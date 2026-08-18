@@ -19,8 +19,6 @@
     "email_env": "BILD_EMAIL",
     "password_env": "BILD_PASSWORD",
     "state_file": "bild.state.json",
-    "proxy": "isp",
-    "proxy_session": "bild",
     "consent_selectors": [
       "button:has-text('Alle akzeptieren')",
       "[data-testid='uc-accept-all-button']",
@@ -69,8 +67,6 @@
     "email_env": "WELT_EMAIL",
     "password_env": "WELT_PASSWORD",
     "state_file": "welt.state.json",
-    "proxy": "isp",
-    "proxy_session": "welt",
     "consent_selectors": [
       "button:has-text('ALLE AKZEPTIEREN')",
       "[data-testid='uc-accept-all-button']",

@@ -3,15 +3,15 @@ from __future__ import annotations
 import os, re, typing as t
 import trafilatura
 
-import logging
+from src.config import CRAWLER_VERBOSE as _VERBOSE
 import requests
 from bs4 import BeautifulSoup, Tag
+import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from .scraper_fetch_html import fetch_html
-
-_VERBOSE = False
-logger = logging.getLogger(__name__)
+from src.logger import get_logger
+logger = get_logger(__name__)
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 

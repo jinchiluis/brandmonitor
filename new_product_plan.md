@@ -1,7 +1,7 @@
 # Brand & Reputation Monitor — Product Plan
 
-Working document. Captures decisions made so far, the reuse map across the three
-existing repos, the proposed architecture, and the questions still open.
+Working document. Captures decisions made so far, the reuse map, the proposed
+architecture, and the questions still open.
 Status: **pre-build — no code written yet.**
 
 ---
@@ -36,7 +36,7 @@ layer model from germany_risk_monitor does not carry over.
 | D3 | Entity-based filtering, not topic-based | Per-client entity dossier; competitor monitoring is a near-free upsell |
 | D4 | Real datastore from day one, not JSONL-only | See §5.2 — decision on which store still open |
 | D5 | Multi-tenant structure from day one | `clients/<name>/` even with a single customer |
-| D6 | New repo, build fresh, copy the plumbing | Do not extend rewriter or germany_risk_monitor in place |
+| D6 | New repo, build fresh, copy the plumbing | Do not extend germany_risk_monitor in place |
 | D7 | **SQLite, self-hosted. No Supabase.** | DB lives with the pipeline, backed up to the existing VPS |
 | D8 | **Pipeline runs on a home laptop (Windows), not the VPS** | Residential IP removes the reason the proxy stack exists — see §5.5 |
 
@@ -73,29 +73,34 @@ manual → automated later without touching anything downstream.
 
 ## 4. Reuse map
 
-**Two** repos contribute. The split is not intuitive — the best fetch layer and the
-best discovery layer live in different places.
+**One** repo contributes: **germany_risk_monitor** (`c:/apps/germany_risk_monitor`).
+It carries discovery, fetch, paywall and the agent/ops plumbing in one maintained
+tree.
 
-| Source repo | What to take | Why |
-|---|---|---|
-| **rewriter** (`c:/apps/rewriter`) | `vendor/newscrawler/` fetch + paywall layer, `rewriter/api.py`, JSONL run-log + `monitor.py` | Newest, most patched fetcher. `handler.py` 510 lines vs. 175 in GRM; `scraper_fetch_html.py` 449 vs. 358. Has the escalation ladder, ISP-proxy pinning, bandwidth accounting, tunnel-error rotation. |
-| **germany_risk_monitor** (`c:/apps/germany_risk_monitor`) | `crawler.py`, `crawler_google_feeds.py`, `parallel_crawler.py`, `source_loader.py`, `crawler_html_utils.py`, `assessment_agent.py`, `embedding_agent.py`, `llm_cost_calculator.py`, `logger.py`, `config.py`, `mocker.py`, `health_check.py`, watermark/history pattern, `word_report.py` as a docx *pattern* | rewriter has no discovery at all (users paste URLs). This is where discovery, batched triage, dedup, cost tracking and ops hygiene live. |
+| Area | Take |
+|---|---|
+| Discovery | `crawler.py`, `crawler_google_feeds.py`, `crawler_html_utils.py`, `parallel_crawler.py`, `source_loader.py` |
+| Fetch + extract | `scraper.py`, `scraper_fetch_html.py`, `crawler_playwright.py`, `paywall/` |
+| Agents | `assessment_agent.py`, `embedding_agent.py`, `llm_client.py`, `llm_cost_calculator.py` |
+| Ops | `logger.py`, `config.py`, `mocker.py`, `health_check.py`, watermark/history pattern |
+| Report | `word_report.py` as a docx *pattern* only |
 
-`c:/apps/NewsCrawler` (the pre-GRM Southeast Asia project) is not used — GRM is its
-descendant and supersedes it.
+GRM's `scraper_fetch_html.py` includes AMP fallback (`_amp_variants`,
+`should_try_amp`) — worth keeping for ~50 heterogeneous niche sites, where AMP
+variants are common, cheap and often lighter-walled.
 
-### Vendoring approach
-Discovery from **GRM**, fetch + paywall from **rewriter's vendor**. The two overlap
-on `scraper_fetch_html.py`, `scraper.py`, `crawler_playwright.py`, `paywall/` — take
-rewriter's for all of these, it is ~95 lines ahead. Restore `crawler_brightdata.py`
-(rewriter's vendor dropped it, per [vendor/README.md](vendor/README.md)).
+### Not used
+- `c:/apps/NewsCrawler` — pre-GRM Southeast Asia project; GRM is its descendant.
+- `c:/apps/rewriter` — its vendored scraper leads GRM only in BrightData proxy
+  machinery (ISP session pinning, tunnel-error rotation, bandwidth accounting),
+  which existed solely to compensate for the VPS datacenter IP. D8 removes the need.
+  GRM already has the paywall logic that matters — `storage_state` persistence,
+  `_relogin`, stub detection with one-shot re-login, credentials-dead detection —
+  and 4 of 5 login modules are byte-identical.
 
-**One merge item:** GRM's `scraper_fetch_html.py` has four functions rewriter's fork
-does not — `_amp_variants`, `should_try_amp`, `_attempt_httpx`, `_attempt_requests`.
-rewriter dropped AMP fallback because it targets 5 known German majors. This product
-hits ~50 heterogeneous small/niche sites where AMP variants are common, cheap and
-often lighter-walled. **Evaluate porting AMP fallback forward** rather than
-discarding it with the rest of GRM's fetch layer.
+**One snippet worth porting from rewriter:** the `contentAccessBlocked: true` regex
+in its `handler.py` `_paywall_trigger`. Reads the JS payload instead of only
+string-matching `stub_signals`. Not proxy-related; Welt needs it. ~5 lines.
 
 ### Drop entirely
 `crawler_gov/`, `main_gov_de.py`, `main_report_de.py`, the L1–L7 layer model, the
@@ -178,7 +183,7 @@ at several customers.
 ```
 1. Discover   per-connector; site crawl + brand-term search = two recall paths
 2. Triage     batched title/snippet entity match — keyword prefilter + LLM confirm
-3. Extract    vendor fetch ladder → trafilatura/BS4  (auto sources only)
+3. Extract    GRM fetch ladder → trafilatura/BS4  (auto sources only)
 4. Ingest     manual-connector records join here, same schema
 5. Dedup      embedding-based, cross-source and cross-cycle
 6. Analyze    sentiment + reach/severity scoring + theme clustering
@@ -215,21 +220,21 @@ are just wrong. Enforce it in code rather than in discipline: `run.py` refuses t
 execute a cycle unless an env var marks the host as primary. The VPS clone never sets
 it; a DR run overrides it explicitly, by hand, once.
 
-**Why the laptop wins: the residential IP.** The entire proxy stack in
-[vendor/newscrawler/](vendor/newscrawler/) — escalation ladder, pinned ISP session,
-`ERR_TUNNEL_CONNECTION_FAILED` rotation, `MAX_PROXY_ROTATIONS`, per-GB BrightData
-billing — exists to compensate for Contabo's IP looking like a bot. A consumer ISP
-IP needs no compensation. Naked httpx mostly just works.
+**Why the laptop wins: the residential IP.** The whole proxy apparatus the VPS
+needed — escalation ladder, pinned ISP session, tunnel-error rotation, per-GB
+BrightData billing — exists to compensate for a datacenter IP looking like a bot.
+A consumer ISP IP needs no compensation; naked httpx mostly just works. This is why
+§4 can drop rewriter entirely.
 
-Paywall logins likely get *more* reliable: Welt/Bild are on ISP proxy because
+Paywall logins likely get *more* reliable: Welt/Bild were on ISP proxy because
 subscription login from a datacenter IP looks like credential abuse. From a German
 household IP it looks like a subscriber.
 
 Volume is trivially safe — 50 sites biweekly is a few thousand URL checks and a few
 hundred fetches per cycle, less than an hour of human browsing.
 
-**Keep the proxy code, off by default.** No rotation is possible on a home IP, so it
-is the only fallback if a site blocks it. Socials keep BrightData where used.
+No proxy fallback is carried for sites (YAGNI). Socials keep BrightData where used
+(D2).
 
 **Windows specifics:**
 - Both codebases are already Windows-native (`chcp 65001`, `sys.stdout.reconfigure`).
@@ -250,8 +255,9 @@ the easiest. Telekom's daily forced reconnect rotates the IP every 24h, a free b
 for crawling.
 
 **Heartbeat:** laptop pings the VPS after each run; VPS alerts if none in N hours.
-Both halves already exist — `health_check.py` (GRM) and the `/log` sink in
-[scrape_server.py](scrape_server.py). This is also the bus-factor answer (§9).
+GRM's `health_check.py` is the seed — extend it with source-level zero-yield
+detection rather than building a separate monitoring UI. This is also the bus-factor
+answer (§9).
 
 **Deploy: pull, not push. No CI/CD.** GitHub's runners cannot reach the laptop behind
 CGNAT, and auto-deploying to the VPS would mean parking an SSH key in GitHub secrets
@@ -355,7 +361,7 @@ defensible without reconstruction.
 | **Manual-labor quality variance** | QC pass in the `manual` connector (§5.1); structured task lists so workers aren't improvising; spot-check against automated results where the two overlap. |
 | **Scope creep to real-time** | Hold the biweekly line on the base tier; §7 alert tier is the pressure valve. |
 | **Bus factor** (one-man operation) | Answer with ops maturity — monitoring, health checks, heartbeat, automated runs — not headcount. |
-| **Home IP blocked, no rotation possible** (D8) | Keep per-domain locks and politeness delays in `parallel_crawler.py` conservative — do not tune concurrency up. Proxy path stays available as fallback. |
+| **Home IP blocked, no rotation possible** (D8) | Keep per-domain locks and politeness delays in `parallel_crawler.py` conservative — do not tune concurrency up. No proxy fallback is carried; if a site does block, that source goes to the `manual` connector. |
 | **ISP terms** — consumer contracts typically bar commercial use / servers | Outbound crawling at this volume is indistinguishable from browsing; Tailscale means no inbound service is ever run. Real but negligible. |
 | **Home infra reliability** — power cut, ISP outage, forced reboot | Watermark pattern is self-healing on next run; VPS heartbeat catches sustained outages; rolling DB snapshots mean the laptop is disposable. |
 
@@ -369,6 +375,6 @@ defensible without reconstruction.
    a sample report. A weekend of work that triples as sales asset, requirements
    document, and recall test. It will immediately show which of the 50 sites are
    worth crawling and which platforms actually carry their mentions.
-4. Scaffold the new repo, vendor the crawler per §4.
+4. Scaffold the new repo, copy from GRM per §4.
 5. Stand up the laptop: Tailscale, auto-login, power settings, Task Scheduler,
    VPS backup + heartbeat. Confirm whether the line is DS-Lite/CGNAT (§5.5).

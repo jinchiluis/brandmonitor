@@ -4,8 +4,6 @@ Called by the paywall handler in scraper_fetch_html.py.
 """
 import re
 
-from playwright.sync_api import Error as PlaywrightError
-
 
 def login(page, email, password):
     """Perform Welt login. Navigates to login page and handles the form."""
@@ -64,8 +62,4 @@ def login(page, email, password):
     page.wait_for_url(re.compile(r"^https://(www\.)?welt\.de/.*"), timeout=60000)
 
     # finish client-side session bootstrap
-    try:
-        page.goto("https://www.welt.de/meinewelt/einstellungen", wait_until="domcontentloaded", timeout=60000)
-    except PlaywrightError as e:
-        if "ERR_FAILED" not in str(e):
-            raise
+    page.goto("https://www.welt.de/meinewelt/einstellungen", wait_until="domcontentloaded", timeout=60000)

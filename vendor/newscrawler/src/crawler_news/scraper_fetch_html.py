@@ -2,8 +2,8 @@
 # Robust, site-agnostic fetcher with:
 # - HTTP/2 (httpx) first, requests fallback
 # - Fast-fail on 406 (no endless backoff)
-# - Desktop + Android profiles
-# - ISP-proxy escalation for datacenter-IP blocks
+# - Referer + Android/desktop profiles
+# - AMP fallbacks
 # - Explicit decoding for br/gzip/deflate + charset detection
 
 from __future__ import annotations
@@ -24,29 +24,17 @@ from urllib.parse import urlsplit
 # pip install brotli  (or: pip install brotlicffi)
 import brotli
 import ftfy
-import logging
-import secrets
-import threading
-
-from . import bandwidth
 from .crawler_playwright import fetch_html_with_playwright
-from .paywall.handler import (
-    get_paywall_cfg, fetch_paywall_article, _proxy_cfg, _proxy_url,
-    _warm_proxy, _PROXY_WARMUP_URL,
-)
+from .crawler_brightdata import fetch_html_with_api as fetch_html_with_brightdata_api
+from .paywall.handler import get_paywall_cfg, fetch_paywall_article
+from src.crawler_news.source_loader import sources
+from src.logger import get_logger
 
-logger = logging.getLogger(__name__)
-_VERBOSE = False
+logger = get_logger(__name__)
+from src.config import CRAWLER_VERBOSE as _VERBOSE
 
 CONNECT_TIMEOUT = 3
-READ_TIMEOUT = 8          # naked datacenter read timeout; a blocked IP should fail fast
-PROXY_READ_TIMEOUT = 20   # ISP proxy adds latency, so allow a bit more
-
-# BrightData ISP zone used for the proxy escalation tiers (rotating exit IP).
-_PROXY_ZONE = "isp"
-# Some ISP exit IPs are themselves Cloudflare-flagged, so rotate through a few
-# cheap (~1.5s) HTML fetches before falling back to an expensive render.
-PROXY_HTTP_ATTEMPTS = 6
+READ_TIMEOUT = 12
 
 UA_DESKTOP = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -166,6 +154,21 @@ def _decode_body(content: bytes, headers: dict, fallback_encoding: str = "utf-8"
     # 5) Fix any mojibake (e.g., UTF-8 decoded as Latin-1)
     return ftfy.fix_text(text)
 
+def _amp_variants(url: str) -> list[str]:
+    out = []
+    if "outputType=amp" not in url:
+        sep = "&" if "?" in url else "?"
+        out.append(url + f"{sep}outputType=amp")
+    if not re.search(r"/amp(/|$)", url):
+        out.append(url.rstrip("/") + "/amp")
+    return out
+
+def should_try_amp(url: str) -> bool:
+    host = urlsplit(url).netloc.lower()
+    if host.endswith("kompas.com"):
+        return False  # Kompas AMP is heavily gated
+    return True
+
 # ---------- clients ----------
 
 # HTTP/2 first
@@ -214,236 +217,142 @@ def _has_sufficient_content(html: str) -> bool:
         # If we can't parse, assume it's OK and let caller handle it
         return True
 
-# ---------- single attempts ----------
+def _attempt_httpx(url: str, headers: dict) -> str:
+    r = _httpx_client.get(url, headers=headers)
+    if r.status_code == 406:
+        # fast-fail so we can switch profile / AMP quickly
+        raise httpx.HTTPStatusError("406 Not Acceptable", request=r.request, response=r)
+    r.raise_for_status()
+    html = _decode_body(r.content, dict(r.headers))
+    # Check if we got a JS-only shell with no content
+    if not _has_sufficient_content(html):
+        raise httpx.HTTPStatusError("Insufficient content (JS-only page)", request=r.request, response=r)
+    return html
 
-def _classify_naked(url: str, headers: dict, use_requests: bool) -> tuple[str, str | None]:
-    """One un-proxied (datacenter) attempt.
-
-    Returns one of:
-      ("ok",      html)  - HTTP 200 with real article content
-      ("shell",   html)  - HTTP 200 but a JS/SPA shell (needs a browser render)
-      ("blocked", None)  - non-200, connection reset, or timeout (IP is being refused)
-    """
-    try:
-        if use_requests:
-            r = _requests_session.get(
-                url, headers=headers, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT), allow_redirects=True,
-            )
-            status, content, hdrs = r.status_code, r.content, r.headers
-        else:
-            r = _httpx_client.get(url, headers=headers)
-            status, content, hdrs = r.status_code, r.content, dict(r.headers)
-    except (httpx.HTTPError, requests.RequestException, socket.timeout) as e:
-        if _VERBOSE: logger.info("[fetch_html] naked attempt error: %s", e)
-        return "blocked", None
-
-    # Record wire bytes so naked (free) fetches show up in the run log's
-    # wire_bytes. Cost stays $0 automatically: wire_cost_for() only bills when
-    # the proxy tag is ISP, and naked fetches leave it None. We always want the
-    # *compressed* on-wire size: httpx exposes it directly; requests doesn't, so
-    # we read it from the raw urllib3 stream (raw socket bytes), then fall back
-    # to Content-Length, and only as a last resort the decompressed body length.
-    wire = getattr(r, "num_bytes_downloaded", 0)
-    if not wire:
-        try:
-            wire = r.raw.tell()  # urllib3: compressed bytes read off the socket
-        except Exception:
-            wire = 0
-        wire = wire or int(hdrs.get("Content-Length") or 0) or len(content)
-    bandwidth.add(wire)
-
-    if status != 200:
-        if _VERBOSE: logger.info("[fetch_html] naked attempt HTTP %s", status)
-        return "blocked", None
-
-    html = _decode_body(content, hdrs)
-    return ("ok", html) if _has_sufficient_content(html) else ("shell", html)
-
-
-def _proxy_httpx(url: str, headers: dict, proxy_cfg: dict) -> tuple[int, str]:
-    """One ISP-proxy HTML fetch. Returns (status, decoded_html).
-
-    Records the response wire size on the bandwidth counter (httpx isn't
-    CDP-instrumented like Playwright) so the proxy's billed bytes/cost land in
-    the run log. Counts every attempt, including failed 403s we still paid for.
-    """
-    purl = _proxy_url(proxy_cfg)
-    with httpx.Client(
-        proxy=purl, http2=True,
-        timeout=httpx.Timeout(PROXY_READ_TIMEOUT, connect=CONNECT_TIMEOUT * 2),
-        follow_redirects=True,
-    ) as c:
-        r = c.get(url, headers=headers)
-        # num_bytes_downloaded is the *compressed* bytes actually read off the
-        # wire (what BrightData bills), present even when the response is chunked
-        # and has no Content-Length. Fall back to the body length if missing.
-        bandwidth.add(getattr(r, "num_bytes_downloaded", 0) or len(r.content))
-        return r.status_code, _decode_body(r.content, dict(r.headers))
-
-
-# Single process-wide pinned ISP session. Like welt/bild's static sessions it
-# pins one warm exit IP and reuses it across fetches (so the steady state is one
-# attempt), but unlike them it is rotated when that IP gets Cloudflare-flagged.
-_isp_session: str | None = None
-_isp_lock = threading.Lock()
-_warmed_sessions: set[str] = set()  # sessions that have bound an exit IP
-
-
-def _new_session_token() -> str:
-    return "rw" + secrets.token_hex(4)
-
-
-def _ensure_warm(session: str, cfg: dict) -> bool:
-    """Warm a session once so it binds an exit IP, mirroring the paywall flow.
-
-    Without this, a freshly-minted session hits BrightData unbound and the first
-    fetch gets `400 Peer not found`; the warmup retries the *same* session until
-    a peer is allocated. Cached per session so the pinned IP isn't re-warmed."""
-    with _isp_lock:
-        if session in _warmed_sessions:
-            return True
-    if _warm_proxy(cfg, _PROXY_WARMUP_URL):
-        with _isp_lock:
-            _warmed_sessions.add(session)
-        return True
-    return False
-
-
-def _get_isp_session() -> str:
-    """The current pinned ISP session, minting one on first use."""
-    global _isp_session
-    with _isp_lock:
-        if _isp_session is None:
-            _isp_session = _new_session_token()
-        return _isp_session
-
-
-def _rotate_isp_session(failed: str) -> str:
-    """Rotate the pinned session away from a burned exit IP.
-
-    Compare-and-swap: if another worker already rotated past `failed`, adopt the
-    current session rather than minting yet another, so a burst of parallel
-    fetches hitting the same bad IP converges on one new IP instead of many."""
-    global _isp_session
-    with _isp_lock:
-        if _isp_session == failed or _isp_session is None:
-            _isp_session = _new_session_token()
-        return _isp_session
-
-
-def _naked_playwright(url: str) -> str:
-    html_bytes = fetch_html_with_playwright(url, timeout_ms=40000)
-    return _decode_body(html_bytes, {}) if html_bytes else ""
-
-
-def _proxy_playwright(url: str) -> str:
-    session = _get_isp_session()
-    cfg = _proxy_cfg(_PROXY_ZONE, session)
-    if not cfg:
-        return ""
-    html_bytes = fetch_html_with_playwright(
-        url, timeout_ms=40000, proxy_cfg=cfg, proxy_name=_PROXY_ZONE,
+def _attempt_requests(url: str, headers: dict) -> str:
+    r = _requests_session.get(
+        url, headers=headers,
+        timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+        allow_redirects=True,
     )
-    return _decode_body(html_bytes, {}) if html_bytes else ""
-
+    if r.status_code == 406:
+        raise requests.HTTPError("406 Not Acceptable", response=r)
+    r.raise_for_status()
+    html = _decode_body(r.content, r.headers)
+    # Check if we got a JS-only shell with no content
+    if not _has_sufficient_content(html):
+        raise requests.HTTPError("Insufficient content (JS-only page)", response=r)
+    return html
 
 # ---------- public API ----------
 
 def fetch_html(url: str) -> str:
     """
-    Fetch article HTML via a cheap-to-expensive escalation ladder:
-
-      1. naked httpx (datacenter IP) -- HTML only
-           200 + content  -> done
-           200 + JS shell -> (3) naked Playwright, then (4) ISP-proxy Playwright
-           blocked/reset  -> (2) ISP-proxy httpx
-      2. ISP-proxy httpx (pinned ISP IP, rotate-on-failure) -- bypasses
-           datacenter-IP blocks (Cloudflare etc.); reuses one warm exit IP and
-           only rotates to a fresh one when it gets flagged
-           200 + content  -> done
-           else           -> (4) ISP-proxy Playwright
-      3. naked Playwright (full page render) -- for genuine SPA sites
-      4. ISP-proxy Playwright (pinned IP, image/css/font/media blocked) -- last resort
-
-    Routing is driven only by HTTP status / connection outcome and the structural
-    `_has_sufficient_content` check -- no Cloudflare text heuristics.
+    Fetch HTML robustly (HTTP/2 first), with fast-fail on 406 and AMP fallbacks.
+    If config indicates brightdata=True for this URL, skips straight to BrightData API.
+    Returns decoded unicode HTML string.
+    Raises on final failure.
     """
-    # Paywall sites have their own authenticated Playwright path.
+    # Check for paywall sites (login-required)
     paywall_cfg = get_paywall_cfg(url)
     if paywall_cfg:
         if _VERBOSE: logger.info("[fetch_html] Paywall site detected, using authenticated Playwright fetch")
         return fetch_paywall_article(url, paywall_cfg)
 
+    # Check if this site requires BrightData upfront
+    if sources.is_brightdata_enabled(url):
+        logger.info("[fetch_html] Site configured for brightdata=True, using BrightData API directly")
+        html_bytes = fetch_html_with_brightdata_api(url, timeout=120)
+        if html_bytes and len(html_bytes) > 1000:
+            txt = _decode_body(html_bytes, {})
+            if len(txt) > 0:
+                logger.info("[fetch_html] BrightData API success, returning %d chars", len(txt))
+                return txt
+            else:
+                logger.info("[fetch_html] BrightData API returned empty content")
+        else:
+            logger.info("[fetch_html] BrightData API failed or insufficient content")
+        # If BrightData fails, raise error instead of falling back
+        # (if site needs BrightData, regular methods won't work anyway)
+        raise RuntimeError(f"BrightData API required for {url} but failed")
+
     ext = tldextract.extract(url)
     host = ".".join([p for p in [ext.domain, ext.suffix] if p])
-    desktop = _chrome_like_headers(host, UA_DESKTOP, mobile=False)
-    android = _chrome_like_headers(host, UA_ANDROID, mobile=True)
 
-    # --- Tier 1: naked datacenter fetch ---
-    naked_attempts = [
-        (desktop, False),  # httpx HTTP/2, desktop UA
-        (desktop, True),   # requests HTTP/1.1 (covers servers that choke on HTTP/2)
-        (android, False),  # httpx HTTP/2, android UA (covers UA gating)
+    profiles = [
+        _chrome_like_headers(host, UA_DESKTOP, mobile=False),
+        _chrome_like_headers(host, UA_ANDROID, mobile=True),
     ]
-    for headers, use_requests in naked_attempts:
-        kind, html = _classify_naked(url, headers, use_requests)
-        if kind == "ok":
-            return html
-        if kind == "shell":
-            # Reachable from the datacenter IP but JS-rendered -> render it.
-            if _VERBOSE: logger.info("[fetch_html] 200 but JS shell -> naked Playwright")
-            rendered = _naked_playwright(url)
-            if rendered and _has_sufficient_content(rendered):
-                return rendered
-            if _VERBOSE: logger.info("[fetch_html] naked Playwright insufficient -> ISP-proxy Playwright")
-            rendered = _proxy_playwright(url)
-            if rendered and _has_sufficient_content(rendered):
-                return rendered
-            raise RuntimeError(f"Failed to fetch {url}: naked Playwright insufficient and ISP-proxy unavailable or insufficient")
-        # kind == "blocked" -> try the next naked attempt
 
-    # --- Tier 2: ISP-proxy HTML via the pinned (rotate-on-failure) exit IP ---
-    # Reuse the process-wide pinned session so the steady state is one cheap
-    # fetch on a warm IP; only when that IP is Cloudflare-flagged do we rotate to
-    # a fresh one and retry (each fresh session lands on a new exit IP).
-    if _VERBOSE: logger.info("[fetch_html] datacenter blocked -> ISP-proxy httpx")
-    proxy_available = False
-    session = _get_isp_session()
-    for attempt in range(PROXY_HTTP_ATTEMPTS):
-        cfg = _proxy_cfg(_PROXY_ZONE, session)
-        if not cfg:
-            break
-        proxy_available = True
-        # Bind the session to an exit IP first (handles `400 Peer not found` by
-        # retrying the same session); if no peer binds, this IP is unusable.
-        if not _ensure_warm(session, cfg):
-            if _VERBOSE: logger.info("[fetch_html] proxy attempt %d: warmup found no peer, rotating", attempt + 1)
-            session = _rotate_isp_session(session)
-            continue
+    def _tries(u: str):
+        # HTTP/2 attempts
+        yield ("h2-desktop", u, profiles[0])
+        yield ("h2-desktop+ref", u, _with_referer(profiles[0], host))
+        yield ("h2-android", u, profiles[1])
+        yield ("h2-android+ref", u, _with_referer(profiles[1], host))
+        # HTTP/1.1 attempts
+        yield ("req-desktop", u, profiles[0])
+        yield ("req-desktop+ref", u, _with_referer(profiles[0], host))
+        yield ("req-android", u, profiles[1])
+        yield ("req-android+ref", u, _with_referer(profiles[1], host))
+
+    last_err = None
+
+    # Primary URL
+    for label, u, h in _tries(url):
         try:
-            status, html = _proxy_httpx(url, desktop, cfg)
-        except (httpx.HTTPError, requests.RequestException, socket.timeout) as e:
-            if _VERBOSE: logger.info("[fetch_html] proxy httpx attempt %d error: %s", attempt + 1, e)
-            session = _rotate_isp_session(session)
+            if label.startswith("h2"):
+                return _attempt_httpx(u, h)
+            else:
+                return _attempt_requests(u, h)
+        except (httpx.HTTPStatusError, requests.HTTPError) as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            # For unexpected 4xx not in the soft list, bail early
+            if status not in (403, 406, 429, 500, 502, 503, 504, None):
+                last_err = e
+                break
+            last_err = e
             continue
-        if status == 200 and _has_sufficient_content(html):
-            bandwidth.set_proxy(_PROXY_ZONE, session)  # tag the winning (now pinned) exit IP
-            if _VERBOSE: logger.info("[fetch_html] ISP-proxy httpx ok on attempt %d (session %s)", attempt + 1, session)
-            return html
-        if _VERBOSE: logger.info("[fetch_html] proxy httpx attempt %d -> HTTP %s / insufficient, rotating", attempt + 1, status)
-        session = _rotate_isp_session(session)
+        except (httpx.TimeoutException, httpx.NetworkError,
+                requests.ConnectionError, requests.Timeout, socket.timeout) as e:
+            last_err = e
+            continue
 
-    if not proxy_available:
-        logger.info("[fetch_html] ISP proxy creds missing (BRD_PASS_ISP); falling back to naked Playwright")
-        rendered = _naked_playwright(url)
-        if rendered and _has_sufficient_content(rendered):
-            return rendered
-        raise RuntimeError(f"Failed to fetch {url}: datacenter blocked and no proxy creds")
+    # AMP variants
+    if should_try_amp(url):
+        for amp in _amp_variants(url):
+            for label, u, h in _tries(amp):
+                try:
+                    if label.startswith("h2"):
+                        return _attempt_httpx(u, h)
+                    else:
+                        return _attempt_requests(u, h)
+                except Exception as e:
+                    last_err = e
+                    continue
 
-    # --- Tier 4: ISP-proxy Playwright (last resort) ---
-    if _VERBOSE: logger.info("[fetch_html] all ISP-proxy httpx attempts failed -> ISP-proxy Playwright")
-    rendered = _proxy_playwright(url)
-    if rendered and _has_sufficient_content(rendered):
-        return rendered
+    ##### Last try: PLAYWRIGHT! (with caching for sites already crawled)
+    logger.info("[fetch_html] Falling back to Playwright for %s", url)
+    try:
+        html_bytes = fetch_html_with_playwright(url, timeout_ms=40000)
+        if html_bytes:
+            logger.info("[fetch_html] Playwright returned %d bytes", len(html_bytes))
+            txt = _decode_body(html_bytes, {})
+            # For Playwright results, trust any non-empty content
+            # Playwright handles bot detection, so if we got HTML, it's likely valid
+            # Don't check for keywords - news articles can mention "forbidden", "captcha", etc.
+            if len(txt) > 0:
+                logger.info("[fetch_html] Playwright success, returning %d chars", len(txt))
+                return txt
+            else:
+                logger.info("[fetch_html] Playwright returned empty page")
+        else:
+            logger.info("[fetch_html] Playwright returned empty bytes")
+    except Exception as e:
+        logger.info("[fetch_html] Playwright exception: %s", e)
+        last_err = e
 
-    raise RuntimeError(f"Failed to fetch {url} after naked + ISP-proxy httpx/Playwright")
+    # Only raise errors if we truly failed everything (including Playwright)
+    if isinstance(last_err, (httpx.HTTPError, requests.HTTPError)):
+        raise last_err
+    raise RuntimeError(f"Failed to fetch after fallbacks: {last_err}")

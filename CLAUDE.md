@@ -95,22 +95,31 @@ is expected, not a broken checkout.
 
 ## Vendored code
 
-`vendor/newscrawler/` is copied **1:1 from rewriter** (commit `6f49889`) — fetch
-escalation ladder, paywall handler, bandwidth accounting, plus three reference docs.
-[vendor/PROVENANCE.md](vendor/PROVENANCE.md) records the source commit, what was
-excluded, and known gaps. Update its "modified since copy" line on first local edit.
+`vendor/newscrawler/` is copied **1:1 from germany_risk_monitor** `src/crawler_news/`
+at `6a86115` (`origin/master`) — discovery, fetch, extract and paywall in one tree.
+[vendor/PROVENANCE.md](vendor/PROVENANCE.md) records the exact commit, what was left
+out and why, host integration requirements, and pending ports. Update its "modified
+since copy" line on first local edit.
 
-This is already a heavily patched fork. Treat it as our code — do not restructure it
-to track upstream. The proxy machinery stays available but off by default; on a
+**The vendored code is not self-contained.** It imports `src.config`, `src.logger`,
+and `src.crawler_news.*` from the surrounding app. Those names must be satisfied or
+the imports patched when `src/` is built — a real decision, not a detail, since our
+planned layout calls it `src/log.py`, not `src/logger.py`.
+
+Heavily patched fork of NewsCrawler. Treat it as our code — do not restructure it to
+track upstream. BrightData paths stay available but unused for site fetching; on a
 residential IP there is nothing to rotate to.
 
 ## Source repos (same machine, not dependencies)
 
-- `c:\apps\rewriter` — origin of the vendored fetch layer
-- `c:\apps\germany_risk_monitor` — origin of the planned discovery layer, watermark
-  pattern, cost accounting, docx report mechanics
+- `c:\apps\germany_risk_monitor` — the single source repo. Vendored crawler above,
+  plus the planned agent/ops plumbing: assessment, embedding, LLM client and cost
+  accounting, logger, watermark pattern, docx report mechanics.
+- `c:\apps\rewriter` — **not** a source repo. Its fetch fork leads GRM only in
+  BrightData proxy machinery, which D8 makes unnecessary. Two small snippets remain
+  worth porting; see PROVENANCE.md.
 
-Both are reference material to copy from deliberately, not to import at runtime.
+Reference material to copy from deliberately, not to import at runtime.
 
 ## Git
 
