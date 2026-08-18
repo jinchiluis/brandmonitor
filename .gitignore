@@ -1,0 +1,12 @@
+env/
+.venv/
+__pycache__/
+*.pyc
+.env
+.claude/
+
+# local data — SQLite DB, cached html, generated reports
+data/
+
+# paywall login states (cookies / session credentials)
+vendor/newscrawler/src/crawler_news/paywall/states/
