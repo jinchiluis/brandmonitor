@@ -60,25 +60,6 @@ Two consequences when `src/` gets built:
    `vendor/newscrawler/src/crawler_news/`. Either mirror the path, add a shim, or
    rewrite the imports on first integration.
 
-## Pending ports from rewriter
-
-rewriter (`c:/apps/rewriter`) is otherwise **not** a source repo. Its fetch fork leads
-GRM only in BrightData proxy machinery — ISP session pinning, tunnel-error rotation,
-bandwidth accounting — which existed to compensate for a datacenter IP. D8 removes the
-need. Verified: 4 of 5 login modules are byte-identical, and the only `paywalls.json`
-difference is the `proxy`/`proxy_session` entries for bild and welt.
-
-Two small things there are still worth taking, neither proxy-related:
-
-1. **`contentAccessBlocked` regex** in rewriter's `paywall/handler.py` `_paywall_trigger`
-   (~5 lines). Reads the JS payload instead of only string-matching `stub_signals`.
-   Welt needs it. Called out in plan §4.
-2. **Welt `ERR_FAILED` guard** — rewriter's `welt_login.py` wraps the settings-page
-   `page.goto` in a `try/except PlaywrightError` that swallows `ERR_FAILED`. Not in
-   the plan; found by diffing. GRM's version lets that navigation raise.
-
-Neither is applied yet — the tree is a clean 1:1 copy.
-
 ## Notes
 
 This is a pruned and heavily patched fork of NewsCrawler. Treat it as our code — do

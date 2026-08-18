@@ -110,14 +110,11 @@ Heavily patched fork of NewsCrawler. Treat it as our code — do not restructure
 track upstream. BrightData paths stay available but unused for site fetching; on a
 residential IP there is nothing to rotate to.
 
-## Source repos (same machine, not dependencies)
+## Source repo (same machine, not a dependency)
 
-- `c:\apps\germany_risk_monitor` — the single source repo. Vendored crawler above,
-  plus the planned agent/ops plumbing: assessment, embedding, LLM client and cost
-  accounting, logger, watermark pattern, docx report mechanics.
-- `c:\apps\rewriter` — **not** a source repo. Its fetch fork leads GRM only in
-  BrightData proxy machinery, which D8 makes unnecessary. Two small snippets remain
-  worth porting; see PROVENANCE.md.
+`c:\apps\germany_risk_monitor` — the vendored crawler above, plus the planned
+agent/ops plumbing: assessment, embedding, LLM client and cost accounting, logger,
+watermark pattern, docx report mechanics.
 
 Reference material to copy from deliberately, not to import at runtime.
 

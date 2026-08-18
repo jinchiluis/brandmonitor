@@ -98,9 +98,16 @@ variants are common, cheap and often lighter-walled.
   `_relogin`, stub detection with one-shot re-login, credentials-dead detection —
   and 4 of 5 login modules are byte-identical.
 
-**One snippet worth porting from rewriter:** the `contentAccessBlocked: true` regex
-in its `handler.py` `_paywall_trigger`. Reads the JS payload instead of only
-string-matching `stub_signals`. Not proxy-related; Welt needs it. ~5 lines.
+**Two snippets worth porting from rewriter,** neither proxy-related, both Welt:
+1. The `contentAccessBlocked: true` regex in its `handler.py` `_paywall_trigger`.
+   Reads the JS payload instead of only string-matching `stub_signals`. ~5 lines.
+2. Its `welt_login.py` wraps the settings-page `page.goto` in
+   `try/except PlaywrightError` and swallows `ERR_FAILED`; GRM's version lets that
+   navigation raise. ~6 lines.
+
+Verified by diff: 4 of 5 login modules are byte-identical, and the only
+`paywalls.json` difference is the `proxy` / `proxy_session` entries for bild and
+welt. Those two snippets are the entire non-proxy delta.
 
 ### Drop entirely
 `crawler_gov/`, `main_gov_de.py`, `main_report_de.py`, the L1–L7 layer model, the
