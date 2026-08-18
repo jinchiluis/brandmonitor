@@ -200,6 +200,21 @@ per-domain locks, HTTP serialized per domain, LLM calls free-running.
 | **Home laptop** (Windows, 24/7) | crawl, scrape, extract, LLM calls, report generation, SQLite primary |
 | **Contabo VPS** (€5/mo, existing) | backup target, heartbeat monitor, delivery endpoint, disaster-recovery runner |
 
+**Work split — what runs where, and when.** Both hosts run brandmonitor code, so the
+boundary has to be explicit rather than assumed:
+
+| | Home laptop | Contabo VPS |
+|---|---|---|
+| **Scheduled** | full pipeline (discover → report) | heartbeat watcher, backup retention |
+| **On demand** | any stage, during development | DR pipeline run, once the laptop is lost |
+| **Never** | — | **scheduled pipeline run** |
+
+The last row is load-bearing. Two hosts running cycles against one DB means duplicate
+LLM spend and a diverged store, and it fails silently — nothing crashes, the numbers
+are just wrong. Enforce it in code rather than in discipline: `run.py` refuses to
+execute a cycle unless an env var marks the host as primary. The VPS clone never sets
+it; a DR run overrides it explicitly, by hand, once.
+
 **Why the laptop wins: the residential IP.** The entire proxy stack in
 [vendor/newscrawler/](vendor/newscrawler/) — escalation ladder, pinned ISP session,
 `ERR_TUNNEL_CONNECTION_FAILED` rotation, `MAX_PROXY_ROTATIONS`, per-GB BrightData
@@ -237,6 +252,26 @@ for crawling.
 **Heartbeat:** laptop pings the VPS after each run; VPS alerts if none in N hours.
 Both halves already exist — `health_check.py` (GRM) and the `/log` sink in
 [scrape_server.py](scrape_server.py). This is also the bus-factor answer (§9).
+
+**Deploy: pull, not push. No CI/CD.** GitHub's runners cannot reach the laptop behind
+CGNAT, and auto-deploying to the VPS would mean parking an SSH key in GitHub secrets
+to keep a *standby* current. Both hosts pull instead: `git pull --ff-only` (never a
+bare `pull` — a stray local edit opens a merge and leaves stale code running), deps
+reinstalled if `requirements.txt` moved, and pending migrations applied automatically
+at `run.py` startup so a pull can never leave the schema behind the code.
+
+The scheduled run does **not** pull. Deploying is a deliberate act performed at the
+keyboard, so an unattended 3am run never executes code nobody watched start. If that
+gate is later wanted without the manual step, pin the laptop to a `release` branch and
+push `main:release` to ship.
+
+CI is worth adding once there is code — `compileall` plus `pytest` on push catches the
+syntax-error-at-3am class, where the run silently no-ops and the only symptom is a
+report that never arrives.
+
+`.env` is gitignored and therefore never deploys. It lives separately on each host and
+drifts silently; the backup job should push it alongside the DB snapshot so the DR
+path is genuinely one command instead of a credential scavenger hunt.
 
 ---
 
