@@ -1,0 +1,84 @@
+{
+  "spiegel.de": {
+    "login_module": "spiegel_login",
+    "email_env": "SPIEGEL_EMAIL",
+    "password_env": "SPIEGEL_PASSWORD",
+    "state_file": "spiegel.state.json",
+    "consent_selectors": [
+      "button:has-text('Alle akzeptieren')",
+      "button:has-text('Zustimmen')",
+      "button:has-text('Accept all')"
+    ],
+    "stub_signals": [
+      "Diesen Artikel weiterlesen mit SPIEGEL+",
+      "Sie haben bereits ein Digital-Abo? Zum Login"
+    ]
+  },
+  "bild.de": {
+    "login_module": "bild_login",
+    "email_env": "BILD_EMAIL",
+    "password_env": "BILD_PASSWORD",
+    "state_file": "bild.state.json",
+    "proxy": "isp",
+    "proxy_session": "bild",
+    "consent_selectors": [
+      "button:has-text('Alle akzeptieren')",
+      "[data-testid='uc-accept-all-button']",
+      "button:has-text('Zustimmen')"
+    ],
+    "stub_signals": [
+      "Weiterlesen mit",
+      "Das Abo ist jederzeit monatlich kündbar"
+    ]
+  },
+  "zeit.de": {
+    "login_module": "zeit_login",
+    "email_env": "ZEIT_EMAIL",
+    "password_env": "ZEIT_PASSWORD",
+    "state_file": "zeit.state.json",
+    "url_append": "/komplettansicht",
+    "consent_selectors": [
+      "button:has-text('Alle akzeptieren')",
+      "button:has-text('Zustimmen')",
+      "[data-testid='uc-accept-all-button']"
+    ],
+    "stub_signals": [
+      "Jetzt ZEIT+ lesen",
+      "Lesen Sie weiter mit ZEIT+",
+      "ZEIT+ Artikel"
+    ]
+  },
+  "manager-magazin.de": {
+    "login_module": "manager_magazin_login",
+    "email_env": "MANAGER_MAGAZIN_EMAIL",
+    "password_env": "MANAGER_MAGAZIN_PASSWORD",
+    "state_file": "manager_magazin.state.json",
+    "consent_selectors": [
+      "button:has-text('Alle akzeptieren')",
+      "button:has-text('Zustimmen')",
+      "button:has-text('Accept all')"
+    ],
+    "stub_signals": [
+      "Jetzt manager+ lesen",
+      "manager+ Artikel",
+      "Weiterlesen mit manager+"
+    ]
+  },
+  "welt.de": {
+    "login_module": "welt_login",
+    "email_env": "WELT_EMAIL",
+    "password_env": "WELT_PASSWORD",
+    "state_file": "welt.state.json",
+    "proxy": "isp",
+    "proxy_session": "welt",
+    "consent_selectors": [
+      "button:has-text('ALLE AKZEPTIEREN')",
+      "[data-testid='uc-accept-all-button']",
+      "button:has-text('Zustimmen')"
+    ],
+    "stub_signals": [
+      "Weiterlesen mit",
+      "Alle Inhalte auf welt.de + WELT News App"
+    ]
+  }
+}
