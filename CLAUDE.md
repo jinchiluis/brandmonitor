@@ -1,124 +1,77 @@
-# brandmonitor — Claude Notes
+# brandmonitor — Project Notes
 
-Brand and reputation monitoring for Chinese consumer brands sold in Germany.
-Biweekly Chinese-language report over news, trade press, and social media.
+Monitoring for Chinese consumer brands sold in Germany, with Chinese-language
+deliverables. The repository is in MVP build-out: the news fetch stack is vendored,
+but the application pipeline is not built yet.
 
-**Status: pre-build.** No application code exists yet. This file describes how the
-system is *distributed* — hosts, repo layout, deploy, secrets. It deliberately
-contains no business logic.
+## Working documents
 
-## Where the design lives
+- [mvp_plan.md](mvp_plan.md) is the implementation plan for the first customer cycle.
+- [new_product_plan.md](new_product_plan.md) and [plan_v2.md](plan_v2.md) are idea
+  archives. They contain useful research and possible later features, but they are
+  not build specifications.
 
-[new_product_plan.md](new_product_plan.md) holds scope, architecture, reuse map, cost
-model, and open questions. **It is a working document, not a spec** — §9 has customer
-questions still unanswered that materially change the build. Do not implement from it
-as if it were settled. As decisions harden into code, the durable ones move here.
+When the documents disagree, follow `mvp_plan.md`.
 
-## Hosts
+## Design rules
+
+- Collection is source-specific; analysis is client-specific.
+- Store normalized source material before applying a client relevance prompt.
+- A new customer should normally require config and prompts, not another scraper.
+- Client assessments must be traceable to the client and prompt/profile version.
+- Keep regulatory and reputation processing independent so one can fail or run
+  without blocking the other.
+- Features outside the MVP stay out until a real cycle demonstrates the need.
+
+## Hosts and secrets
 
 | Host | Path | Role |
 |---|---|---|
-| Windows laptop (primary) | `c:\apps\brandmonitor` | full pipeline, SQLite primary, development |
-| Contabo VPS (standby) | `/var/www/brandmonitor` | heartbeat watcher, backup target, DR runner |
+| Windows laptop | `c:\apps\brandmonitor` | primary database and scheduled pipeline |
+| Contabo VPS | `/var/www/brandmonitor` | heartbeat, backups, and manual disaster recovery |
 
-| | Laptop | VPS |
-|---|---|---|
-| **Scheduled** | full pipeline | heartbeat watcher, backup retention |
-| **On demand** | any stage | DR pipeline run |
-| **Never** | — | **scheduled pipeline run** |
+The VPS must not run scheduled collection or analysis. Two independently scheduled
+hosts would duplicate spend and create divergent databases.
 
-The VPS must never run a cycle on a schedule. Two hosts writing one DB means duplicate
-LLM spend and a diverged store, and it fails silently. Planned enforcement: `run.py`
-refuses a cycle unless an env var marks the host primary; the VPS clone never sets it.
+The live `.env` belongs on the laptop and is never committed. The VPS needs only the
+token required for its scheduled heartbeat/backup role. Activating disaster recovery
+and copying any additional credentials are manual operations.
 
-Why the laptop is primary: its residential IP removes the reason the vendored proxy
-stack exists. See §5.5 of the plan.
+## Planned repository shape
 
-## VPS details
-
-- Host: `144.91.109.185` (`ssh root@144.91.109.185`) — shared with other projects
-- App dir: `/var/www/brandmonitor/`, venv `env/` (Python 3.12.3) — use `env/bin/python3`
-- Deps not installed yet; there is no `requirements.txt`
-- No systemd unit, no cron, no timer. Nothing here runs automatically yet.
-- Do not confuse with `/var/www/brandchecker` — unrelated project
-
-## Deploy
-
-Pull, not push. **No CI/CD**, deliberately: GitHub runners cannot reach the laptop
-behind CGNAT, and auto-deploying the standby would mean an SSH key in GitHub secrets.
-
-```bash
-git pull --ff-only          # never a bare pull — a stray local edit opens a merge
-```
-
-Planned around it: reinstall deps when `requirements.txt` moves, and apply pending
-migrations at `run.py` startup so a pull can never leave the schema behind the code.
-The scheduled run will **not** pull — deploying is a deliberate act at the keyboard.
-
-## Secrets
-
-`.env` at the repo root on both hosts, gitignored, never deployed. VPS copy is
-`chmod 600`, root-only. 25 keys: Doubao, BrightData zones + API keys, five paywall
-site logins, `SCRAPE_SERVER_TOKEN` (the VPS `/log` sink the heartbeat will reuse), and
-empty placeholders for Anthropic, YouTube, and Reddit.
-
-Credentials were copied 1:1 from rewriter's VPS `.env`, so **both products currently
-share live production values** — rotating in one place means rotating in both, and the
-paywall logins are single-session accounts that can invalidate each other if both
-products run concurrently.
-
-The two copies drift silently. Any key added on the laptop must be re-copied to the
-VPS by hand until the backup job carries `.env` alongside the DB snapshot.
-
-## Repo layout
-
-Flat by design. `germany_risk_monitor` runs 10k lines on four subfolders; a folder
-holding two files is an extra path segment, not organization. Split into a sibling
-file first; create a folder only at ~5 files of the same shape.
-
-```
-run.py                 # planned — single entrypoint, stage flags
-config.json            # planned — workers, models
-migrations/            # NNN_*.sql — the schema lives here, nowhere else
-clients/<slug>/        # planned — client.json, entities.json, sources.json
-src/
-  connectors/          # only folder that earns one — ~8 files, one shape
-  prompts/             # prompt text files, not inline strings
-vendor/newscrawler/    # exists — see below
-data/                  # gitignored — SQLite DB, cached html, reports
+```text
+run.py                 single entry point
+clients/<slug>/        client config and prompt inputs
+migrations/            ordered SQLite migrations
+src/                    application code and prompts
+vendor/newscrawler/    existing news discovery/fetch code
+vendor/govcrawler/     government fetch code, when added
+data/                  gitignored database, cache, PDFs, and reports
 tests/
 ```
 
-Only `vendor/`, `migrations/`, the plan, and this file exist so far. Git does not track
-empty directories, so a fresh clone looks sparser than the laptop working copy — that
-is expected, not a broken checkout.
+Prefer a flat `src/` until several files of the same kind justify a folder.
 
 ## Vendored code
 
-`vendor/newscrawler/` is copied **1:1 from germany_risk_monitor** `src/crawler_news/`
-at `6a86115` (`origin/master`) — discovery, fetch, extract and paywall in one tree.
-[vendor/PROVENANCE.md](vendor/PROVENANCE.md) records the exact commit, what was left
-out and why, host integration requirements, and pending ports. Update its "modified
-since copy" line on first local edit.
+Code under `vendor/` originated elsewhere but is maintained as part of this project.
+Edit it directly when needed; do not add shims or monkey patches merely to preserve
+an upstream diff. Record origins and material local changes in
+[vendor/PROVENANCE.md](vendor/PROVENANCE.md).
 
-**The vendored code is not self-contained.** It imports `src.config`, `src.logger`,
-and `src.crawler_news.*` from the surrounding app. Those names must be satisfied or
-the imports patched when `src/` is built — a real decision, not a detail, since our
-planned layout calls it `src/log.py`, not `src/logger.py`.
+The existing news crawler imports `src.config`, `src.logger`, and
+`src.crawler_news.*`. Integration should provide `src/config.py` and `src/logger.py`;
+rewrite the stale `src.crawler_news.*` imports when the vendor tree is first wired
+into the application.
 
-Heavily patched fork of NewsCrawler. Treat it as our code — do not restructure it to
-track upstream. BrightData paths stay available but unused for site fetching; on a
-residential IP there is nothing to rotate to.
+## Reference repository
 
-## Source repo (same machine, not a dependency)
+`c:\apps\NewsCrawler` is the local working copy of
+`github.com/jinchiluis/germany_risk_monitor`, despite its directory name. It is a
+source of fetch, agent, and report mechanics only; brandmonitor must not import it at
+runtime.
 
-`c:\apps\germany_risk_monitor` — the vendored crawler above, plus the planned
-agent/ops plumbing: assessment, embedding, LLM client and cost accounting, logger,
-watermark pattern, docx report mechanics.
+## Deployment
 
-Reference material to copy from deliberately, not to import at runtime.
-
-## Git
-
-- Repo: `https://github.com/jinchiluis/brandmonitor`, default branch `main`
-- Laptop remote is HTTPS (Git Credential Manager); VPS remote is SSH
+Deployment is deliberate and pull-based. Use `git pull --ff-only`; scheduled runs do
+not update their own code.
