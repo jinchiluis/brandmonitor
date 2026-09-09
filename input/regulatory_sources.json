@@ -1,0 +1,128 @@
+[
+  {
+    "country": "EU",
+    "organization": "EU Taxation and Customs",
+    "type": "监管机构",
+    "domain": "跨境包裹",
+    "language": "英语",
+    "url": "https://taxation-customs.ec.europa.eu/",
+    "sitemap": false,
+    "feeds": true,
+    "frontpage": false,
+    "allowed_dirs": [],
+    "feed_urls": [
+      "https://taxation-customs.ec.europa.eu/node/2/rss_en"
+    ],
+    "notes": "de-minimis and low-value parcel import reform; feed is neither advertised nor at a standard path",
+    "content_mode": "full_text"
+  },
+  {
+    "country": "EU",
+    "organization": "EU Commission Press Corner",
+    "type": "监管机构",
+    "domain": "平台监管",
+    "language": "英语",
+    "url": "https://ec.europa.eu/",
+    "sitemap": false,
+    "feeds": true,
+    "frontpage": false,
+    "allowed_dirs": [],
+    "feed_urls": [
+      "https://ec.europa.eu/commission/presscorner/api/rss?language=en&pagesize=50"
+    ],
+    "notes": "DSA enforcement announcements; Temu and Shein are designated VLOPs. High volume, all Commission topics - needs topic filtering",
+    "content_mode": "full_text"
+  },
+  {
+    "country": "EU",
+    "organization": "BEUC",
+    "type": "消费者保护机构",
+    "domain": "消费者保护",
+    "language": "英语",
+    "url": "https://www.beuc.eu/",
+    "sitemap": false,
+    "feeds": true,
+    "frontpage": false,
+    "allowed_dirs": [],
+    "notes": "EU consumer organisation; campaigns against platforms. Feed at the conventional /rss.xml",
+    "content_mode": "full_text"
+  },
+  {
+    "country": "EU",
+    "organization": "EDPB",
+    "type": "监管机构",
+    "domain": "数据保护",
+    "language": "英语",
+    "url": "https://www.edpb.europa.eu/",
+    "sitemap": false,
+    "feeds": true,
+    "frontpage": false,
+    "allowed_dirs": [],
+    "notes": "EU-level GDPR enforcement and guidance",
+    "content_mode": "full_text"
+  },
+  {
+    "country": "Germany",
+    "organization": "Bundeskartellamt",
+    "type": "监管机构",
+    "domain": "竞争",
+    "language": "德语",
+    "url": "https://www.bundeskartellamt.de/",
+    "sitemap": false,
+    "feeds": true,
+    "frontpage": false,
+    "allowed_dirs": [],
+    "notes": "German competition proceedings against platforms and logistics; advertises its own feed",
+    "content_mode": "full_text"
+  },
+  {
+    "country": "Germany",
+    "organization": "Bundesnetzagentur",
+    "type": "监管机构",
+    "domain": "跨境包裹",
+    "language": "德语",
+    "url": "https://www.bundesnetzagentur.de/",
+    "sitemap": false,
+    "feeds": true,
+    "frontpage": false,
+    "allowed_dirs": [],
+    "feed_urls": [
+      "https://www.bundesnetzagentur.de/SiteGlobals/Functions/RSSFeed/DE/RSSNewsfeed/RSSNewsfeed_Pressemitteilungen.xml?nn=693926",
+      "https://www.bundesnetzagentur.de/SiteGlobals/Functions/RSSFeed/DE/RSSNewsfeed/RSSNewsfeed_Aktuelles_neu.xml?nn=693926"
+    ],
+    "notes": "regulates postal and parcel services. feed_urls is REQUIRED here: autodiscovery picks the energy-auction feed instead. Output is still mostly energy - needs topic filtering",
+    "content_mode": "full_text"
+  },
+  {
+    "country": "Germany",
+    "organization": "vzbv",
+    "type": "消费者保护机构",
+    "domain": "消费者保护",
+    "language": "德语",
+    "url": "https://www.vzbv.de/",
+    "sitemap": false,
+    "feeds": true,
+    "frontpage": false,
+    "allowed_dirs": [],
+    "notes": "German consumer association; litigates against platforms",
+    "content_mode": "full_text"
+  },
+  {
+    "country": "Germany",
+    "organization": "Verbraucherzentrale",
+    "type": "消费者保护机构",
+    "domain": "消费者保护",
+    "language": "德语",
+    "url": "https://www.verbraucherzentrale.de/",
+    "sitemap": true,
+    "feeds": false,
+    "frontpage": false,
+    "allowed_dirs": [
+      "verbandsklagen",
+      "urteile",
+      "wissen/vertraege-reklamation/abzocke"
+    ],
+    "notes": "consumer advice; whole-site sitemap of 5057 URLs. Narrowed 2026-09-09 to event-bearing sections only: class actions, court rulings, and named fake-shop warnings. Excluded /wissen otherwise (1832 urls, 6% relevant, and evergreen guides that re-publish in bulk - 421 pages touched in June alone), plus /rezepte, /bildung, /veranstaltungen. See todo.md",
+    "content_mode": "full_text"
+  }
+]

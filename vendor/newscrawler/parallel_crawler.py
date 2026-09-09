@@ -6,7 +6,7 @@ from typing import List, Dict, Any
 from src.logger import get_logger
 logger = get_logger(__name__)
 
-from src.crawler_news.crawler import crawl_site
+from .crawler import crawl_site
 
 
 def _crawl_one_source(src: Dict[str, Any],

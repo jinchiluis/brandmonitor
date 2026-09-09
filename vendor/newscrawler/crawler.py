@@ -31,7 +31,7 @@ import feedparser
 from dateutil import parser as dateparser
 from .crawler_html_utils import enrich_dates_light, fetch_html, fetch_title_fallback
 from .crawler_playwright import fetch_html_with_playwright
-from src.crawler_news.source_loader import sources
+from .source_loader import sources
 from src.logger import get_logger
 logger = get_logger(__name__)
 
@@ -327,8 +327,30 @@ def discover_sitemaps(session, site_url):
             session.headers.clear()
             session.headers.update(old_headers) # revert back simple headers for fetching
 
-    if _VERBOSE: logger.info(f"[robots] found {len(sitemaps)} sitemap entries")
-    return sitemaps
+    # De-duplicate by content location, not by guess URL. The www and non-www
+    # bases usually serve the same file, so a site whose robots.txt declares no
+    # sitemap gets every URL discovered twice — doubling fetch cost and inflating
+    # every "found" count, since the duplicates are only collapsed at storage.
+    seen_sitemaps, unique = set(), []
+    for sm in sitemaps:
+        key = urlparse(sm)._replace(netloc=urlparse(sm).netloc.removeprefix("www.")).geturl()
+        if key in seen_sitemaps:
+            if _VERBOSE: logger.info(f"[robots] duplicate sitemap dropped {sm}")
+            continue
+        seen_sitemaps.add(key)
+        unique.append(sm)
+
+    if _VERBOSE: logger.info(f"[robots] found {len(unique)} sitemap entries")
+    return unique
+
+def _is_news_sitemap(sitemap_url: str) -> bool:
+    """True for a Google News sitemap, judged by its filename.
+
+    Named files only: matching the whole URL would treat every sitemap on a host
+    like news.example.com as a news sitemap.
+    """
+    return "news" in urlsplit(sitemap_url).path.rsplit("/", 1)[-1].lower()
+
 
 def fetch_sitemap_urls(session: requests.Session, sitemap_url: str) -> Tuple[
     List[Tuple[str, Optional[datetime], Optional[str]]],
@@ -517,9 +539,18 @@ def collect_from_sitemaps(session: requests.Session, site_url: str, start: datet
             if _VERBOSE: logger.info(f"[sitemap] skipping category sitemap {sm}")
             continue
 
-        hint_dt = sm_lastmod or _sitemap_date_hint(sm)
-        if hint_dt and hint_dt < (start - grace):
-            if _VERBOSE: logger.info(f"[sitemap] prune old index {sm} (hint {hint_dt.isoformat()})")
+        url_hint = _sitemap_date_hint(sm)
+        # Still fall back to lastmod when dating individual entries below.
+        hint_dt = sm_lastmod or url_hint
+
+        # Prune only on a date embedded in the sitemap's own URL. That is a
+        # deliberate archive marker (sitemap-2019-03.xml) and trustworthy. A CMS
+        # <lastmod> is not: TYPO3 reports 2024-07-08 for dvz.de's live news
+        # sitemaps, whose entries are current, so pruning on it discarded the
+        # paper's entire recent output and left 13 articles a fortnight. Traversal
+        # cost stays bounded by max_sitemap_fetches and the newest-first ordering.
+        if url_hint and url_hint < (start - grace):
+            if _VERBOSE: logger.info(f"[sitemap] prune old index {sm} (url hint {url_hint.isoformat()})")
             continue
 
         url_entries, nested = fetch_sitemap_urls(session, sm)
@@ -535,12 +566,20 @@ def collect_from_sitemaps(session: requests.Session, site_url: str, start: datet
                     hints.append(ArticleHint(url=normalize_url(loc), published_at=entry_dt, title=title, source="sitemap"))
                     per_source_counts["sitemap"] += 1
 
-        # Sort nested sitemaps newest-first before inserting so that sites with
-        # massive historical archives (e.g. zeit.de goes back to 1946) don't
-        # exhaust the timeout before reaching recent months.
+        # News sitemaps first, then newest-first. Both orderings exist to spend a
+        # bounded max_per_source on the right entries: sites with massive archives
+        # (zeit.de goes back to 1946) must not exhaust it before reaching recent
+        # months, and a news sitemap is strictly better than any archive one — it
+        # carries <news:title> and a real <news:publication_date>, where a plain
+        # sitemap offers a bare URL and a <lastmod> the publisher may have
+        # rewritten in bulk. etailment lists its news sitemap last behind six
+        # archive files sharing one lastmod, so in file order the cap was spent
+        # before reaching it: 2,000 undated, untitled rows, 90% of them pre-2025.
         nested_sorted = sorted(
             nested,
-            key=lambda x: x[1] or _sitemap_date_hint(x[0]) or datetime.min.replace(tzinfo=BERLIN_TZ),
+            key=lambda x: (_is_news_sitemap(x[0]),
+                           x[1] or _sitemap_date_hint(x[0])
+                           or datetime.min.replace(tzinfo=BERLIN_TZ)),
             reverse=True,
         )
         queue = nested_sorted + queue
@@ -553,10 +592,39 @@ def collect_from_sitemaps(session: requests.Session, site_url: str, start: datet
     return hints
 
 # ------------------ Discovery via RSS/Atom ------------------
+def discover_declared_feeds(session, base: str) -> List[str]:
+    """Read feed URLs the homepage advertises via <link rel="alternate">.
+
+    Returns [] on any failure: feed discovery is an optimisation, and a homepage
+    that will not load must not take the rest of the crawl down with it.
+    """
+    from urllib.parse import urljoin
+
+    try:
+        raw = fetch_html(session, base + '/', timeout=(5, 8), use_playwright_fallback=False)
+        if not raw:
+            return []
+        from lxml import html as _lxml_html
+        tree = _lxml_html.fromstring(raw)
+    except Exception as e:
+        if _VERBOSE: logger.info(f"[rss] autodiscovery failed for {base}: {e}")
+        return []
+
+    found: List[str] = []
+    for link in tree.xpath("//link[@rel='alternate'][@href]"):
+        ltype = (link.get("type") or "").lower()
+        if "rss" in ltype or "atom" in ltype:
+            found.append(urljoin(base + '/', link.get("href")))
+    found = list(dict.fromkeys(found))
+    if _VERBOSE and found: logger.info(f"[rss] autodiscovered {len(found)} feed(s) for {base}")
+    return found
+
+
 def collect_from_feeds(session, site_url):
     """
-    Discover article URLs via RSS/Atom without any homepage HTML parsing.
-      - Tries common on-site feed paths (COMMON_FEED_PATHS)
+    Discover article URLs via RSS/Atom.
+      - Reads the feeds the homepage advertises via <link rel="alternate">
+      - Then tries common on-site feed paths (COMMON_FEED_PATHS)
     Returns: List[ArticleHint]
     """
     from urllib.parse import urljoin, urlsplit
@@ -565,7 +633,21 @@ def collect_from_feeds(session, site_url):
     hints: List[ArticleHint] = []
     base = site_url.rstrip('/')
 
-    feed_urls: List[str] = [urljoin(base + '/', p) for p in COMMON_FEED_PATHS]
+    # Configured feeds win. Some publishers neither advertise a feed nor put it at
+    # a conventional path, and a few advertise the wrong one — bundesnetzagentur.de
+    # offers energy-auction feeds that autodiscovery happily collects instead of the
+    # press releases we actually want. An explicit feed_urls list is the only way to
+    # say which feed a source means.
+    rules = sources.get_site_rules(site_url) or {}
+    feed_urls: List[str] = [u for u in (rules.get("feed_urls") or []) if u]
+    explicit = set(feed_urls)
+
+    # Advertised feeds next: a fixed path list misses any publisher who puts its
+    # feed somewhere unusual, and that reads as "this site has no feeds" rather
+    # than as a gap in our guesses. Costs one homepage fetch.
+    if not explicit:
+        feed_urls += list(discover_declared_feeds(session, base))
+        feed_urls += [urljoin(base + '/', p) for p in COMMON_FEED_PATHS]
 
     # De-dup in order
     feed_urls = list(dict.fromkeys(feed_urls))

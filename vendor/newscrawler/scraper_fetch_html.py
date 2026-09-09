@@ -27,7 +27,7 @@ import ftfy
 from .crawler_playwright import fetch_html_with_playwright
 from .crawler_brightdata import fetch_html_with_api as fetch_html_with_brightdata_api
 from .paywall.handler import get_paywall_cfg, fetch_paywall_article
-from src.crawler_news.source_loader import sources
+from .source_loader import sources
 from src.logger import get_logger
 
 logger = get_logger(__name__)

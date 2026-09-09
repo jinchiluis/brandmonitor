@@ -9,4 +9,7 @@ __pycache__/
 data/
 
 # paywall login states (cookies / session credentials)
-vendor/newscrawler/src/crawler_news/paywall/states/
+vendor/newscrawler/paywall/states/
+
+# probe/crawl scratch output
+input/*.local.json

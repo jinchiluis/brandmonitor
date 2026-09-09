@@ -1,0 +1,291 @@
+{
+  "slug": "jt-express",
+  "name": "J&T Express Germany",
+  "profile_version": "2026-09-09",
+  "body_min_keywords": 2,
+  "notes": [
+    "What to look for, not how to report it. Delivery language and cadence are",
+    "operational settings and live elsewhere.",
+    "body_min_keywords: a title is short and curated, so one keyword there means",
+    "something; a body is long, so one keyword there is usually an accident. Brands",
+    "and topics always stand alone. Measured on 342 bodies: 156 selections -> 77,",
+    "keeping every brand and topic find.",
+    "Self-contained on purpose: a shared topic file would let an edit change this",
+    "client's assessments without changing profile_version, which would break the",
+    "traceability rule in CLAUDE.md. Duplicating ~40 lines per client is cheaper",
+    "than resolving and hashing a composed profile.",
+    "A term ending in * allows a suffix, which German morphology needs:",
+    "'zollfreigrenz*' matches Zollfreigrenze and Zollfreigrenzen.",
+    "Use 'pattern' only where terms cannot express it - see J&T and 极兔."
+  ],
+  "brands": [
+    {
+      "name": "J&T",
+      "pattern": "(?<!\\w)(?:j\\s*&\\s*t(?:\\s+(?:express|international))?|j\\s+t\\s+(?:express|international))(?!\\w)",
+      "why": "Ampersand and spacing variants; slugs decode %26 to & and hyphens to spaces."
+    },
+    {
+      "name": "极兔",
+      "pattern": "极兔",
+      "boundaries": false,
+      "why": "CJK has no word boundaries; \\b would never match."
+    },
+    {
+      "name": "Temu",
+      "terms": [
+        "temu"
+      ]
+    },
+    {
+      "name": "Shein",
+      "terms": [
+        "shein"
+      ]
+    },
+    {
+      "name": "AliExpress",
+      "terms": [
+        "aliexpress",
+        "ali express"
+      ]
+    },
+    {
+      "name": "TikTok Shop",
+      "terms": [
+        "tiktok shop"
+      ]
+    }
+  ],
+  "topics": [
+    {
+      "name": "Zollfreigrenze",
+      "terms": [
+        "zollfreigrenz*"
+      ]
+    },
+    {
+      "name": "150-Euro-Grenze",
+      "terms": [
+        "150 euro grenz*"
+      ]
+    },
+    {
+      "name": "de-minimis",
+      "terms": [
+        "de minimis"
+      ]
+    },
+    {
+      "name": "Paketabgabe",
+      "terms": [
+        "paketabgab*"
+      ]
+    },
+    {
+      "name": "Importgebühr",
+      "terms": [
+        "importgebühr*",
+        "importgebuehr*"
+      ]
+    },
+    {
+      "name": "Einfuhrumsatzsteuer",
+      "terms": [
+        "einfuhrumsatzsteuer*"
+      ]
+    },
+    {
+      "name": "Niedrigwertsendung",
+      "terms": [
+        "niedrigwertsendung*"
+      ]
+    },
+    {
+      "name": "low-value parcel",
+      "terms": [
+        "low value parcel*",
+        "low value package*",
+        "low value consignment*"
+      ]
+    },
+    {
+      "name": "cross-border e-commerce",
+      "terms": [
+        "cross border e commerce"
+      ]
+    },
+    {
+      "name": "e-commerce imports",
+      "terms": [
+        "e commerce import*"
+      ]
+    },
+    {
+      "name": "Digital Services Act",
+      "terms": [
+        "digital services act",
+        "dsa"
+      ]
+    },
+    {
+      "name": "Digital Markets Act",
+      "terms": [
+        "digital markets act",
+        "dma"
+      ]
+    },
+    {
+      "name": "GPSR",
+      "terms": [
+        "produktsicherheitsverordnung*",
+        "gpsr"
+      ]
+    },
+    {
+      "name": "Plattformhaftung",
+      "terms": [
+        "plattformhaftung*"
+      ]
+    },
+    {
+      "name": "Marktüberwachung",
+      "terms": [
+        "marktüberwachung*",
+        "marktueberwachung*",
+        "market surveillance"
+      ]
+    },
+    {
+      "name": "nicht-konforme Produkte",
+      "terms": [
+        "nicht konforme produkt*",
+        "non compliant product*"
+      ]
+    },
+    {
+      "name": "unsichere Produkte",
+      "terms": [
+        "unsichere produkt*",
+        "unsicheren produkt*",
+        "unsafe product*"
+      ]
+    },
+    {
+      "name": "Postgesetz",
+      "terms": [
+        "postgesetz*",
+        "postal act"
+      ]
+    },
+    {
+      "name": "Paketmarkt",
+      "terms": [
+        "paketmarkt*"
+      ]
+    },
+    {
+      "name": "KEP-Markt",
+      "terms": [
+        "kep markt*"
+      ]
+    },
+    {
+      "name": "customs reform",
+      "terms": [
+        "customs reform*"
+      ]
+    }
+  ],
+  "keywords": [
+    {
+      "name": "China/chinesisch",
+      "terms": [
+        "china",
+        "chinesisch*"
+      ]
+    },
+    {
+      "name": "online commerce",
+      "terms": [
+        "onlinehandel*",
+        "online handel*",
+        "onlineversand*",
+        "online versand*",
+        "onlinehändler*",
+        "online händler*",
+        "e commerce"
+      ]
+    },
+    {
+      "name": "marketplace/platform",
+      "terms": [
+        "plattform*",
+        "platform*",
+        "marktplatz*",
+        "marktplätz*",
+        "marketplace*"
+      ]
+    },
+    {
+      "name": "parcel",
+      "terms": [
+        "paket*",
+        "parcel*",
+        "kleinsendung*",
+        "niedrigwertsendung*"
+      ]
+    },
+    {
+      "name": "KEP",
+      "terms": [
+        "kep"
+      ]
+    },
+    {
+      "name": "customs",
+      "terms": [
+        "zoll*",
+        "customs",
+        "custom"
+      ]
+    },
+    {
+      "name": "import",
+      "terms": [
+        "einfuhr*"
+      ],
+      "pattern": "\\bimport(?!ant\\b|ance\\b)\\w*",
+      "why": "Plain 'import*' also matches important/importance."
+    },
+    {
+      "name": "regulation",
+      "terms": [
+        "regulier*",
+        "regulation*",
+        "regulatory*"
+      ]
+    },
+    {
+      "name": "product safety",
+      "terms": [
+        "produktsicherheit*",
+        "product safety"
+      ]
+    },
+    {
+      "name": "third country",
+      "terms": [
+        "drittstaat*",
+        "third country",
+        "third countries"
+      ]
+    },
+    {
+      "name": "supply chain",
+      "terms": [
+        "lieferkett*",
+        "supply chain*"
+      ]
+    }
+  ]
+}

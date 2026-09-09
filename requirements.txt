@@ -1,0 +1,28 @@
+# Fetch and parse — required by vendor/newscrawler
+requests>=2.31.0
+urllib3>=2.0.0
+httpx>=0.24.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+lxml_html_clean
+feedparser>=6.0.0
+tldextract>=5.0.0
+trafilatura
+# PDF bodies: regulators publish press releases and reports as PDF.
+# pypdf is BSD-3; pymupdf is faster but AGPL, which does not suit a commercial
+# deliverable without a paid licence.
+pypdf>=4.0.0
+brotli>=1.0.0
+charset-normalizer>=3.0.0
+ftfy>=6.0.0
+
+# Date/time handling
+python-dateutil>=2.8.0
+tzdata
+
+# Paywalled sources and anti-bot fallbacks
+# playwright also needs: playwright install chromium
+playwright>=1.40.0
+
+# Secrets
+python-dotenv>=1.0.0

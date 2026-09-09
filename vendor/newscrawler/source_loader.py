@@ -6,7 +6,7 @@ Source & Blacklist Loader (singleton)
 Loads news source configurations and blacklisted URLs once, caches them.
 
 Usage:
-    from src.crawler_news.source_loader import sources
+    from vendor.newscrawler.source_loader import sources
 
     sources.load_sources("input/germany_medias.json")
     sources.load_blacklist()
@@ -148,7 +148,7 @@ class SourceLoader:
                             url_domain = urlparse(url).netloc.lower()
                             if url_domain in source_domains:
                                 # Normalize URL (import on-demand to avoid circular dependency)
-                                from src.crawler_news.crawler import normalize_url
+                                from .crawler import normalize_url
                                 self._blacklist_urls.add(normalize_url(url))
                                 filtered_count += 1
 
@@ -195,6 +195,9 @@ class SourceLoader:
                     "frontpage": source.get("frontpage", False),
                     "brightdata": source.get("brightdata", False),
                     "allowed_dirs": source.get("allowed_dirs", []),
+                    # Explicit feed URLs for publishers whose feed is neither
+                    # advertised on the homepage nor at a conventional path.
+                    "feed_urls": source.get("feed_urls", []),
                 }
 
         return None  # URL not in our sources
@@ -213,7 +216,7 @@ class SourceLoader:
             self.load_blacklist()
 
         # Import on-demand to avoid circular dependency
-        from src.crawler_news.crawler import normalize_url
+        from .crawler import normalize_url
         return normalize_url(url) in self._blacklist_urls
 
     def clear_cache(self):

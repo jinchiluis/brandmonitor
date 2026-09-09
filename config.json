@@ -1,0 +1,19 @@
+{
+  "workers": {
+    "crawler": 20
+  },
+  "lookback_days": {
+    "news": 30
+  },
+  "body_fetch": {
+    "_comment": "Full-text sources produce ~157 items/day, so a limit of 100 could never keep up. 1000 is a safety rail, not a throttle. delay_seconds is enforced per host, not globally: tasks are interleaved across sources, so consecutive requests normally hit different publishers anyway.",
+    "limit": 1000,
+    "timeout_seconds": 20,
+    "delay_seconds": 1.0,
+    "browser_escalation": true,
+    "pdf_max_pages": 20
+  },
+  "verbose": {
+    "crawler": false
+  }
+}
