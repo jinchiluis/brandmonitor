@@ -9,8 +9,25 @@
     "feeds": true,
     "frontpage": false,
     "allowed_dirs": [],
-    "notes": "sitemap 1500/14d; feeds 72; paywalled - needs subscription + login module for full text; 1 feed(s) at non-standard paths",
-    "content_mode": "title_only"
+    "notes": "sitemap 1500/14d; feeds 72; paywalled - needs subscription + login module for full text; 1 feed(s) at non-standard paths. /sport /panorama /kultur and lifestyle sections excluded 2026-09-10: 800 of 1998 rows, no plausible signal for a Chinese consumer brand in Germany.",
+    "content_mode": "title_only",
+    "excluded_dirs": [
+      "sport",
+      "panorama",
+      "kultur",
+      "reise",
+      "geschichte",
+      "fitness",
+      "effilee",
+      "partnerschaft",
+      "psychologie",
+      "familie",
+      "stil",
+      "games",
+      "backstage",
+      "deinspiegel",
+      "tests"
+    ]
   },
   {
     "country": "Germany",
@@ -22,8 +39,31 @@
     "feeds": true,
     "frontpage": false,
     "allowed_dirs": [],
-    "notes": "sitemap 1500/14d; feeds 30; paywalled - needs subscription + login module for full text; 1 feed(s) at non-standard paths",
-    "content_mode": "title_only"
+    "notes": "sitemap 1500/14d; feeds 30; paywalled - needs subscription + login module for full text; 1 feed(s) at non-standard paths. culture, sport and lifestyle sections excluded 2026-09-10. /news is the dpa agency ticker (3430 rows) and is deliberately kept.",
+    "content_mode": "title_only",
+    "excluded_dirs": [
+      "sport",
+      "zeit-magazin",
+      "feuilleton",
+      "campus",
+      "familie",
+      "spiele",
+      "zona",
+      "leserbriefe",
+      "entdecken",
+      "wochenende",
+      "zeit-verbrechen",
+      "zeit-geschichte",
+      "zeit-wissen",
+      "video",
+      "angebote",
+      "newsletter",
+      "faq",
+      "index",
+      "serie",
+      "bildung",
+      "hamburg"
+    ]
   },
   {
     "country": "Germany",
@@ -35,8 +75,19 @@
     "feeds": true,
     "frontpage": false,
     "allowed_dirs": [],
-    "notes": "sitemap 885/14d; feeds 164; paywalled - needs subscription + login module for full text; 1 feed(s) at non-standard paths",
-    "content_mode": "title_only"
+    "notes": "sitemap 885/14d; feeds 164; paywalled - needs subscription + login module for full text; 1 feed(s) at non-standard paths. depth-2 prefixes required: 2006 of 2061 rows sit under /aktuell, so a one-segment rule cannot separate anything. Excluded 2026-09-10: feuilleton 607, sport 194, rhein-main 266 = 52% of the source.",
+    "content_mode": "title_only",
+    "excluded_dirs": [
+      "aktuell/feuilleton",
+      "aktuell/sport",
+      "aktuell/rhein-main",
+      "aktuell/spiele",
+      "aktuell/reise",
+      "aktuell/besser-leben",
+      "aktuell/fotografie",
+      "video",
+      "podcasts"
+    ]
   },
   {
     "country": "Germany",
@@ -48,8 +99,18 @@
     "feeds": false,
     "frontpage": false,
     "allowed_dirs": [],
-    "notes": "sitemap 1500/14d; paywalled - needs subscription + login module for full text",
-    "content_mode": "title_only"
+    "notes": "sitemap 1500/14d; paywalled - needs subscription + login module for full text. /adv is advertorial; /video /audio /epaper-pdf carry no article text. Excluded 2026-09-10: 272 of 917 rows.",
+    "content_mode": "title_only",
+    "excluded_dirs": [
+      "video",
+      "adv",
+      "audio",
+      "autoren",
+      "epaper-pdf",
+      "die-welt-in-bildern-blickfang",
+      "journalismus_live",
+      "arts_und_style"
+    ]
   },
   {
     "country": "Germany",
@@ -69,8 +130,28 @@
       "thema",
       "magazin"
     ],
-    "notes": "frontpage-only fallback (80 links, undated); paywalled - needs subscription + login module for full text",
-    "content_mode": "title_only"
+    "notes": "frontpage-only fallback (80 links, undated); paywalled - needs subscription + login module for full text. frontpage source, so allowed_dirs seeds navigation but does NOT filter output - which is how /gutscheine and /consent got in. excluded_dirs added 2026-09-10 because it is a real output rule.",
+    "content_mode": "title_only",
+    "excluded_dirs": [
+      "gutscheine",
+      "consent",
+      "mediadaten",
+      "agb",
+      "datenschutz",
+      "impressum",
+      "utiq-verwalten",
+      "jobs",
+      "infoszurbarrierefreiheit",
+      "newsletter-homepagefooter",
+      "updates-eilmeldung",
+      "updates-rss",
+      "updates-mobileapps",
+      "stil",
+      "leben",
+      "reise",
+      "auto",
+      "jetzt"
+    ]
   },
   {
     "country": "Germany",
@@ -82,8 +163,19 @@
     "feeds": true,
     "frontpage": false,
     "allowed_dirs": [],
-    "notes": "feeds 143; 2 feed(s) at non-standard paths",
-    "content_mode": "title_only"
+    "notes": "feeds 143; 2 feed(s) at non-standard paths. broadcast and video pages carry no article text. Excluded 2026-09-10: 50 of 144 rows.",
+    "content_mode": "title_only",
+    "excluded_dirs": [
+      "video",
+      "multimedia",
+      "tagesthemen",
+      "tagesschau_20_uhr",
+      "tagesschau_in_100_sekunden",
+      "tagesschau_in_einfacher_sprache",
+      "tagesschau_mit_gebaerdensprache",
+      "wetter",
+      "kultur"
+    ]
   },
   {
     "country": "Germany",
@@ -95,8 +187,23 @@
     "feeds": false,
     "frontpage": false,
     "allowed_dirs": [],
-    "notes": "sitemap 1500/14d; paywalled - needs subscription + login module for full text",
-    "content_mode": "title_only"
+    "notes": "sitemap 1500/14d; paywalled - needs subscription + login module for full text. excluded 2026-09-10: 741 of 4433 rows. /regionales (2194) was considered and deliberately KEPT: it is state-level local news, but a parcel client runs regional depots and a depot opening surfaces there first.",
+    "content_mode": "title_only",
+    "excluded_dirs": [
+      "sport",
+      "kultur",
+      "vermischtes",
+      "iconist",
+      "gesundheit",
+      "motor",
+      "geschichte",
+      "reise",
+      "kmpkt",
+      "podcasts",
+      "food",
+      "iconmagazine",
+      "newsletter"
+    ]
   },
   {
     "country": "Germany",
@@ -108,8 +215,13 @@
     "feeds": false,
     "frontpage": false,
     "allowed_dirs": [],
-    "notes": "sitemap 1160/14d; paywalled - needs subscription + login module for full text",
-    "content_mode": "title_only"
+    "notes": "sitemap 1160/14d; paywalled - needs subscription + login module for full text. /adv is advertorial. Excluded 2026-09-10.",
+    "content_mode": "title_only",
+    "excluded_dirs": [
+      "adv",
+      "autoren",
+      "podcast"
+    ]
   },
   {
     "country": "Germany",
@@ -134,7 +246,22 @@
     "feeds": true,
     "frontpage": false,
     "allowed_dirs": [],
-    "notes": "sitemap 238/14d; feeds 20",
+    "excluded_dirs": [
+      "fachmagazin",
+      "termine"
+    ],
+    "excluded_url_substrings": [
+      "newsuebersicht"
+    ],
+    "excluded_title_substrings": [
+      "Newsübersicht",
+      "im Überblick",
+      "Aktuelle News",
+      "Aktuelle Meldungen",
+      "News zu",
+      "Alle News"
+    ],
+    "notes": "sitemap 238/14d; feeds 20. /fachmagazin excluded 2026-09-10: subscriber-only and not useful enough to retain as title-only evidence. /termine event listings and rolling company Newsübersicht pages excluded 2026-09-10 because they are not individual news articles. Rolling per-company hub pages sit under /news beside real articles, so only a title rule can reach them. Fragments extended 2026-09-10 on evidence: they match 12 rows carrying 1.13 MB - 26% of this source's body text - averaging 58 KB against a 2.8 KB article median, with zero false positives across all 2059 rows.",
     "content_mode": "full_text"
   },
   {

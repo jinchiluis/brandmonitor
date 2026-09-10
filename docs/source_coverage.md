@@ -15,7 +15,7 @@ back. Raw results are in the probe output; the resulting configuration is
 | Sweepable by feeds only | 3 |
 | Frontpage fallback only | 2 |
 | Nothing works | 0 |
-| Require a paid subscription for full text | 8 |
+| Publishers known to contain paid sections | at least 10; access is usually mixed |
 
 The list is in far better shape than the earlier tagesschau result suggested. Every
 named source can be collected by some method.
@@ -103,6 +103,167 @@ The config now uses `bpex-ev.de`, seeded on `presse`, `aktuelles`,
 redirects to `ohn.haendlerbund.de`. Both are kept, since the publication and the
 association publish different things, but "we monitor 24 sources" is really 23
 organisations.
+
+## Applied source-policy corrections
+
+These decisions are production configuration, not pending work:
+
+- **Verbraucherzentrale** was narrowed to `verbandsklagen`, `urteile`, and
+  `wissen/vertraege-reklamation/abzocke`. This reduced a measured 30-day result from
+  766 broad consumer pages to 203 event-like records. The 563 excluded rows were
+  purged after a backup; collection and body backfill enforce the same prefixes.
+- **BVL** was narrowed and ultimately changed to `title_only`. Its regenerated
+  sitemap gives thousands of archive, furniture, and malformed URLs one shared
+  `lastmod`, causing a permanent refetch treadmill. In 620 retained URLs it produced
+  no brand hit and only three selector-worthy slugs. Index/malformed rows were
+  purged; the useful de-minimis post remains discoverable by its slug.
+- **etailment** is restricted to `/magazin`. A 2026 migration restamped most of its
+  25-year archive, and 519 of the first 2,000 URLs were index pages. News sitemaps
+  are now traversed first because they carry real titles and publication dates for
+  the rolling recent window.
+- **LOGISTIK HEUTE `/fachmagazin`** was excluded and purged on 2026-09-10. The
+  section was subscriber-only and not valuable enough to retain as title evidence.
+  The same durable policy now excludes 68 `/termine/` event listings and 21 company
+  `Newsübersicht` indexes. A transactional repair removed 177 historical raw
+  versions, normalized 1,021 retained page-date versions while preserving their raw
+  values, and removed the terminal tag cloud from five retained gallery bodies.
+  Discovery, body backfill, and candidate selection enforce the same rules.
+
+- **The eight mainstream outlets** were given `excluded_dirs` on 2026-09-10, the
+  first restrictions any of them had carried. Measured effect below. Rows already
+  collected were **not** purged: exclusions are enforced at collection, body
+  backfill and candidate selection alike, so the stored rows are inert, and they
+  are the evidence for this table.
+- **Bundesnetzagentur** was topic-filtered on 2026-09-10, closing the "needs topic
+  filtering" note its own source entry had carried since the regulatory tier was
+  proposed. The excluded prefixes are `DE/Allgemeines/Presse/Amtsblatt`,
+  `DE/Fachthemen/ElektrizitaetundGas` and `DE/Fachthemen/Telekommunikation` — 74 of
+  134 rows and 0.95 of 1.15 MB. Nothing postal was lost:
+  `/SharedDocs/Pressemitteilungen` is untouched and `DE/Fachthemen/Post` is
+  deliberately *not* excluded so postal topics survive if they ever appear. Note
+  that this source is **feeds-only**, so `allowed_dirs` would have been ignored
+  entirely (see CLAUDE.md's table) — only `excluded_dirs` works here.
+
+### Measured effect of the 2026-09-10 restrictions
+
+| Source | Rows | Excluded | | Body bytes removed |
+|---|---:|---:|---:|---:|
+| faz.net | 2,061 | 1,104 | 54% | 0.26 MB |
+| spiegel.de | 1,998 | 800 | 40% | 0.20 MB |
+| welt.de | 4,433 | 741 | 17% | 0.22 MB |
+| handelsblatt.com | 917 | 270 | 29% | 0.07 MB |
+| zeit.de | 4,459 | 247 | 6% | 0.04 MB |
+| bundesnetzagentur.de | 134 | 74 | 55% | **0.97 MB** |
+| wiwo.de | 420 | 48 | 11% | 0.01 MB |
+| tagesschau.de | 144 | 45 | 31% | 0.01 MB |
+| sueddeutsche.de | 361 | 39 | 11% | 0.00 MB |
+| logistik-heute.de | 2,059 | 12 | 1% | **1.19 MB** |
+| **Total** | **20,759** | **3,380** | **16%** | **3.04 MB** |
+
+The two columns measure different wins and should not be read together. The
+mainstream cuts are a **selection-cost** win — those sources are `title_only`, so
+their rows are ~250 B stubs and removing 3,000 of them frees almost no disk but
+takes 3,000 titles out of every selection prompt. The **disk** win is 86 rows:
+logistik-heute's hubs and Bundesnetzagentur's gazette pages carry 2.16 MB of the
+3.04 MB total.
+
+Verified by running the production `url_is_excluded` over the stored corpus and
+dumping every excluded row above 5 KB on a `full_text` source. All of it is hub
+pages, `Amtsblatt 1..17/2026` gazettes, energy auctions ("Wind an Land:
+Gebotstermin 1. Mai 2026"), mobile-telecom statistics, and a 93 KB *Verzeichnis der
+zugeteilten deutschen Amateurfunkrufzeichen* — the register of German amateur-radio
+callsigns. No legitimate content was caught.
+
+**`welt.de/regionales` was considered and deliberately kept.** At 2,194 rows it is
+over 10% of the entire corpus and is state-level local news, which is the profile of
+pure noise. It stays because a parcel client runs regional depots, and a depot
+opening or closure surfaces in state news before it reaches the trade press. Revisit
+once a real cycle shows whether it ever produces a selected item.
+
+**FAZ needs depth-2 prefixes.** 2,006 of its 2,061 rows sit under `/aktuell`, so a
+one-segment rule separates nothing. `url_matches_dirs` matches on `path.startswith`,
+so multi-segment values work: `aktuell/feuilleton` (607 rows), `aktuell/sport` (194)
+and `aktuell/rhein-main` (266) are 52% of the source between them.
+
+### Rolling hub pages need a title rule, not a directory rule
+
+LOGISTIK HEUTE publishes per-company hub pages *under `/news`, beside real
+articles* — "Bosch: Aktuelle Meldungen zu Produktion, KI, Robotik und Logistik" is
+186 KB of concatenated teasers carrying 65 date-stamps, against a 2.8 KB article
+median. No path prefix separates them, so `excluded_dirs` cannot reach them. The
+existing `excluded_title_substrings` mechanism can, and was extended on 2026-09-10
+to `["Newsübersicht", "im Überblick", "Aktuelle News", "Aktuelle Meldungen",
+"News zu", "Alle News"]` — **12 rows, 1.19 MB, 26% of this source's body text, with
+zero false positives across all 2,059 titles.**
+
+The URL cannot be trusted here even in principle. One hub sits at
+`/news/e-commerce-zalando-uebertrifft-dank-endspurt-gewinnprognose-fuer-2024-194044.html`
+under the title "Zalando-Logistik: Alle News sowie aktuelle Entwicklungen…" — the
+publisher repurposed a 2024 earnings article's URL into a rolling index. Only the
+title and the body are honest.
+
+**One hub still escapes**, and it defines the limit of a title rule: "Arvato
+Logistik: Entwicklungen, Projekte und Kooperationen des Supply-Chain-Dienstleisters"
+(134 KB, 50 date-stamps) reads exactly like an article. The generic alternative is
+**date-stamp density in the body** — an article carries one date, an aggregation page
+repeats one per teaser. Measured across the sources that fetch bodies:
+
+| Source | median | p95 | max |
+|---|---:|---:|---:|
+| logistik-heute.de | 0 | 0 | 75 (hubs: 50–75) |
+| verkehrsrundschau.de | 0 | 1 | 11 |
+| etailment.de | 0 | 0 | 1 |
+| verbraucherzentrale.de | 0 | 2 | 4 |
+| bvdw.org | 0 | 3 | 10 |
+
+A threshold of ≥15 separates cleanly with margin on both sides and would catch
+Arvato — but it misses two hubs the title rule does catch (Safelog at 9 stamps,
+Hyperloop at 6), so neither rule subsumes the other; the union catches all 13.
+**Not built.** It would be a post-fetch gate in `src/bodies.py`, structurally
+different from `is_furniture`, which runs on URLs at discovery. Config already
+recovers 1.19 of the 1.31 MB and the residue is one row. Build it generically when
+a second source shows the pattern — verkehrsrundschau already has a row at 11.
+
+### Dating coverage — measured 2026-09-10
+
+Of the 17,379 rows in the working corpus, **470 (2.7%) carry no publication date at
+all**, and they are concentrated in three sources:
+
+| Source | Undated | of | |
+|---|---:|---:|---:|
+| sueddeutsche.de | 315 | 322 | 98% |
+| bpex-ev.de | 95 | 113 | 84% |
+| bundesnetzagentur.de | 60 | 60 | 100% |
+
+Every other source is fully dated. The pattern is discovery method, not publisher:
+Süddeutsche and BPEX are the two **frontpage-only** sources, and frontpage links
+carry no date — which is already recorded in Süddeutsche's entry as "80 links,
+undated". This is a structural property of frontpage discovery, not a bug to fix.
+
+The restamp audit CLAUDE.md prescribes — distinct publication *days* against row
+count, and the lag from the busiest day to the fetch day — was run across all
+sources. **The large `title_only` sources are clean**: welt.de spreads 3,692 rows
+over 8 days (top day 18%, lag 1), zeit.de 4,212 over 11 (13%, lag 1), faz.net 957
+over 32 (12%, lag 2). Their sitemap dates are real publication dates, not `lastmod`.
+
+**BVL remains the documented exception**, now visible in stored data: 629 rows across
+3 distinct days with 100% on one. That is the shared-`lastmod` restamp already
+recorded above, and because BVL is `title_only` no page date will ever overwrite it.
+Those 629 rows are not undated — they are *confidently wrongly dated*, which is the
+worse failure. Treat BVL dates as unusable for any recency gate or customer-facing
+date.
+
+One gap worth noting for later: `published_at_source` is only written during body
+fetch, so **14,462 rows carry a date with no recorded provenance** — the 12,128
+`title_only` rows, which will never be body-fetched, plus `full_text` rows not yet
+fetched. Only 1,964 rows record `page` and 559 record `discovery`. The dates are
+right for the sources audited above, but nothing in the row says so. If a future
+source turns out to be restamped, no stored field distinguishes its dates from a
+trustworthy one.
+
+When purging collected rows, remember that collection watermarks are independent.
+Deleting `raw_item` while leaving an eligible URL and its watermark unchanged can
+create a permanent gap; make the future collection rule durable before deleting.
 
 ## Regulatory tier — proposal
 
@@ -438,9 +599,8 @@ body text was extractable anonymously nearly everywhere.
 >   five brand hits in the table above were all `/news/`, which is why it read as
 >   fully free.
 >
-> No config change followed: `_declares_paywall()` in `src/bodies.py` already marks
-> such pages `unavailable` instead of storing them, so magazine articles keep their
-> titles as an index and never have their text taken.
+> That decision was later changed: `/fachmagazin` is now excluded and its stored
+> rows were purged. Public `/news` articles remain in the full-text tier.
 >
 > Method note: the string "abonnement" appears on **all 20** LOGISTIK HEUTE pages
 > sampled — it is footer promo. A marker-based check would have condemned the entire
@@ -452,6 +612,12 @@ DVZ) are not on the critical path. FAZ is the only one with demonstrated paid
 relevant content. Handelsblatt's brand hits were video pages carrying ~10 words of
 text — its 994 articles produced nothing readable on topic.
 
+The production backfill on 2026-09-10 added an important correction: **DVZ and t3n
+are mixed-access**, with both successful public bodies and subscriber-only items;
+e-commerce Magazin also produced declared-paywall results. “Paywalled site” is
+therefore not a useful binary. Subscription decisions must be based on relevant,
+paid-only, non-duplicated articles per month rather than publisher labels.
+
 Sample sizes are small (2–5 per source). Re-measure before making a purchasing
 decision, but the direction is consistent enough to stop treating paywalls as the
 main obstacle.
@@ -462,8 +628,7 @@ main obstacle.
    commitment. Safety Gate, EU presscorner and Bundeskartellamt are ready to build
    against today.
 2. **DVZ coverage** — confirm whether 13 articles per fortnight reflects reality.
-3. **`allowed_dirs` is deliberately empty** for every sitemap and feed source.
-   Completeness beats economy for a monitoring product, and a brand can be mentioned
-   in any section. Measured volumes are in each entry's `notes` so this can be
-   narrowed on evidence once real volumes are known.
+3. **Continue systematic source audits.** Several sources now have evidence-based
+   path restrictions. Apply new restrictions only after measuring what useful URLs
+   they would remove, and record the decision in this report.
 4. **Süddeutsche** — recheck once a subscription exists.

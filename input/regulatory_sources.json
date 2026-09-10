@@ -90,8 +90,13 @@
       "https://www.bundesnetzagentur.de/SiteGlobals/Functions/RSSFeed/DE/RSSNewsfeed/RSSNewsfeed_Pressemitteilungen.xml?nn=693926",
       "https://www.bundesnetzagentur.de/SiteGlobals/Functions/RSSFeed/DE/RSSNewsfeed/RSSNewsfeed_Aktuelles_neu.xml?nn=693926"
     ],
-    "notes": "regulates postal and parcel services. feed_urls is REQUIRED here: autodiscovery picks the energy-auction feed instead. Output is still mostly energy - needs topic filtering",
-    "content_mode": "full_text"
+    "notes": "regulates postal and parcel services. feed_urls is REQUIRED here: autodiscovery picks the energy-auction feed instead. Output is still mostly energy - needs topic filtering. Topic filtering added 2026-09-10, resolving the note above: this is a feeds-only source, so allowed_dirs would be ignored entirely and only excluded_dirs applies. Drops 74 of 134 rows and 0.95 of 1.15 MB - gazette downloads, energy auctions and spectrum/amateur-radio pages, all of which also carry no publication date. /DE/Fachthemen/Post is deliberately not excluded so postal topics survive if they appear.",
+    "content_mode": "full_text",
+    "excluded_dirs": [
+      "DE/Allgemeines/Presse/Amtsblatt",
+      "DE/Fachthemen/ElektrizitaetundGas",
+      "DE/Fachthemen/Telekommunikation"
+    ]
   },
   {
     "country": "Germany",
