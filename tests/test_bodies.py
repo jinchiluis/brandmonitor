@@ -11,7 +11,8 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.bodies import (NO_ARTICLE_TEXT, PAYWALL_DECLARED, BodyResult,
-                        _extract_pdf, fetch_body, run_body_fetch)
+                        _extract_pdf, fetch_body, normalize_page_published_at,
+                        run_body_fetch)
 from src.collect import run_collection, store_hints
 from src.db import get_watermark, migrate, session, start_run
 from vendor.newscrawler.crawler import ArticleHint
@@ -129,7 +130,12 @@ def test_unavailable_is_explicitly_retryable_and_never_overwrites_a_body(project
     run(project)
     before = [dict(r) for r in rows(project)]
     monkeypatch.setattr("src.bodies.fetch_body", lambda url: BodyResult("unavailable", error="paywall"))
-    assert run(project, refresh=True)["unavailable"] == 1
+    unavailable = run(project, refresh=True)
+    assert unavailable["unavailable"] == 1
+    with session(project[0]) as conn:
+        assert conn.execute(
+            "SELECT status FROM run WHERE id=?", (unavailable["run_id"],)
+        ).fetchone()[0] == "ok"
     assert run(project)["attempted"] == 0
     assert [dict(r) for r in rows(project)] == before
     monkeypatch.setattr("src.bodies.fetch_body", lambda url: success())
@@ -155,6 +161,46 @@ def test_backfill_respects_narrowed_sitemap_sections(project, monkeypatch):
     monkeypatch.setattr("src.bodies.fetch_body", lambda url: calls.append(url) or success())
     assert run(project)["attempted"] == 1
     assert calls == ["https://trade.test/events/story"]
+
+
+def test_backfill_respects_excluded_dirs_for_sitemaps_and_feeds(project, monkeypatch):
+    discover(project, url="https://trade.test/paid/sitemap-story")
+    discover(project, url="https://trade.test/paid/feed-story")
+    with session(project[0]) as conn:
+        conn.execute(
+            "UPDATE raw_item SET payload=json_set(payload, '$.discovered_via', 'rss') "
+            "WHERE external_id='https://trade.test/paid/feed-story'"
+        )
+    entries = json.loads(project[1].read_text())
+    entries[0]["excluded_dirs"] = ["paid"]
+    project[1].write_text(json.dumps(entries))
+    calls = []
+    monkeypatch.setattr("src.bodies.fetch_body", lambda url: calls.append(url) or success())
+    assert run(project)["attempted"] == 0
+    assert calls == []
+
+
+def test_backfill_respects_source_specific_url_fragments(project, monkeypatch):
+    discover(project, url="https://trade.test/news/acme-newsuebersicht-123.html")
+    entries = json.loads(project[1].read_text())
+    entries[0]["excluded_url_substrings"] = ["newsuebersicht"]
+    project[1].write_text(json.dumps(entries))
+    calls = []
+    monkeypatch.setattr("src.bodies.fetch_body", lambda url: calls.append(url) or success())
+    assert run(project)["attempted"] == 0
+    assert calls == []
+
+
+def test_backfill_respects_source_specific_title_fragments(project, monkeypatch):
+    discover(project, url="https://trade.test/news/old-article-123.html",
+             title="Acme: Newsübersicht")
+    entries = json.loads(project[1].read_text())
+    entries[0]["excluded_title_substrings"] = ["Newsübersicht"]
+    project[1].write_text(json.dumps(entries))
+    calls = []
+    monkeypatch.setattr("src.bodies.fetch_body", lambda url: calls.append(url) or success())
+    assert run(project)["attempted"] == 0
+    assert calls == []
 
 
 def test_batch_limit_and_old_failures_do_not_starve_pending_items(project, monkeypatch):
@@ -224,6 +270,46 @@ def test_real_extractor_preserves_article_and_german_characters(monkeypatch):
     assert "Navigation" not in result.text
 
 
+def test_an_article_wrapped_in_one_container_still_extracts(monkeypatch):
+    """A lone <article> holding a single wrapper div used to extract to nothing.
+
+    trafilatura's load_html rejects markup whose first 50 characters lack "html"
+    unless its root has 2+ children, so handing it a bare <article> fragment
+    returned None. The page was then retired as "no article text even after
+    rendering" - verkehrsrundschau.de lost 32 stories that way.
+    """
+    wrapped = ARTICLE.replace('<article>', '<article><div class="section">').replace(
+        '</article>', '</div></article>')
+    respond(monkeypatch, wrapped)
+    result = fetch_body("https://trade.test/article")
+    assert result.status == "ok"
+    assert all(p in result.text for p in PARAGRAPHS)
+
+
+def test_a_lone_article_hides_its_ids_from_the_extractor(monkeypatch):
+    """Inside a known boundary, an id must not be able to re-anchor the body.
+
+    trafilatura treats ids like #article-content-wrapper as "the body starts here".
+    verkehrsrundschau.de wraps only its standfirst in one and leaves the rest of the
+    story outside it, so the extractor kept the lead and dropped ~40% of every
+    article - a body that still passed the length gate, so nothing flagged it.
+    Asserted on the markup handed to the extractor because reproducing the scoring
+    that picks the anchor needs a full-size page, not a fixture.
+    """
+    import trafilatura
+    seen = []
+    real = trafilatura.extract
+    monkeypatch.setattr(trafilatura, "extract",
+                        lambda html, **kw: seen.append(html) or real(html, **kw))
+    anchored = ARTICLE.replace(
+        '<article>', '<article><div id="article-content-wrapper" class="lead">').replace(
+        '</article>', '</div></article>')
+    respond(monkeypatch, anchored)
+    assert fetch_body("https://trade.test/article").status == "ok"
+    assert 'id="article-content-wrapper"' not in seen[0]
+    assert 'class="lead"' in seen[0], "classes still carry junk signals; only ids re-anchor"
+
+
 def test_page_title_fills_a_missing_discovery_title(monkeypatch):
     respond(monkeypatch, ARTICLE.replace('<h1>Neue Regeln für Händler</h1>', ''))
     result = fetch_body("https://trade.test/article")
@@ -276,20 +362,58 @@ def test_quotation_in_slider_is_part_of_source_material(monkeypatch):
     assert quote in result.text
 
 
+def test_dense_tag_cloud_is_removed_without_removing_article_links(monkeypatch):
+    tags = " , ".join(
+        f'<span class="tagcloud-prio-{i % 3 + 1}"><a href="/tag/{i}">Tag {i}</a></span>'
+        for i in range(8)
+    )
+    unbounded = ARTICLE.replace("<article>", "<main>").replace("</article>", "</main>")
+    unbounded = unbounded.replace(
+        "</body>", f'<div class="global-taxonomy"><p>{tags}</p></div></body>')
+    respond(monkeypatch, unbounded)
+
+    result = fetch_body("https://trade.test/article")
+
+    assert result.status == "ok"
+    assert all(p in result.text for p in PARAGRAPHS)
+    assert "Tag 0" not in result.text
+
+
+def test_one_tagcloud_link_in_article_is_not_removed(monkeypatch):
+    linked = ARTICLE.replace(
+        "</article>",
+        '<p><span class="tagcloud-prio-1"><a href="/tag/kep">KEP-Dienste</a></span> '
+        "bleiben Gegenstand des Artikels.</p></article>")
+    respond(monkeypatch, linked)
+
+    result = fetch_body("https://trade.test/article")
+
+    assert result.status == "ok"
+    assert "KEP-Dienste" in result.text
+
+
 def test_source_tiers_are_explicit():
     """The tier split is a decision, not a default, so it is pinned here.
 
-    BVL moved to title_only on 2026-09-09: 0 brand hits across 620 URLs, and its
-    bodies are leadership essays rather than events. Under the balanced selector
-    policy only 3 of those 620 slugs are worth opening, so it is indexed by slug
-    and fetched on match instead of in bulk.
+    BVL moved to title_only on 2026-09-09: 0 brand hits across 620 URLs. DVZ moved
+    on 2026-09-11 when its missing news sitemap exposed a substantial daily stream
+    from a mixed/paywalled source. Both are fetched on match instead of in bulk.
     """
     root = Path(__file__).resolve().parent.parent
     news = json.loads((root / "input/germany_medias.json").read_text(encoding="utf-8"))
-    assert sum(e["content_mode"] == "full_text" for e in news) == 15
-    assert sum(e["content_mode"] == "title_only" for e in news) == 9
+    assert sum(e["content_mode"] == "full_text" for e in news) == 14
+    assert sum(e["content_mode"] == "title_only" for e in news) == 10
+    dvz = next(e for e in news if e["organization"] == "DVZ")
+    assert dvz["content_mode"] == "title_only"
+    assert dvz["extra_sitemap_urls"] == ["https://www.dvz.de/news-sitemap.xml"]
     regulatory = json.loads((root / "input/regulatory_sources.json").read_text(encoding="utf-8"))
     assert all(e["content_mode"] == "full_text" for e in regulatory)
+    presscorner = next(e for e in regulatory
+                       if e["organization"] == "EU Commission Press Corner")
+    assert presscorner["feed_urls"] == [
+        "https://ec.europa.eu/commission/presscorner/api/rss?search?language=en"
+        "&policyarea=23&pagesize=100",
+    ]
 
 
 def test_page_date_replaces_a_restamped_discovery_date(project, monkeypatch):
@@ -316,7 +440,7 @@ def test_discovery_date_is_kept_and_marked_when_the_page_states_none(project, mo
     run(project)
     latest = rows(project)[-1]
     assert latest["published_at"] == "2026-09-01T00:00:00+00:00"
-    assert json.loads(latest["payload"])["published_at_source"] == "discovery"
+    assert json.loads(latest["payload"])["published_at_source"] == "sitemap"
 
 
 def test_page_published_at_reads_nested_json_ld():
@@ -340,6 +464,170 @@ def test_page_published_at_falls_back_to_meta_and_then_none():
         '<meta property="article:published_time" content="2026-06-09T10:00:00+02:00">', "lxml")
     assert _page_published_at(meta) == "2026-06-09T10:00:00+02:00"
     assert _page_published_at(BeautifulSoup("<p>no date here</p>", "lxml")) is None
+
+
+@pytest.mark.parametrize(("raw", "expected"), [
+    ("Do, 09/10/2026 - 14:33", "2026-09-10T14:33:00+02:00"),
+    ("So, 11/16/2025 - 06:00", "2025-11-16T06:00:00+01:00"),
+    ("2026-09-10T13:51:00+0200", "2026-09-10T13:51:00+02:00"),
+    ("2019-12-09", "2019-12-09"),
+    ("Mo, 09/10/2026 - 14:33", None),  # 10 September 2026 was Thursday
+    ("not a date", None),
+])
+def test_page_dates_are_normalized_or_rejected(raw, expected):
+    assert normalize_page_published_at(raw) == expected
+
+
+def test_logistik_date_is_normalized_and_raw_value_is_retained(monkeypatch):
+    raw = "Do, 09/10/2026 - 14:33"
+    markup = ARTICLE.replace(
+        "<head>", '<head><script type="application/ld+json">'
+        f'{{"@type":"NewsArticle","datePublished":"{raw}"}}'
+        "</script>")
+    respond(monkeypatch, markup)
+
+    result = fetch_body("https://trade.test/article")
+
+    assert result.published_at == "2026-09-10T14:33:00+02:00"
+    assert result.published_at_raw == raw
+
+
+def test_invalid_page_date_keeps_discovery_date_and_raw_evidence(project, monkeypatch):
+    discover(project, date="2026-09-01T00:00:00+00:00")
+    monkeypatch.setattr(
+        "src.bodies.fetch_body",
+        lambda url: BodyResult("ok", text="The article body", title="Headline",
+                               published_at_raw="not a date"))
+
+    run(project)
+
+    latest = rows(project)[-1]
+    payload = json.loads(latest["payload"])
+    assert latest["published_at"] == "2026-09-01T00:00:00+00:00"
+    assert payload["published_at_source"] == "sitemap"
+    assert payload["published_at_raw"] == "not a date"
+
+
+def test_a_lone_time_element_dates_a_page_but_disagreeing_ones_do_not():
+    from bs4 import BeautifulSoup
+
+    from src.bodies import _page_published_at
+
+    # bevh: one <time itemprop="datePublished">, nothing in JSON-LD or meta.
+    lone = BeautifulSoup(
+        '<h2><time itemprop="datePublished" datetime="2026-09-09">09.09.2026</time></h2>', "lxml")
+    assert _page_published_at(lone) == "2026-09-09"
+    # DSLV: epoch seconds in the datetime attribute.
+    epoch = BeautifulSoup('<li><time datetime="1789036740">10. September 2026</time></li>', "lxml")
+    assert _page_published_at(epoch) == "2026-09-10T12:39:00+02:00"
+    # Verbraucherzentrale class action: filed, served, status. None is publication.
+    record = BeautifulSoup(
+        '<time datetime="2025-03-04T12:00:00Z">04. März 2025</time>'
+        '<time datetime="2025-04-16T12:00:00Z">16. April 2025</time>'
+        '<time datetime="2026-06-30T12:00:00Z">30. Juni 2026</time>', "lxml")
+    assert _page_published_at(record) is None
+    # Durations and empty attributes are not dates and do not spoil a lone one;
+    # two stamps on the same day agree.
+    noisy = BeautifulSoup(
+        '<time datetime="PT5M">5 min</time><time datetime="">heute</time>'
+        '<time datetime="2026-09-09T08:00:00+02:00">morgens</time>'
+        '<time datetime="2026-09-09T17:30:00+02:00">abends</time>', "lxml")
+    assert _page_published_at(noisy) == "2026-09-09T08:00:00+02:00"
+    # A structured statement always outranks <time>, even when it is older.
+    stated = BeautifulSoup(
+        '<script type="application/ld+json">'
+        '{"@type":"Article","datePublished":"2015-06-24T22:00:00Z","dateModified":"2026-09-10T09:21:29Z"}'
+        '</script><time datetime="2026-09-10">heute</time>', "lxml")
+    assert _page_published_at(stated) == "2015-06-24T22:00:00+00:00"
+
+
+def test_hint_dates_carry_their_provenance_into_the_stored_body(project, monkeypatch):
+    db, _ = project
+    with session(db) as conn:
+        run_id = start_run(conn, "news", "a", "b")
+        store_hints(conn, run_id, "trade.test", [
+            ArticleHint("https://trade.test/feed-story", datetime(2026, 9, 1), "F", "rss",
+                        date_source="feed"),
+            ArticleHint("https://trade.test/lastmod-story", datetime(2026, 9, 1), None,
+                        "sitemap", date_source="lastmod"),
+            ArticleHint("https://trade.test/undated", None, "U", "frontpage"),
+        ], full_text=True)
+    labels = {r["external_id"]: json.loads(r["payload"])["published_at_source"]
+              for r in rows(project)}
+    assert labels == {"https://trade.test/feed-story": "feed",
+                      "https://trade.test/lastmod-story": "lastmod",
+                      "https://trade.test/undated": None}
+    monkeypatch.setattr("src.bodies.fetch_body", lambda url: success())
+    run(project)
+    enriched = {r["external_id"]: json.loads(r["payload"]) for r in rows(project)
+                if json.loads(r["payload"]).get("body_text")}
+    assert {k: v["published_at_source"] for k, v in enriched.items()} == labels
+
+
+def test_legacy_discovery_label_is_read_as_its_method_without_a_new_version(project, monkeypatch):
+    discover(project)
+    monkeypatch.setattr("src.bodies.fetch_body", lambda url: success())
+    run(project)
+    with session(project[0]) as conn:
+        conn.execute("UPDATE raw_item SET payload=json_set(payload, "
+                     "'$.published_at_source', 'discovery') WHERE version=2")
+    # Nothing about the page changed, so relabelling alone must not version it.
+    assert run(project, refresh=True)["stored"] == 0
+    monkeypatch.setattr("src.bodies.fetch_body", lambda url: success("A changed body"))
+    assert run(project, refresh=True)["stored"] == 1
+    assert json.loads(rows(project)[-1]["payload"])["published_at_source"] == "sitemap"
+
+
+def test_failures_are_retired_after_the_attempt_cap_and_reopened_explicitly(project, monkeypatch):
+    monkeypatch.setattr("src.bodies.BODY_FETCH_MAX_ATTEMPTS", 3)
+    discover(project)
+    monkeypatch.setattr("src.bodies.fetch_body", lambda url: BodyResult("failed", error="timeout"))
+    assert [run(project)["failed"] for _ in range(2)] == [1, 1]
+    third = run(project)
+    assert (third["failed"], third["unavailable"]) == (0, 1)
+    with session(project[0]) as conn:
+        task = conn.execute("SELECT * FROM body_fetch").fetchone()
+    assert (task["status"], task["attempts"]) == ("unavailable", 3)
+    assert task["error"] == "gave up after 3 attempts: timeout"
+    assert run(project)["attempted"] == 0
+    monkeypatch.setattr("src.bodies.fetch_body", lambda url: success())
+    assert run(project, retry_unavailable=True)["ok"] == 1
+    with session(project[0]) as conn:
+        assert conn.execute("SELECT attempts FROM body_fetch").fetchone()[0] == 0
+
+
+def test_a_changed_hint_reopens_a_retired_url_with_a_fresh_budget(project, monkeypatch):
+    monkeypatch.setattr("src.bodies.BODY_FETCH_MAX_ATTEMPTS", 2)
+    discover(project)
+    monkeypatch.setattr("src.bodies.fetch_body", lambda url: BodyResult("failed", error="timeout"))
+    run(project)
+    run(project)
+    with session(project[0]) as conn:
+        assert conn.execute("SELECT status FROM body_fetch").fetchone()[0] == "unavailable"
+    discover(project, date="2026-09-09T00:00:00+00:00")
+    with session(project[0]) as conn:
+        task = conn.execute("SELECT status, attempts FROM body_fetch").fetchone()
+    assert (task["status"], task["attempts"]) == ("pending", 0)
+
+
+def test_corrected_page_date_versions_an_unchanged_body(project, monkeypatch):
+    discover(project)
+    monkeypatch.setattr(
+        "src.bodies.fetch_body",
+        lambda url: BodyResult("ok", text="The article body", title="Headline",
+                               published_at="2026-09-01T12:00:00+02:00",
+                               published_at_raw="Di, 09/01/2026 - 12:00"))
+    run(project)
+    monkeypatch.setattr(
+        "src.bodies.fetch_body",
+        lambda url: BodyResult("ok", text="The article body", title="Headline",
+                               published_at="2026-09-01T12:05:00+02:00",
+                               published_at_raw="Di, 09/01/2026 - 12:05"))
+
+    summary = run(project, refresh=True)
+
+    assert summary["stored"] == 1
+    assert rows(project)[-1]["published_at"] == "2026-09-01T12:05:00+02:00"
 
 
 # ── the fetch escalation ladder ───────────────────────────────────────────

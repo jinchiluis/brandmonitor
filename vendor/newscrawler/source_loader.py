@@ -198,6 +198,10 @@ class SourceLoader:
                     # Explicit feed URLs for publishers whose feed is neither
                     # advertised on the homepage nor at a conventional path.
                     "feed_urls": source.get("feed_urls", []),
+                    # Additive sitemap roots for publishers whose robots.txt is
+                    # incomplete. Unlike the fallback guesses, these are used
+                    # even when robots.txt declares another sitemap.
+                    "extra_sitemap_urls": source.get("extra_sitemap_urls", []),
                 }
 
         return None  # URL not in our sources

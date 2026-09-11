@@ -7,10 +7,14 @@ but the application pipeline is not built yet.
 ## Working documents
 
 - [mvp_plan.md](mvp_plan.md) is the implementation plan for the first customer cycle.
-- [todo.md](todo.md) is the live build state: what works, what is stubbed, and the
-  open questions each remaining piece needs answered.
+- [todo.md](todo.md) is the active backlog. Completed implementation history does
+  not belong there.
 - [docs/source_coverage.md](docs/source_coverage.md) records what each configured
   source actually yields, measured rather than assumed.
+- [docs/body_collection.md](docs/body_collection.md) is the body-fetch runbook and
+  storage/retry contract.
+- [docs/selection_and_assessment.md](docs/selection_and_assessment.md) records the
+  durable client-selection rationale and planned assessment funnel.
 - [new_product_plan.md](new_product_plan.md) and [plan_v2.md](plan_v2.md) are idea
   archives. They contain useful research and possible later features, but they are
   not build specifications.
@@ -45,9 +49,14 @@ rewritten by CMS migrations, template edits, and nightly regeneration jobs. It i
 **change signal only** — never store it as a publication date, sort on it, or show
 it to a customer.
 
-Take the publication date from the page itself: schema.org `datePublished` during
-body fetch, or `<news:publication_date>` from a news sitemap. Both survive a restamp;
-`lastmod` does not.
+Take the publication date from the page itself: schema.org `datePublished`,
+`article:published_time` or a lone `<time datetime>` during body fetch, or
+`<news:publication_date>` from a news sitemap. Both survive a restamp; `lastmod`
+does not. Every stored row records which field supplied its date in
+`published_at_source` (`page`, `feed`, `news_sitemap`, `lastmod`, `frontpage`, or
+null); a report may print the first three and must never print `lastmod`. Visible
+text is never parsed for a date: the first visible date on a page was a future
+seminar on one sampled source and a listing entry on another.
 
 Two sources proved this, and they fail in opposite directions, so a recency check
 built on `lastmod` would have caught neither:
@@ -79,12 +88,66 @@ paperwork, because they are rarely the same field.
 | Windows laptop | `c:\apps\brandmonitor` | primary database and scheduled pipeline |
 | Contabo VPS | `/var/www/brandmonitor` | heartbeat, backups, and manual disaster recovery |
 
+The laptop is reachable remotely without being on the same LAN or network:
+Tailscale SSH (`ssh -l "dell laptop" 100.80.13.120`) and Chrome Remote Desktop are
+both set up under the `stroymaker` Google account, so scheduled collection can keep
+running — and be checked on — while away from the machine.
+
 The VPS must not run scheduled collection or analysis. Two independently scheduled
 hosts would duplicate spend and create divergent databases.
+
+The VPS can also reach the laptop: its `contabo-server` key is in the laptop's
+`C:\ProgramData\ssh\administrators_authorized_keys` (added 2026-09-10), giving it
+full admin SSH — the same tier as the owner's own personal keys. This is for manual
+disaster recovery and checking on the laptop, not for running anything scheduled;
+the "VPS must not run scheduled collection" rule above still applies regardless of
+reachability.
 
 The live `.env` belongs on the laptop and is never committed. The VPS needs only the
 token required for its scheduled heartbeat/backup role. Activating disaster recovery
 and copying any additional credentials are manual operations.
+
+### Scheduled work
+
+**Nothing is scheduled yet, deliberately.** The project is still in the testing
+phase and `run_daily.bat` is run by hand. No Task Scheduler entry exists; do not add
+one as a side effect of other work.
+
+When the pipeline does go live on the primary laptop, register it under the
+logged-on user rather than SYSTEM — SYSTEM sees neither the `.venv` nor the user's
+OneDrive folder. The settings that matter are laptop-specific and are not the
+defaults: `StartWhenAvailable` catches up a run missed while the machine was off,
+and Task Scheduler otherwise refuses to start on battery and stops a running task
+when the machine unplugs.
+
+```powershell
+$a = New-ScheduledTaskAction -Execute "C:\apps\brandmonitor\run_daily.bat" `
+       -WorkingDirectory "C:\apps\brandmonitor"
+$s = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries `
+       -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 4) `
+       -MultipleInstances IgnoreNew
+Register-ScheduledTask -TaskName "brandmonitor-daily" -Action $a -Settings $s `
+  -Trigger (New-ScheduledTaskTrigger -Daily -At 6am)
+# check: Get-ScheduledTaskInfo -TaskName "brandmonitor-daily"  (LastTaskResult 0 = ok)
+```
+
+An `Interactive` principal runs only while that user is logged on, which is why the
+remote access above is part of the operating arrangement rather than a convenience.
+Running whether-logged-on-or-not requires storing a password.
+
+`run_daily.bat` ends with a `backup` stage, so the snapshot always carries the day's
+collection instead of yesterday's. Backups are `python run.py backup`: an online
+SQLite snapshot (safe while the pipeline holds the database open), VACUUMed, gzipped,
+rotated into daily/weekly/monthly tiers, then copied to
+`~/OneDrive/brandmonitor-backups` — a plain directory the OneDrive client already
+syncs, so there is no `rclone` remote and no OAuth token on this host. Retention and
+paths live in `config.json`. The backup command is useful on its own during testing;
+it does not need a scheduler.
+
+Restoring: stop whatever holds the database open, decompress the `.gz` over
+`data/brandmonitor.sqlite3`, and **delete the `-wal` and `-shm` sidecars** — the
+database runs in WAL mode, and stale sidecars beside a restored file get replayed on
+next open, silently undoing part of the restore.
 
 ## Planned repository shape
 
@@ -97,7 +160,7 @@ migrations/            ordered SQLite migrations
 src/                    application code and prompts
 vendor/newscrawler/    existing news discovery/fetch code
 vendor/govcrawler/     government fetch code, when added
-data/                  gitignored database, cache, logs, PDFs, and reports
+data/                  gitignored database, backups, cache, logs, PDFs, and reports
 tests/
 ```
 
@@ -133,6 +196,12 @@ publisher's feed is unconventional, and whenever a site advertises several feeds
 only one is wanted — autodiscovery takes what it finds first, which on
 bundesnetzagentur.de is energy auctions rather than press releases.
 
+`extra_sitemap_urls` is an optional additive list of sitemap roots. They are merged
+with anything declared in `robots.txt`; unlike guessed paths, they are used even
+when robots already declares a different sitemap. Use this for a verified omission,
+not to turn common-path guessing on for every source. DVZ needs it because its
+two-day Google News sitemap is not declared in `robots.txt`.
+
 `allowed_dirs` means something different to each method, which is the sharpest edge
 in this config format:
 
@@ -146,6 +215,10 @@ So an unset `allowed_dirs` means "keep everything" for sitemaps but "scrape the
 homepage and four English-language guesses (`news`, `world`, `business`,
 `technology`)" for frontpage — which on a German site finds almost nothing. Set it
 whenever `frontpage` is on.
+
+`excluded_dirs` is a final output rule: matching path prefixes are removed from
+sitemap, feed, and frontpage results, and are also ignored by body backfills and
+candidate selection. Use it for a section that should never enter the corpus.
 
 Crawl every new site once before writing its entry. Do not infer these values from
 how the site looks:

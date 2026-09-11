@@ -60,7 +60,7 @@ access does not.
 
 | Outlet | sitemap | feeds | Verdict |
 |---|---:|---:|---|
-| DVZ | 13 | — | sitemap, **suspiciously low** (paywalled) |
+| DVZ | 32 / latest 2d | — | undeclared Google News sitemap, title-only/mixed access |
 | VerkehrsRundschau | 232 | — | sitemap |
 | LOGISTIK HEUTE | 238 | 20 | sitemap + feeds |
 | Onlinehändler-News | 81 | — | sitemap |
@@ -68,11 +68,13 @@ access does not.
 | t3n | 0 | 30 | feeds only |
 | e-commerce Magazin | 22 | 120 | sitemap + feeds |
 
-DVZ returning 13 articles in 14 days is implausible for a logistics daily. Its
-sitemap is probably partial, and its top paths (`dvz-plus`, `abo`) suggest content
-sits behind the paywall. **Verify against DVZ's real publication volume before
-trusting coverage here** — this is the one source where we may be silently missing
-most of the output.
+DVZ's gap was confirmed and closed 2026-09-11. A configured crawl of the sitemap
+declared in `robots.txt` returned only 10 URLs in 14 days, while the separately
+published `news-sitemap.xml` contained 32 titled articles with real publication
+dates from September 9–10. `extra_sitemap_urls` now adds that verified root without
+probing guessed paths on every source. Because the recovered stream is mixed-access,
+DVZ is `title_only`: selected URLs will be fetched on match, never as a bulk paid
+archive crawl. Like every two-day Google News sitemap, it requires daily collection.
 
 ### 德国行业协会 (associations)
 
@@ -98,6 +100,15 @@ one of the most relevant sources on the entire list, so monitoring `bpex.de` wou
 have quietly substituted a random consultancy for the sector's main association.
 The config now uses `bpex-ev.de`, seeded on `presse`, `aktuelles`,
 `themen-und-positionen` and `kep-branche`.
+
+Frontpage discovery keeps every link a seed page carries, including the site
+navigation, so on 2026-09-11 38 of the 57 stored BPEX rows were about, legal,
+listing and pagination pages, and the selector passed 37 of the 57 on to the LLM
+stages. The entry now excludes those sections and `/aktuelles?`. What remains is
+the press releases under `/presse/meldung/`, the rare `/aktuelles/meldung/` item,
+the position pages under `/themen-und-positionen/` and the KEP figures page. The
+nine excluded `/aktuelles?file=` PDFs duplicated the nine HTML releases one to
+one; they were the only BPEX rows carrying a date.
 
 **Onlinehändler-News and Händlerbund are one organisation.** `onlinehaendler-news.de`
 redirects to `ohn.haendlerbund.de`. Both are kept, since the publication and the
@@ -253,13 +264,46 @@ Those 629 rows are not undated — they are *confidently wrongly dated*, which i
 worse failure. Treat BVL dates as unusable for any recency gate or customer-facing
 date.
 
-One gap worth noting for later: `published_at_source` is only written during body
-fetch, so **14,462 rows carry a date with no recorded provenance** — the 12,128
-`title_only` rows, which will never be body-fetched, plus `full_text` rows not yet
-fetched. Only 1,964 rows record `page` and 559 record `discovery`. The dates are
-right for the sources audited above, but nothing in the row says so. If a future
-source turns out to be restamped, no stored field distinguishes its dates from a
-trustworthy one.
+Provenance gap, closed 2026-09-11: `published_at_source` was only written during
+body fetch, and as `discovery` it did not say whether a feed `<pubDate>` or a
+sitemap `<lastmod>` supplied the date. Collection now labels every row at discovery
+(`feed`, `news_sitemap`, `lastmod`, `frontpage`, or null) and a body fetch
+overwrites it with `page`. Rows stored before that date keep `discovery` and are
+resolved from `discovered_via`; their sitemap flavour is unrecoverable and stays
+`sitemap`.
+
+### What the non-page-dated bodies actually were — measured 2026-09-11
+
+Of 2,672 stored bodies, 1,966 carried a page date. The rest split as follows,
+which is a different picture from "444 rows the extractor missed":
+
+| What the row is | Bodies | Where |
+|---|---:|---|
+| Feed-dated articles, date trustworthy | ~120 | EC press corner, vzbv, Bundeskartellamt, BEUC, EDPB, HDE |
+| Verbraucherzentrale case records | 202 | 183 Verbandsklagen, 18 Urteile |
+| Hub, event, member, download, evergreen pages | ~215 | bevh events 52 and Rechtshilfen 46, WBZ category archives 22, DVZ event and media-kit pages 22, BVDW person and download pages 19, VR section indexes 8, etailment section indexes 7, HB Termine 6 |
+| Real articles on a template the extractor missed | ~10 | bevh /detail 7, DSLV Meldung 3 |
+| LOGISTIK HEUTE editorial newsletters, no structured date | 4 | |
+| Undated | 113 | BNetzA 66, 36 of them since excluded by config; BPEX 47, mostly pagination and about-pages |
+
+The extractor share was about ten rows, fixed by reading a lone `<time datetime>`.
+The hub share was handled by narrowing eight source entries on their stored path
+histograms (bevh, DSLV, BVDW, Wettbewerbszentrale, DVZ, Händlerbund, ohn, LOGISTIK
+HEUTE - the notes on each entry record what was dropped) and, for what config
+cannot reach, by the selector gate described in `docs/selection_and_assessment.md`.
+
+Two things the narrowing check caught that a plain "page-dated means article"
+assumption would have missed: BVDW's WordPress stamps a JSON-LD `datePublished` on
+every page, events and about-pages included, so 89 of its 95 page-dated rows were
+not articles; and Händlerbund keeps real press releases under
+`/de/news/presse/pressemitteilungen`, so only the mention and study indexes beside
+them are excluded.
+
+Verbraucherzentrale case records have no publication date at all. Their
+`<time>` elements are the filing, service and status dates of the case, and the
+`/urteile` pages carry only a visible "Stand:" line. Their `lastmod` stays stored
+as a change signal, labelled as such, and is never printed as a publication date;
+assessment reads the dates in the body.
 
 When purging collected rows, remember that collection watermarks are independent.
 Deleting `raw_item` while leaving an eligible URL and its watermark unchanged can
@@ -297,6 +341,21 @@ Set against the news side, where `"J&T Express"` returned **zero** German media
 mentions in 30 days, this one free official source yields more actionable items per
 week than the entire 24-site news sweep will produce in direct brand mentions.
 
+**Implemented and live-validated 2026-09-11.** `python run.py collect-safety-gate`
+fetches the official report index, resumes from a report watermark, and stores every
+alert under `source_kind = "safety_gate"` with its native fields intact. Each report
+commits independently, so a stopped or partially failed historical run resumes
+without losing completed work. Explicit `--weeks`, `--end`, and `--max-reports`
+options support fixed-window validation and bounded backfills.
+
+The current 12-report window contained 639 alerts. The J&T pilot view selected 50
+that were both Germany-notified and Chinese-origin; 20 of those matched a customer
+marketplace in `onlineTrader` (AliExpress 11, Temu 5, Shein 4). Collection itself
+stores all alerts and remains customer-independent; the geography and marketplace
+rules are applied later by `select_client_alerts` using the versioned client profile.
+Re-fetching an identical alert writes nothing, while a changed official payload
+appends a version.
+
 ### The contract's six domains
 
 `德国及欧盟监管信息监测` names no sources. Its operative sentence is a list of
@@ -308,7 +367,7 @@ domain to sources verified working on 2026-09-09.
 | Domain | Source | Endpoint | Verified |
 |---|---|---|---|
 | 产品安全 product safety | **EU Safety Gate** | `/safety-gate-alerts/api/download/weeklyReport/list/xml/en` | 1,114 reports |
-| 平台监管 platform reg | **EU Commission presscorner** | `/commission/presscorner/api/rss?language=en` | 20 entries |
+| 平台监管 platform reg | **EU Commission presscorner** | `/commission/presscorner/api/rss?search?language=en&policyarea=23` | 100 entries |
 | 竞争 competition | **Bundeskartellamt** | `/DE/Service/RSS/_documents/rssnewsfeed.xml` | 30 entries |
 | 数据保护 data protection | **EDPB** | `edpb.europa.eu/rss.xml` | 10 entries |
 | 跨境包裹 customs | **EU Taxation & Customs** | `taxation-customs.ec.europa.eu/node/2/rss_en` | 30 entries |
@@ -326,6 +385,13 @@ than one, so the source yields **67 distinct items, not 77**. That pattern is ge
 — any source configured with several discovery methods finds some articles through
 each of them. Counts taken per method are therefore ceilings, and only a count taken
 after de-duplication is a source's real volume.
+
+The Presscorner endpoint was narrowed 2026-09-11 with the Commission's native
+`policyarea=23` filter (Digital economy and society). A live crawler read returned
+100 dated entries and included current DSA enforcement against TikTok and AliExpress.
+The policy area also contains AI, connectivity and DMA material, so downstream
+selection still decides client relevance; brand-only filtering at collection would
+lose sector-wide platform rules.
 
 ### How each is collected
 
@@ -358,6 +424,11 @@ against the live API on 2026-09-09, and **most of the previously recorded
 constraints were wrong** — they are corrected in place and flagged.
 Temu, Shein and AliExpress are designated VLOPs, so every content-moderation
 decision they take is filed here as a statement of reasons.
+
+The 30-day production backfill completed 2026-09-11: 120 platform-days covering
+2026-08-12 through 2026-09-10, with 30 days each for Temu, Shein, AliExpress and
+TikTok and no failed days. The primary watermark is `2026-09-10`. Amazon and Zalando
+remain disabled; every stored payload carries the required CC BY 4.0 attribution.
 
 **The API**, once you hold a token — base
 `https://transparency.dsa.ec.europa.eu/api/v1/research`, header
@@ -558,10 +629,9 @@ Three sources carry the news side: **etailment, Onlinehändler-News and LOGISTIK
 HEUTE produce 192 of the 211 brand hits found.** The eight mainstream outlets
 together produce 11. WELT and WirtschaftsWoche produced none in 120 days.
 
-Two measurement caveats. DVZ's number is unreliable — its sitemap traversal is
-affected by the fetch budget (see the pruning fix in PROVENANCE), so re-measure it.
-And feed-only sources (Tagesschau, t3n, HDE) can only ever show what is currently in
-the feed, so they cannot be backfilled and their totals are not comparable.
+One measurement caveat: feed-only sources (Tagesschau, t3n, HDE) can only ever show
+what is currently in the feed, so they cannot be backfilled and their totals are
+not comparable.
 
 ## Paywalls — measured 2026-09-09
 
@@ -625,10 +695,9 @@ main obstacle.
 ## Open decisions
 
 1. **Which regulatory sources are in scope.** The list above is a proposal, not a
-   commitment. Safety Gate, EU presscorner and Bundeskartellamt are ready to build
-   against today.
-2. **DVZ coverage** — confirm whether 13 articles per fortnight reflects reality.
-3. **Continue systematic source audits.** Several sources now have evidence-based
+   commitment. Safety Gate is built; EU presscorner and Bundeskartellamt are
+   collectable through the regulatory article pipeline today.
+2. **Continue systematic source audits.** Several sources now have evidence-based
    path restrictions. Apply new restrictions only after measuring what useful URLs
    they would remove, and record the decision in this report.
-4. **Süddeutsche** — recheck once a subscription exists.
+3. **Süddeutsche** — recheck once a subscription exists.

@@ -98,6 +98,23 @@ def set_watermark(conn: sqlite3.Connection, scope: str, position: str) -> None:
     )
 
 
+def advance_watermark(conn: sqlite3.Connection, scope: str, position: str) -> bool:
+    """Move a timestamp watermark forward atomically, never backward.
+
+    Collection sources run concurrently and two scheduler invocations can overlap.
+    Comparing with SQLite's Julian-day conversion keeps an older, late-finishing
+    run from replacing a newer checkpoint, including across timezone offsets.
+    """
+    cur = conn.execute(
+        "INSERT INTO watermark (scope, position, updated_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(scope) DO UPDATE SET position = excluded.position, "
+        "updated_at = excluded.updated_at "
+        "WHERE julianday(excluded.position) > julianday(watermark.position)",
+        (scope, position, utcnow()),
+    )
+    return cur.rowcount > 0
+
+
 # ── runs ──────────────────────────────────────────────────────────────────
 
 def start_run(conn: sqlite3.Connection, kind: str,

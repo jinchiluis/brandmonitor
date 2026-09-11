@@ -15,7 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.db import (  # noqa: E402
-    finish_run, get_watermark, migrate, record_source_result, session,
+    advance_watermark, finish_run, get_watermark, migrate, record_source_result, session,
     set_watermark, start_run,
 )
 
@@ -62,6 +62,15 @@ class TestWatermarks:
             set_watermark(conn, "analysis:jt-express:news", "2026-09-01T00:00:00")
             assert get_watermark(conn, "collection:news") != \
                    get_watermark(conn, "analysis:jt-express:news")
+
+    def test_advance_is_monotonic_across_timezone_offsets(self, db):
+        with session(db) as conn:
+            assert advance_watermark(
+                conn, "collection:news:x.de", "2026-10-25T02:15:00+01:00")
+            assert not advance_watermark(
+                conn, "collection:news:x.de", "2026-10-25T02:45:00+02:00")
+            assert get_watermark(conn, "collection:news:x.de") == \
+                   "2026-10-25T02:15:00+01:00"
 
 
 class TestRunAccounting:

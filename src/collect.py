@@ -15,7 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -25,14 +25,15 @@ import requests
 
 from src.config import CRAWLER_WORKERS, INPUT_DIR, NEWS_LOOKBACK_DAYS
 from src.db import (
-    finish_run, get_watermark, record_source_result, session, set_watermark,
+    advance_watermark, finish_run, get_watermark, record_source_result, session,
+    set_watermark,
     start_run, utcnow,
 )
 from src.logger import get_logger
 from vendor.newscrawler.crawler import (
     BERLIN_TZ, HTML_HEADERS, SITEMAP_HEADERS, ArticleHint,
     collect_from_feeds, collect_from_frontpage, collect_from_sitemaps,
-    in_range, normalize_url, pick_accessible_origin,
+    in_range, normalize_url, pick_accessible_origin, url_matches_dirs,
 )
 from vendor.newscrawler.source_loader import sources
 
@@ -40,6 +41,33 @@ logger = get_logger(__name__)
 
 DEFAULT_NEWS_SOURCES = INPUT_DIR / "germany_medias.json"
 DEFAULT_REGULATORY_SOURCES = INPUT_DIR / "regulatory_sources.json"
+
+
+def source_watermark_scope(kind: str, slug: str) -> str:
+    """Return the independent discovery checkpoint for one configured source."""
+    return f"collection:{kind}:{slug}"
+
+
+def _legacy_source_start(conn: sqlite3.Connection, kind: str, slug: str,
+                         global_mark: Optional[str]) -> Optional[str]:
+    """Find a safe checkpoint for a source created before per-source watermarks.
+
+    A source present in historical runs inherits the old global checkpoint. A
+    genuinely new source must not inherit it, because doing so would skip its
+    initial lookback. Databases that never completed a global run fall back to the
+    earliest window in which that source was attempted.
+    """
+    rows = conn.execute(
+        "SELECT r.window_start FROM run_source rs JOIN run r ON r.id=rs.run_id "
+        "WHERE r.kind=? AND rs.source_slug=? AND r.window_start IS NOT NULL",
+        (kind, slug),
+    ).fetchall()
+    if not rows:
+        return None
+    if global_mark:
+        return global_mark
+    return min(rows, key=lambda row: datetime.fromisoformat(row["window_start"]))[
+        "window_start"]
 
 # Sections whose shallow pages list other articles rather than being one: tag,
 # author and topic indexes. They carry no article, and they change whenever
@@ -63,6 +91,33 @@ ASSET_MARKERS = frozenset({"wp-content", "wp-json", "wp-admin", "wp-includes"})
 # Characters RFC 3986 does not allow unescaped in a path. A URL carrying one did
 # not come from a working template - see is_malformed.
 UNSAFE_PATH_CHARS = ('"', "<", ">", "{", "}", "|", "\\", "^", "`", "$(")
+
+
+def url_is_excluded(url: str, entry: Dict[str, Any], title: str | None = None) -> bool:
+    """Return whether a source excludes this URL from every pipeline stage.
+
+    Prefixes handle whole sections such as ``/fachmagazin``.  Some publishers put
+    rolling indexes beside real articles under the same section, so an optional
+    literal fragment list handles those without teaching generic furniture
+    detection about one site's naming convention.
+
+    Fragments see the query string as well as the path. BPEX serves its
+    pagination (``/aktuelles?page_a12=2``) and PDF copies of its press releases
+    (``/aktuelles?file=...``) on the bare section path, beside real items at
+    ``/aktuelles/meldung/<slug>``; only the ``?`` tells them apart.
+    """
+    excluded = entry.get("excluded_dirs") or []
+    if excluded and url_matches_dirs(url, excluded):
+        return True
+    fragments = entry.get("excluded_url_substrings") or []
+    parts = urlparse(url)
+    target = unquote(parts.path + (f"?{parts.query}" if parts.query else "")).casefold()
+    if any(str(fragment).casefold() in target for fragment in fragments):
+        return True
+    title_fragments = entry.get("excluded_title_substrings") or []
+    folded_title = (title or "").casefold()
+    return any(str(fragment).casefold() in folded_title
+               for fragment in title_fragments)
 
 
 def is_furniture(url: str) -> bool:
@@ -195,7 +250,13 @@ def collect_source(entry: Dict[str, Any], start: datetime,
         except Exception as exc:
             errors.append(f"frontpage: {type(exc).__name__}: {exc}")
 
-    return _dedupe_hints(hints), "; ".join(errors) if errors else None
+    unique = _dedupe_hints(hints)
+    kept = [hint for hint in unique
+            if not url_is_excluded(hint.url, entry, hint.title)]
+    if len(kept) < len(unique):
+        logger.info("[collect] %s: dropped %d URL(s) by source exclusion policy",
+                    slug_for(entry), len(unique) - len(kept))
+    return kept, "; ".join(errors) if errors else None
 
 
 def store_hints(conn: sqlite3.Connection, run_id: int, slug: str,
@@ -230,6 +291,9 @@ def store_hints(conn: sqlite3.Connection, run_id: int, slug: str,
             "title": h.title,
             "published_at": published,
             "discovered_via": h.source,
+            # Recorded at discovery so title_only rows carry it too. A body fetch
+            # overwrites it with "page" when the article states its own date.
+            "published_at_source": h.date_source if published else None,
         }
 
         # Every stored version is compared, not just the newest. Two
@@ -286,84 +350,103 @@ def run_collection(sources_path: Optional[Path] = None, *, days: Optional[float]
     modes = {slug_for(entry): content_mode(entry) for entry in entries}
 
     end = datetime.now(tz=BERLIN_TZ)
+    end_iso = end.isoformat()
     scope = f"collection:{kind}"
+    plans = []
 
+    # Give every source its own durable starting position. Initial positions are
+    # written before network work so a source that fails on its first run retries
+    # the exact same window rather than losing a little history every day.
     with session(db_path) as conn:
-        mark = get_watermark(conn, scope)
-    if days is not None:
-        start = end - timedelta(days=days)
-    elif mark:
-        start = datetime.fromisoformat(mark)
-    else:
-        start = end - timedelta(days=NEWS_LOOKBACK_DAYS)
+        global_mark = get_watermark(conn, scope)
+        for entry in entries:
+            slug = slug_for(entry)
+            source_scope = source_watermark_scope(kind, slug)
+            mark = get_watermark(conn, source_scope)
+            if mark is None:
+                mark = _legacy_source_start(conn, kind, slug, global_mark)
+                if mark is None:
+                    mark = (end - timedelta(days=NEWS_LOOKBACK_DAYS)).isoformat()
+                set_watermark(conn, source_scope, mark)
 
-    # An explicit --days window that starts after the watermark leaves a hole.
-    # Advancing the watermark over it would make that hole permanent and silent,
-    # so such a run collects normally but does not move the mark.
-    leaves_gap = bool(mark) and start > datetime.fromisoformat(mark)
-    if leaves_gap:
-        logger.warning(
-            "[collect] window starts %s but watermark is %s - %s of history would be "
-            "skipped, so the watermark will not advance",
-            start.isoformat(), mark, start - datetime.fromisoformat(mark))
+            checkpoint = datetime.fromisoformat(mark)
+            start = end - timedelta(days=days) if days is not None else checkpoint
+            # An explicit --days window beginning after this source's checkpoint
+            # leaves a hole. Crawl it, but do not claim the missing interval.
+            leaves_gap = start > checkpoint
+            if leaves_gap:
+                logger.warning(
+                    "[collect] %s window starts %s but watermark is %s - %s of "
+                    "history would be skipped, so its watermark will not advance",
+                    slug, start.isoformat(), mark, start - checkpoint)
+            plans.append({"entry": entry, "slug": slug, "start": start,
+                          "scope": source_scope, "leaves_gap": leaves_gap})
 
-    logger.info("[collect] %s: %d sources, %s -> %s",
-                kind, len(entries), start.isoformat(), end.isoformat())
+        earliest = min(plan["start"] for plan in plans)
+        run_id = start_run(conn, kind, earliest.isoformat(), end_iso)
 
-    def work(entry):
-        slug = slug_for(entry)
+    logger.info("[collect] %s: %d sources, earliest window %s -> %s",
+                kind, len(entries), earliest.isoformat(), end_iso)
+
+    def work(plan):
+        entry = plan["entry"]
         try:
-            hints, error = collect_source(entry, start, end, max_per_source)
+            hints, error = collect_source(entry, plan["start"], end, max_per_source)
         except Exception as exc:  # noqa: BLE001 - one source must not end the run
-            return entry, slug, [], f"{type(exc).__name__}: {exc}"
-        return entry, slug, hints, error
-
-    results = []
-    with ThreadPoolExecutor(max_workers=workers or CRAWLER_WORKERS) as ex:
-        for r in ex.map(work, entries):
-            results.append(r)
+            hints, error = [], f"{type(exc).__name__}: {exc}"
+        return plan, hints, error
 
     summary = {"kind": kind, "sources": len(entries), "ok": 0, "zero": 0,
-               "failed": 0, "found": 0, "stored": 0, "start": start.isoformat(),
-               "end": end.isoformat(), "per_source": []}
+               "failed": 0, "found": 0, "stored": 0,
+               "start": earliest.isoformat(), "end": end_iso,
+               "per_source": [], "run_id": run_id}
 
+    # Commit each completed source immediately. Like the body queue, a stopped
+    # process keeps completed work and the unfinished sources retain their marks.
+    with ThreadPoolExecutor(max_workers=workers or CRAWLER_WORKERS) as ex:
+        futures = [ex.submit(work, plan) for plan in plans]
+        for future in as_completed(futures):
+            plan, hints, error = future.result()
+            entry, slug = plan["entry"], plan["slug"]
+            with session(db_path) as conn:
+                # Store whatever was collected even when a method failed. Discarding
+                # a successful sitemap sweep because its feed timed out loses data.
+                stored = store_hints(conn, run_id, slug, hints, source_kind=kind,
+                                     full_text=modes[slug] == "full_text")
+                if error:
+                    status = "failed"
+                    summary["failed"] += 1
+                    logger.warning("[collect] %s FAILED (%d hints kept): %s",
+                                   slug, len(hints), error)
+                else:
+                    status = "ok" if hints else "zero"
+                    summary["ok" if hints else "zero"] += 1
+                    if not plan["leaves_gap"]:
+                        advance_watermark(conn, plan["scope"], end_iso)
+                summary["found"] += len(hints)
+                summary["stored"] += stored
+                summary["per_source"].append(
+                    {"slug": slug, "organization": entry.get("organization"),
+                     "status": status, "found": len(hints), "stored": stored,
+                     "start": plan["start"].isoformat(),
+                     "watermark_advanced": not error and not plan["leaves_gap"],
+                     "error": error})
+                record_source_result(conn, run_id, slug, status,
+                                     items_found=len(hints), items_stored=stored,
+                                     error=error)
+
+    gaps = sum(1 for plan in plans if plan["leaves_gap"])
     with session(db_path) as conn:
-        run_id = start_run(conn, kind, start.isoformat(), end.isoformat())
-        for entry, slug, hints, error in results:
-            # Store whatever was collected even when a method failed. Discarding a
-            # source's successful sitemap sweep because its feed timed out loses
-            # real data and is invisible afterwards.
-            stored = store_hints(conn, run_id, slug, hints, source_kind=kind,
-                                 full_text=modes[slug] == "full_text")
-            if error:
-                status = "failed"
-                summary["failed"] += 1
-                logger.warning("[collect] %s FAILED (%d hints kept): %s",
-                               slug, len(hints), error)
-            else:
-                status = "ok" if hints else "zero"
-                summary["ok" if hints else "zero"] += 1
-            summary["found"] += len(hints)
-            summary["stored"] += stored
-            summary["per_source"].append(
-                {"slug": slug, "organization": entry.get("organization"),
-                 "status": status, "found": len(hints), "stored": stored,
-                 "error": error})
-            record_source_result(conn, run_id, slug, status,
-                                 items_found=len(hints), items_stored=stored,
-                                 error=error)
-
-        # Only advance the watermark when nothing failed and the window left no
-        # hole: a partial window that looks complete is how gaps become permanent.
-        if summary["failed"] == 0 and not leaves_gap:
-            set_watermark(conn, scope, end.isoformat())
+        # Keep the former aggregate checkpoint for status reporting, old code, and
+        # migration of sources that existed before per-source checkpoints.
+        if summary["failed"] == 0 and gaps == 0:
+            advance_watermark(conn, scope, end_iso)
         elif summary["failed"]:
-            logger.warning("[collect] %d source(s) failed - watermark not advanced",
-                           summary["failed"])
-        summary["watermark_advanced"] = summary["failed"] == 0 and not leaves_gap
+            logger.warning("[collect] %d source(s) failed - aggregate watermark "
+                           "not advanced", summary["failed"])
+        summary["watermark_advanced"] = summary["failed"] == 0 and gaps == 0
         finish_run(conn, run_id, "ok" if summary["failed"] == 0 else "failed",
                    note=f"{summary['stored']} new items")
-        summary["run_id"] = run_id
 
     # Discovery is committed before any page fetch. The durable body queue is
     # independent of the discovery watermark, including for feed items that vanish.

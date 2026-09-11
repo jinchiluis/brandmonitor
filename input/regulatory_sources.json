@@ -28,9 +28,9 @@
     "frontpage": false,
     "allowed_dirs": [],
     "feed_urls": [
-      "https://ec.europa.eu/commission/presscorner/api/rss?language=en&pagesize=50"
+      "https://ec.europa.eu/commission/presscorner/api/rss?search?language=en&policyarea=23&pagesize=100"
     ],
-    "notes": "DSA enforcement announcements; Temu and Shein are designated VLOPs. High volume, all Commission topics - needs topic filtering",
+    "notes": "DSA and platform enforcement announcements; Temu and Shein are designated VLOPs. The official RSS policyarea=23 filter limits collection to Digital economy and society; deterministic/client assessment still removes unrelated digital-policy items.",
     "content_mode": "full_text"
   },
   {

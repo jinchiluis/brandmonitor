@@ -1,7 +1,7 @@
 {
   "slug": "jt-express",
   "name": "J&T Express Germany",
-  "profile_version": "2026-09-09",
+  "profile_version": "2026-09-11.3",
   "body_min_keywords": 2,
   "notes": [
     "What to look for, not how to report it. Delivery language and cadence are",
@@ -10,49 +10,156 @@
     "something; a body is long, so one keyword there is usually an accident. Brands",
     "and topics always stand alone. Measured on 342 bodies: 156 selections -> 77,",
     "keeping every brand and topic find.",
+    "scope: 'body' on a keyword means it never selects on a title or slug, and in a",
+    "body it only completes a pair with a regular keyword; two body-only words",
+    "together select nothing. Policy vocabulary from the customer's row 3 (Logistik",
+    "AND Gesetz) is held that way. The sector side is parcel-specific on purpose:",
+    "'Logistik' is ambient in trade press and turned the AND into 'any policy word'.",
+    "role on a brand is metadata for the prompts and the report (own, competitor,",
+    "customer); matching ignores it. It keeps the customer's monitoring categories",
+    "traceable to this profile version.",
     "Self-contained on purpose: a shared topic file would let an edit change this",
     "client's assessments without changing profile_version, which would break the",
     "traceability rule in CLAUDE.md. Duplicating ~40 lines per client is cheaper",
     "than resolving and hashing a composed profile.",
     "A term ending in * allows a suffix, which German morphology needs:",
     "'zollfreigrenz*' matches Zollfreigrenze and Zollfreigrenzen.",
-    "Use 'pattern' only where terms cannot express it - see J&T and 极兔."
+    "Use 'pattern' only where terms cannot express it - see J&T, 极兔 and UPS.",
+    "The customer's incident and compliance vocabulary (rows 4 and 5 of their list)",
+    "is deliberately absent: it classifies, it does not select. See alert_taxonomy.json."
   ],
+  "prompt": {
+    "why": "What the LLM stages are told about this client; src/prompts/ holds the wording shared by every client. Brand names and roles come from 'brands', so they are not repeated here. false_matches is measured, not imagined: each line is a class of noise the keyword rules above actually selected on the title-only tier (2026-09-11, 247 candidates). It is this client's list because the noise follows this client's keywords - 'China' is noise here only because it is a J&T keyword. The body gate adds body_false_matches, the two classes its untuned prompt kept in the first hand-labelled body sample, and the regulatory_ lists, which its regulatory prompt reads instead of 'relevant': legal areas, because regulatory relevance is topical. Measured 2026-09-11 on 90 labels (clients/jt-express/labels/) and one pass over every regulatory body; see docs/selection_and_assessment.md, 'Body gate'.",
+    "about": "a parcel carrier that delivers for Chinese e-commerce platforms",
+    "relevant": [
+      "parcel delivery, couriers, the parcel/KEP market, postal law",
+      "customs, duties, product-safety or platform rules for e-commerce imports into the EU"
+    ],
+    "false_matches": [
+      "China in politics, the economy, the military, disasters, cars, sport or culture",
+      "trade disputes that don't involve the EU or e-commerce (e.g. USA vs. Canada)",
+      "routine share-price notes (\"DHL Group-Aktie: Es geht bergab\")",
+      "local news where a parcel driver is incidental (a theft, an accident)",
+      "general supply-chain management, software or career advice",
+      "another sense of the word: Hermès the fashion house, \"Plattform\" or \"Marktplatz\" outside online retail"
+    ],
+    "body_false_matches": [
+      "evergreen legal advice or explainers for merchants (returns, withdrawal, contracts, data protection) with no new rule, ruling or case",
+      "a shipper's own warehouse, fulfilment centre or intralogistics project"
+    ],
+    "regulatory_relevant": [
+      "postal and parcel law, the parcel/KEP market, and Bundesnetzagentur decisions on postal services",
+      "labour and transport rules specific to parcel delivery (subcontracting, drivers, delivery vehicles)",
+      "customs, duties, import VAT and handling fees on low-value e-commerce imports; EU customs reform",
+      "product safety and market surveillance of goods sold online or imported from outside the EU",
+      "obligations and enforcement for online marketplaces, e.g. DSA trader traceability or consumer-protection action against Temu, Shein, AliExpress, TikTok Shop or other marketplaces",
+      "packaging, returns and waste rules that change how e-commerce goods are shipped",
+      "competition decisions on parcel carriers or online marketplaces",
+      "trade measures on low-value consumer goods imported from China"
+    ],
+    "regulatory_false_matches": [
+      "other sectors (energy, telecoms, rail, finance, insurance, food, health, fisheries, defence, heavy industry), even from an authority that also regulates post",
+      "consumer cases against companies outside online retail and parcel delivery"
+    ]
+  },
   "brands": [
     {
       "name": "J&T",
       "pattern": "(?<!\\w)(?:j\\s*&\\s*t(?:\\s+(?:express|international))?|j\\s+t\\s+(?:express|international))(?!\\w)",
-      "why": "Ampersand and spacing variants; slugs decode %26 to & and hyphens to spaces."
+      "why": "Ampersand and spacing variants; slugs decode %26 to & and hyphens to spaces.",
+      "role": "own"
     },
     {
       "name": "极兔",
       "pattern": "极兔",
       "boundaries": false,
-      "why": "CJK has no word boundaries; \\b would never match."
+      "why": "CJK has no word boundaries; \\b would never match.",
+      "role": "own"
     },
     {
       "name": "Temu",
       "terms": [
         "temu"
-      ]
+      ],
+      "role": "customer"
     },
     {
       "name": "Shein",
       "terms": [
         "shein"
-      ]
+      ],
+      "role": "customer"
     },
     {
       "name": "AliExpress",
       "terms": [
         "aliexpress",
         "ali express"
-      ]
+      ],
+      "role": "customer"
     },
     {
       "name": "TikTok Shop",
       "terms": [
         "tiktok shop"
+      ],
+      "role": "customer"
+    },
+    {
+      "name": "DHL",
+      "role": "competitor",
+      "terms": [
+        "dhl"
+      ]
+    },
+    {
+      "name": "Hermes",
+      "role": "competitor",
+      "terms": [
+        "hermes"
+      ],
+      "why": "Also the fashion house and the god; the cheap title stage sorts those out."
+    },
+    {
+      "name": "UPS",
+      "role": "competitor",
+      "pattern": "(?<!\\w)(?<!start[\\s-])(?<!scale[\\s-])(?<!grown[\\s-])(?<!set[\\s-])(?<!back[\\s-])(?<!pick[\\s-])(?<!pop[\\s-])(?<!push[\\s-])(?<!sign[\\s-])(?<!follow[\\s-])(?<!meet[\\s-])(?<!mock[\\s-])(?<!line[\\s-])(?<!warm[\\s-])ups(?!\\w)",
+      "why": "Case-insensitive 'ups' matched only start-ups (13 of 13 in the corpus); slugs are lowercase so case cannot help. Excludes the common '-ups' compounds instead. Scale-ups, Grown-ups, Back-ups and Set-ups added 2026-09-11 from a scan of every stored title, slug and body: those four were the only non-carrier hits left, and Set-ups had put a warehouse opening into the candidates as a UPS brand find."
+    },
+    {
+      "name": "FedEx",
+      "role": "competitor",
+      "terms": [
+        "fedex",
+        "fed ex"
+      ]
+    },
+    {
+      "name": "DPD",
+      "role": "competitor",
+      "terms": [
+        "dpd"
+      ]
+    },
+    {
+      "name": "GLS",
+      "role": "competitor",
+      "terms": [
+        "gls"
+      ]
+    },
+    {
+      "name": "GoFo",
+      "role": "competitor",
+      "terms": [
+        "gofo"
+      ]
+    },
+    {
+      "name": "iMile",
+      "role": "competitor",
+      "terms": [
+        "imile"
       ]
     }
   ],
@@ -285,6 +392,44 @@
       "terms": [
         "lieferkett*",
         "supply chain*"
+      ]
+    },
+    {
+      "name": "parcel sector",
+      "terms": [
+        "zusteller*",
+        "paketdienst*",
+        "kurier*"
+      ],
+      "why": "Customer row 3, sector side, narrowed to parcel delivery. 'logistik*' and 'spedition*' are out: on a trade-press body 'Logistik' is always present, so any second word selected - 484 LOGISTIK HEUTE items about volcanoes, Bundeswehr depots and Daimler labor law in one run. Single-hit on a title is intended: the cheap LLM reads it."
+    },
+    {
+      "name": "regulatory instrument",
+      "scope": "body",
+      "terms": [
+        "richtlinie*",
+        "regelung*",
+        "vorschrift*",
+        "verordnung*"
+      ],
+      "why": "Customer row 3, policy side. Body-only: never selects alone or with another body-only word, only next to a regular keyword such as parcel, KEP, customs or online commerce. That is the customer's 'Logistik AND Gesetz' with the sector side held to what a parcel carrier sells."
+    },
+    {
+      "name": "enforcement",
+      "scope": "body",
+      "terms": [
+        "bußgeld*",
+        "behörde*",
+        "urteil*"
+      ]
+    },
+    {
+      "name": "labor",
+      "scope": "body",
+      "terms": [
+        "gewerkschaft*",
+        "mindestlohn*",
+        "tarif*"
       ]
     }
   ]

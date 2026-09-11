@@ -108,10 +108,29 @@ yielding 13 articles per fortnight instead of 73, roughly 1 in 6 of its real
 output, with no error anywhere to show for it. Traversal cost stays bounded by
 `max_sitemap_fetches` (100) and the existing newest-first ordering.
 
-Still open for dvz.de: its freshest content sits in `news-sitemap.xml`, which
-robots.txt does not declare, and `discover_sitemaps` only tries guessed paths when
-robots declares none. Merging guesses with declared sitemaps would find it at the
-cost of extra requests on every site.
+**2026-09-11 — configured additive sitemap roots.** `extra_sitemap_urls` supplements
+the roots declared in `robots.txt` without enabling common-path probes for every
+source. DVZ needs it: its declared sitemap yielded 10 URLs in a live 14-day probe,
+while the undeclared `news-sitemap.xml` held 32 titled, publication-dated articles
+from the latest two days. Top-level news roots are traversed before general roots so
+an archive index cannot delay them or spend the fetch budget first. DVZ is now
+`title_only`, so this restored discovery does not become a bulk paid-body crawl;
+selected articles will use fetch-on-match.
+
+**2026-09-11 — a hint records which field dated it.** `ArticleHint` gained
+`date_source` (`news_sitemap`, `lastmod`, `feed`, `frontpage`, or None), defaulted
+so existing constructions are unchanged. `fetch_sitemap_urls` returns a fourth
+tuple element saying whether `<news:publication_date>` or `<lastmod>` supplied
+the entry date; an entry that inherits the containing sitemap's `lastmod` or
+filename month is labelled `lastmod`. `collect_from_feeds`, the frontpage
+collector and the Google-feeds collector set the label at their constructors.
+
+Needed because `pub_dt or lastmod` had collapsed two dates of opposite
+trustworthiness into one field: `<news:publication_date>` is when the article
+appeared, `<lastmod>` is when the URL changed and is restamped in bulk (BVL,
+etailment). Nothing downstream could tell them apart, so a report could not know
+which stored dates it may print. `src/collect.py` stores the label as
+`published_at_source` on every row.
 
 **2026-09-09 — traverse news sitemaps first.** `collect_from_sitemaps` sorted
 nested sitemaps newest-first; it now sorts news sitemaps ahead of everything else

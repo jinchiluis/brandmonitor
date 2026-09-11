@@ -6,12 +6,39 @@
     "news": 30
   },
   "body_fetch": {
-    "_comment": "Full-text sources produce ~157 items/day, so a limit of 100 could never keep up. 1000 is a safety rail, not a throttle. delay_seconds is enforced per host, not globally: tasks are interleaved across sources, so consecutive requests normally hit different publishers anyway.",
+    "_comment": "Full-text sources produce ~157 items/day, so a limit of 100 could never keep up. 1000 is a safety rail, not a throttle. delay_seconds is enforced per host, not globally: tasks are interleaved across sources, so consecutive requests normally hit different publishers anyway. max_attempts counts consecutive retryable failures (a success resets it); after that many the URL is retired as unavailable and only --retry-unavailable or a changed discovery hint reopens it.",
     "limit": 1000,
+    "max_attempts": 5,
     "timeout_seconds": 20,
     "delay_seconds": 1.0,
     "browser_escalation": true,
     "pdf_max_pages": 20
+  },
+  "title_gate": {
+    "_comment": "Cheap LLM check between the keyword selector and a body fetch, for title-only sources. Chosen 2026-09-11 on 247 hand-labelled candidates, three shuffled runs per model: gpt-5.4-mini at reasoning 'low' missed 1 of 69 relevant judgements and kept 2 extras, about $0.07/month at 25 items/day. With reasoning 'none' it missed 14; larger models without reasoning cost more and missed more. A dated snapshot, so the model cannot change underneath the gate. log_keep_days prunes the per-day decision logs in data/title_gate/.",
+    "model": "gpt-5.4-mini-2026-03-17",
+    "reasoning_effort": "low",
+    "batch_size": 10,
+    "timeout_seconds": 60,
+    "log_keep_days": 30
+  },
+  "body_gate": {
+    "_comment": "Cheap LLM relevance check between a selected body and the full assessment, for news and regulatory bodies. Same dated snapshot and reasoning as the title gate; measured 2026-09-11 on 90 hand-labelled bodies with no relevant item dropped (docs/selection_and_assessment.md). One body per call. body_chars caps the text sent - the p90 body is about 7,700 characters. workers are parallel calls. limit is a safety rail per kind and run, newest first, so a backlog drains over a few runs instead of in one surprise; a normal day is about 25 news and 5 regulatory bodies.",
+    "model": "gpt-5.4-mini-2026-03-17",
+    "reasoning_effort": "low",
+    "timeout_seconds": 60,
+    "workers": 8,
+    "body_chars": 12000,
+    "limit": 300
+  },
+  "backup": {
+    "_comment": "Daily-only while the project is in testing: the point right now is 'roll back to before yesterday's purge/repair went wrong', not 'reconstruct the corpus from six months ago' - there is no six-months-ago yet. 14 days covers the realistic detection lag already seen on this project (BVL and etailment date issues surfaced days after collection, not same-day). Add keep_weekly/keep_monthly back once real weekly reports are going out and past-state reconstruction actually matters - it's a config change, not a code change. offbox_dir is a plain directory the OneDrive client already syncs - no rclone remote, no OAuth token. Set it to null to keep backups on this box only. warn_total_mb warns and never deletes: retention already bounds the normal case, so crossing it means an assumption broke.",
+    "dir": "data/backups",
+    "offbox_dir": "~/OneDrive/brandmonitor-backups",
+    "keep_daily": 14,
+    "keep_weekly": 0,
+    "keep_monthly": 0,
+    "warn_total_mb": 1024
   },
   "verbose": {
     "crawler": false

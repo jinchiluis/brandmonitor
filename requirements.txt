@@ -26,3 +26,6 @@ playwright>=1.40.0
 
 # Secrets
 python-dotenv>=1.0.0
+
+# Title gate (src/title_gate.py): Responses API with reasoning effort
+openai>=3.13.0

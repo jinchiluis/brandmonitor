@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Safety-Gate xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <report_language>en</report_language>
+  <report_date>11/09/2026</report_date>
+  <report_year>2026</report_year>
+  <report_week>36</report_week>
+  <report_addendum xsi:nil="true"/>
+  <notifications xsi:type="webReportXmlWeeklyReportDetailMotorVehicleContentDto">
+    <order>1</order>
+    <caseNumber>SR/02420/26</caseNumber>
+    <reference>https://ec.europa.eu/safety-gate-alerts/screen/webReport/alertDetail/10099608</reference>
+    <category>Jewellery</category>
+    <product>Necklace</product>
+    <brand xsi:nil="true"/>
+    <name xsi:nil="true"/>
+    <type_numberOfModel xsi:nil="true"/>
+    <batchNumber xsi:nil="true"/>
+    <barcode>20241210</barcode>
+    <riskType>Chemical</riskType>
+    <danger>The rate of nickel release is too high.</danger>
+    <measures>Removal of this product listing by the online marketplace</measures>
+    <URLrecall xsi:nil="true"/>
+    <description>Necklace with a green flower pendant.</description>
+    <notifyingCountry>Germany</notifyingCountry>
+    <countryOfOrigin>People's Republic of China</countryOfOrigin>
+    <type>Consumer</type>
+    <level>Serious risk</level>
+    <pictures>
+      <picture>https://ec.europa.eu/image/1</picture>
+      <picture>https://ec.europa.eu/image/2</picture>
+    </pictures>
+    <onlineTrader>Other(Shein (sj23050389953853544)) / </onlineTrader>
+    <companyRecallCode xsi:nil="true"/>
+    <productionDates xsi:nil="true"/>
+  </notifications>
+  <notifications xsi:type="webReportXmlWeeklyReportDetailContentDto">
+    <order>2</order>
+    <caseNumber>SR/02417/26</caseNumber>
+    <reference>https://ec.europa.eu/safety-gate-alerts/screen/webReport/alertDetail/10099529</reference>
+    <category>Cosmetics</category>
+    <product>Perfume</product>
+    <brand>Tesori d'Oriente</brand>
+    <riskType>Chemical</riskType>
+    <danger>Allergen missing from the label.</danger>
+    <measures>Withdrawal of the product from the market</measures>
+    <notifyingCountry>Greece</notifyingCountry>
+    <countryOfOrigin>Italy</countryOfOrigin>
+    <level>Serious risk</level>
+    <pictures><picture>https://ec.europa.eu/image/3</picture></pictures>
+    <onlineTrader>Other(BEAUTY CORNER.GR) / </onlineTrader>
+  </notifications>
+</Safety-Gate>

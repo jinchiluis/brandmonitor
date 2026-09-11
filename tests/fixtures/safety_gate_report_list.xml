@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<weeklyReports>
+  <weeklyReport>
+    <report_language>en</report_language>
+    <reference>Report-2026-36</reference>
+    <publicationDate>11/09/2026</publicationDate>
+    <year>2026</year>
+    <month>9</month>
+    <day>11</day>
+    <week>36</week>
+    <URL>https://ec.europa.eu/safety-gate-alerts/api/download/weeklyReport/detail/xml/10000322?language=en&amp;search=WEB_REPORT%7C:%7C10000322,</URL>
+  </weeklyReport>
+  <weeklyReport>
+    <report_language>en</report_language>
+    <reference>Report-2026-35</reference>
+    <publicationDate>04/09/2026</publicationDate>
+    <year>2026</year>
+    <month>9</month>
+    <day>4</day>
+    <week>35</week>
+    <URL>https://ec.europa.eu/safety-gate-alerts/api/download/weeklyReport/detail/xml/10000321?language=en&amp;search=WEB_REPORT%7C:%7C10000321,</URL>
+  </weeklyReport>
+</weeklyReports>

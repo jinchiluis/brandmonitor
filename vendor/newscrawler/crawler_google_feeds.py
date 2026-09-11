@@ -58,6 +58,7 @@ except ImportError:
         published_at: Optional[datetime]
         title: Optional[str]
         source: str
+        date_source: Optional[str] = None
 
     def parse_dt(val: Optional[str]) -> Optional[datetime]:
         if not val:
@@ -445,7 +446,8 @@ class GoogleNewsFeedCrawler:
                         url=normalize_url(real_url),
                         published_at=published,
                         title=title,
-                        source="rss-google"
+                        source="rss-google",
+                        date_source="feed" if published else None,
                     ))
 
                     if self.verbose:

@@ -6,7 +6,7 @@ sources in a fresh session.
 
 Audited so far: Verbraucherzentrale (narrowed 766→203), BVL (narrowed 2002→174),
 LOGISTIK HEUTE (partial paywall found), Zoll (dropped — publishes drug seizures, not
-customs policy), BPEX (wrong company entirely), DVZ (sitemap pruning bug, 13→73),
+customs policy), BPEX (wrong company entirely), DVZ (undeclared two-day news sitemap),
 bevh (JS-rendered, bodies unobtainable).
 
 **Not yet audited:** DER SPIEGEL, DIE ZEIT, FAZ, Handelsblatt, WELT,
@@ -111,8 +111,9 @@ Ranked by how much a finding would change things:
 2. **DIE ZEIT and WELT** — 2,000 and 1,035 items in `title_only`. ZEIT is 78% dpa
    wire, WELT 53% `regionales`. Neither is fetched for bodies, so the cost is only
    storage, but the question is whether `regionales` is worth indexing at all.
-3. **The eight regulators** — small volumes, but EU presscorner returned 0 relevant
-   of 50 and needs topic filtering, and BNetzA's feeds are mostly energy.
+3. **The eight regulators** — small volumes. EU presscorner now uses its native
+   Digital economy and society filter, and BNetzA excludes its non-postal sections;
+   assessment still needs to measure the useful remainder.
 4. **Händlerbund vs Onlinehändler-News** — same organisation, both configured.
    Check whether their content overlaps before paying to fetch both.
 5. **The remaining associations** (DSLV 13, BGL 2, BVDW 143, Wettbewerbszentrale 47)

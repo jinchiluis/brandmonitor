@@ -98,6 +98,12 @@ class ArticleHint:
     published_at: Optional[datetime]
     title: Optional[str]
     source: str  # "sitemap" or "rss"
+    # Which field supplied published_at, because they are not equally trustworthy:
+    # "news_sitemap" (<news:publication_date>) and "feed" (<pubDate>) state when
+    # the article appeared; "lastmod" says only that the URL changed and is
+    # rewritten in bulk by CMS migrations; "frontpage" is a date read near a link.
+    # None when there is no date. Stored so a report can tell which dates it may print.
+    date_source: Optional[str] = None
 
 @dataclasses.dataclass
 class ArticleRecord:
@@ -248,7 +254,7 @@ def is_valid_sitemap(resp) -> bool:
     # accept when bytes contain sitemap markers
     return (b"<urlset" in head) or (b"<sitemapindex" in head)
 
-def discover_sitemaps(session, site_url):
+def discover_sitemaps(session, site_url, extra_sitemap_urls=None):
     from urllib.parse import urljoin
     base = site_url.rstrip('/') + '/'
     robots_url = urljoin(base, "robots.txt")
@@ -327,6 +333,15 @@ def discover_sitemaps(session, site_url):
             session.headers.clear()
             session.headers.update(old_headers) # revert back simple headers for fetching
 
+    # robots.txt is not required to list every sitemap. A configured source may
+    # name additional roots that should be traversed alongside the declared one;
+    # this avoids probing every guessed path on every source merely to handle a
+    # known publisher exception. Relative values are accepted for consistency
+    # with robots.txt sitemap declarations.
+    for configured_url in extra_sitemap_urls or []:
+        if configured_url:
+            sitemaps.append(urljoin(base, configured_url))
+
     # De-duplicate by content location, not by guess URL. The www and non-www
     # bases usually serve the same file, so a site whose robots.txt declares no
     # sitemap gets every URL discovered twice — doubling fetch cost and inflating
@@ -353,12 +368,14 @@ def _is_news_sitemap(sitemap_url: str) -> bool:
 
 
 def fetch_sitemap_urls(session: requests.Session, sitemap_url: str) -> Tuple[
-    List[Tuple[str, Optional[datetime], Optional[str]]],
+    List[Tuple[str, Optional[datetime], Optional[str], Optional[str]]],
     List[Tuple[str, Optional[datetime]]]
 ]:
     """
     Returns (url_entries, nested_sitemaps)
-    url_entries: list of (loc, lastmod/publish_date, news_title)
+    url_entries: list of (loc, lastmod/publish_date, news_title, date_source)
+                 date_source is "news_sitemap" when <news:publication_date> supplied
+                 the date, "lastmod" when only <lastmod> did, None when neither.
     nested_sitemaps: list of (sitemap_url, lastmod) found in index
     """
     try:
@@ -412,7 +429,7 @@ def fetch_sitemap_urls(session: requests.Session, sitemap_url: str) -> Tuple[
     news_ns = next((v for v in root.nsmap.values() if "sitemap-news" in v), "http://www.google.com/schemas/sitemap-news/0.9")
     ns = {"sm": root_ns, "news": news_ns}
 
-    url_entries: List[Tuple[str, Optional[datetime], Optional[str]]] = []
+    url_entries: List[Tuple[str, Optional[datetime], Optional[str], Optional[str]]] = []
     nested: List[Tuple[str, Optional[datetime]]] = []
 
     # Sitemap index
@@ -437,7 +454,8 @@ def fetch_sitemap_urls(session: requests.Session, sitemap_url: str) -> Tuple[
         pub_date_el = url_el.find("news:news/news:publication_date", namespaces=ns)
         pub_dt = parse_dt(pub_date_el.text.strip()) if pub_date_el is not None and pub_date_el.text else None
         title = news_title_el.text.strip() if news_title_el is not None and news_title_el.text else None
-        url_entries.append((loc, pub_dt or lastmod, title))
+        date_source = "news_sitemap" if pub_dt else ("lastmod" if lastmod else None)
+        url_entries.append((loc, pub_dt or lastmod, title, date_source))
 
     if _VERBOSE: logger.info(f"[sitemap] items={len(url_entries)} nested_indexes={len(nested)} -> {sitemap_url}")
 
@@ -451,7 +469,12 @@ def collect_from_sitemaps(session: requests.Session, site_url: str, start: datet
     rules = sources.get_site_rules(site_url)
     allowed_dirs = rules.get("allowed_dirs") if rules else None
     
-    raw = discover_sitemaps(session, site_url)
+    extra_sitemap_urls = rules.get("extra_sitemap_urls") if rules else None
+    raw = discover_sitemaps(session, site_url, extra_sitemap_urls)
+    # An explicit Google News root is normally a short rolling window with real
+    # titles and publication dates. Traverse it before a general sitemap index,
+    # whose archive children can otherwise delay or exhaust the fetch budget.
+    raw = sorted(raw, key=_is_news_sitemap, reverse=True)
     queue: List[Tuple[str, Optional[datetime]]] = [(u, None) for u in raw]
 
     grace = timedelta(days=7)
@@ -556,14 +579,19 @@ def collect_from_sitemaps(session: requests.Session, site_url: str, start: datet
         url_entries, nested = fetch_sitemap_urls(session, sm)
         sitemap_fetch_count += 1
 
-        for loc, dt, title in url_entries:
+        for loc, dt, title, date_source in url_entries:
             entry_dt = dt or hint_dt
             if entry_dt and (start <= entry_dt <= end):
                 # Filter by allowed_dirs if specified
                 if not url_matches_dirs(loc, allowed_dirs):
                     continue
                 if per_source_counts["sitemap"] < max_per_source:
-                    hints.append(ArticleHint(url=normalize_url(loc), published_at=entry_dt, title=title, source="sitemap"))
+                    # An entry without a date of its own inherits the containing
+                    # sitemap's <lastmod> or filename month. That is a change
+                    # signal at best, so it is labelled like one.
+                    hints.append(ArticleHint(url=normalize_url(loc), published_at=entry_dt, title=title,
+                                             source="sitemap",
+                                             date_source=date_source if dt else "lastmod"))
                     per_source_counts["sitemap"] += 1
 
         # News sitemaps first, then newest-first. Both orderings exist to spend a
@@ -717,6 +745,7 @@ def collect_from_feeds(session, site_url):
                     published_at=published,
                     title=title,
                     source="rss",
+                    date_source="feed" if published else None,
                 ))
 
         except Exception as ex:
@@ -962,7 +991,8 @@ def collect_from_frontpage(session, site_url, start_date=None, cap=80):
 
 
     return [
-        ArticleHint(url=url, published_at=dt, title=None, source="frontpage")
+        ArticleHint(url=url, published_at=dt, title=None, source="frontpage",
+                    date_source="frontpage" if dt else None)
         for url, dt in selected_items
     ]
 
@@ -1082,4 +1112,3 @@ def crawl_site(site_url: str, start: datetime, end: datetime, max_per_source: in
 
     logger.info(f"[{site}] done — {len(records)} articles with titles ({fetch_title_count} fetched from page)")
     return records, fetch_title_count
-

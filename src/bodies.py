@@ -27,15 +27,17 @@ import time
 import unicodedata
 from collections import defaultdict, deque
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 import requests
 from bs4 import BeautifulSoup
 
 from src.config import (BODY_FETCH_BROWSER, BODY_FETCH_DELAY, BODY_FETCH_LIMIT,
-                        BODY_FETCH_TIMEOUT, PDF_MAX_PAGES)
+                        BODY_FETCH_MAX_ATTEMPTS, BODY_FETCH_TIMEOUT, PDF_MAX_PAGES)
 from src.db import finish_run, record_source_result, session, start_run, utcnow
 from src.logger import get_logger
 from vendor.newscrawler.crawler import HTML_HEADERS, url_matches_dirs
@@ -126,7 +128,7 @@ def queue_body(conn: sqlite3.Connection, slug: str, external_id: str,
         "INSERT INTO body_fetch (source_slug, external_id, discovery_hash, hint_payload) "
         "VALUES (?, ?, ?, ?) ON CONFLICT(source_slug, external_id) DO UPDATE SET "
         "discovery_hash=excluded.discovery_hash, hint_payload=excluded.hint_payload, "
-        "status='pending', error=NULL",
+        "status='pending', error=NULL, attempts=0",
         (slug, external_id, fingerprint, json.dumps(hint, ensure_ascii=False)),
     )
 
@@ -138,16 +140,18 @@ class BodyResult:
     title: str | None = None
     url: str | None = None
     published_at: str | None = None
+    published_at_raw: str | None = None
     error: str | None = None
 
 
-def _page_published_at(soup: BeautifulSoup) -> str | None:
-    """The publication date the page states about itself, or None.
+def _page_published_value(soup: BeautifulSoup) -> str | None:
+    """Return the publisher's untrusted page-date string, if present.
 
-    A sitemap's <lastmod> says only that a URL changed, and publishers rewrite it
-    in bulk: BVL stamps all 5,323 of its URLs with one timestamp, and etailment's
-    2026 migration restamped an archive back to 2001. Both make old pages look new.
-    The page's own datePublished survives that, so it is what we keep.
+    Structured attributes only: JSON-LD ``datePublished``, then
+    ``article:published_time``, then a lone ``<time datetime>``. Visible text is
+    never read - sampled first visible dates included a future seminar and a
+    listing entry, and a confident wrong date is worse than none. Modification
+    dates are left out on purpose; they are ``lastmod`` under another name.
     """
     def walk(value):
         if isinstance(value, dict):
@@ -168,7 +172,107 @@ def _page_published_at(soup: BeautifulSoup) -> str | None:
             return found
     meta = soup.find("meta", property="article:published_time")
     content = meta.get("content") if meta else None
-    return content.strip() if content and content.strip() else None
+    if content and content.strip():
+        return content.strip()
+    return _lone_time_datetime(soup)
+
+
+def _lone_time_datetime(soup: BeautifulSoup) -> str | None:
+    """The one day every ``<time datetime>`` on the page agrees on, or None.
+
+    bevh and DSLV state their article date in a single <time> element and
+    nowhere else. Several <time> elements naming different days are refused
+    rather than guessed at: a Verbraucherzentrale class-action record carries
+    filed, served and status dates, none of which is a publication date, and a
+    listing page carries one per teaser. Elements whose datetime is not a date
+    (durations such as PT5M, empty strings) do not count either way.
+    """
+    found: list[tuple[str, str]] = []
+    for tag in soup.find_all("time"):
+        raw = (tag.get("datetime") or "").strip()
+        normalized = normalize_page_published_at(raw) if raw else None
+        if normalized:
+            found.append((raw, normalized[:10]))
+    if not found or len({day for _raw, day in found}) != 1:
+        return None
+    return found[0][0]
+
+
+_LOGISTIK_DATE = re.compile(
+    r"^(Mo|Di|Mi|Do|Fr|Sa|So),\s*(\d{2})/(\d{2})/(\d{4})\s*-\s*"
+    r"(\d{2}):(\d{2})$"
+)
+_GERMAN_WEEKDAY = {"Mo": 0, "Di": 1, "Mi": 2, "Do": 3,
+                   "Fr": 4, "Sa": 5, "So": 6}
+
+
+def normalize_page_published_at(value: str | None) -> str | None:
+    """Validate a page date and return sortable ISO 8601, or reject it.
+
+    LOGISTIK HEUTE emits a non-ISO Drupal value whose numeric portion is US
+    month/day order despite the German weekday.  ``11/16`` proves that order.
+    The weekday is checked as a guard against silently swapping ambiguous dates.
+    """
+    if not value or not value.strip():
+        return None
+    value = value.strip()
+    if re.fullmatch(r"\d{10}", value):
+        # DSLV writes epoch seconds into <time datetime>. Ten digits spans
+        # 2001-2286, so nothing plausible is refused and nothing else matches.
+        return datetime.fromtimestamp(int(value), tz=ZoneInfo("Europe/Berlin")).isoformat()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        try:
+            return datetime.fromisoformat(value).date().isoformat()
+        except ValueError:
+            return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).isoformat()
+    except ValueError:
+        pass
+
+    match = _LOGISTIK_DATE.fullmatch(value)
+    if not match:
+        return None
+    weekday, month, day, year, hour, minute = match.groups()
+    try:
+        parsed = datetime(int(year), int(month), int(day), int(hour), int(minute),
+                          tzinfo=ZoneInfo("Europe/Berlin"))
+    except ValueError:
+        return None
+    if parsed.weekday() != _GERMAN_WEEKDAY[weekday]:
+        return None
+    return parsed.isoformat()
+
+
+def _page_published_at(soup: BeautifulSoup) -> str | None:
+    """The validated publication date the page states, or None.
+
+    A sitemap's <lastmod> says only that a URL changed, and publishers rewrite it
+    in bulk: BVL stamps all 5,323 of its URLs with one timestamp, and etailment's
+    2026 migration restamped an archive back to 2001. Both make old pages look new.
+    The page's own datePublished survives that, so it is what we keep.
+    """
+    return normalize_page_published_at(_page_published_value(soup))
+
+
+def _remove_tag_clouds(root: BeautifulSoup) -> None:
+    """Remove dense publisher tag clouds without deleting ordinary links.
+
+    LOGISTIK HEUTE renders its global taxonomy as a paragraph of dozens of
+    ``tagcloud-prio-*`` spans outside a semantic footer.  Trafilatura therefore
+    treated it as article prose.  Requiring eight markers keeps this structural
+    and avoids deleting a genuine paragraph that happens to contain one tag link.
+    """
+    candidates = []
+    seen: set[int] = set()
+    for marker in root.select('[class*="tagcloud-prio-"]'):
+        container = marker.find_parent(("p", "ul", "ol")) or marker.find_parent("div")
+        if container is not None and id(container) not in seen:
+            seen.add(id(container))
+            candidates.append(container)
+    for container in candidates:
+        if len(container.select('[class*="tagcloud-prio-"]')) >= 8:
+            container.decompose()
 
 
 def _declares_paywall(soup: BeautifulSoup) -> bool:
@@ -227,7 +331,8 @@ def _extract_article(markup: bytes | str, final_url: str) -> BodyResult:
         return BodyResult("unavailable", url=final_url, error=PAYWALL_DECLARED)
     # Read before the tree is pruned below: the JSON-LD block sits outside
     # the article element that extraction narrows to.
-    published = _page_published_at(soup)
+    published_raw = _page_published_value(soup)
+    published = normalize_page_published_at(published_raw)
     heading = soup.find("h1")
     og_title = soup.find("meta", property="og:title")
     title = (heading.get_text(" ", strip=True) if heading else
@@ -239,9 +344,14 @@ def _extract_article(markup: bytes | str, final_url: str) -> BodyResult:
            ("just a moment", "access denied", "verify you are human", "captcha")):
         return BodyResult("failed", url=final_url, error="access challenge page")
     articles = soup.find_all("article")
-    root = articles[0] if len(articles) == 1 else soup
+    # A lone <article> is the publisher stating the body boundary itself, which is
+    # better than any heuristic. Several of these mean the page also carries teasers,
+    # so there is no boundary to trust and the whole document is handed over instead.
+    bounded = len(articles) == 1
+    root = articles[0] if bounded else soup
     for element in root.select('nav, footer, form, aside, [role="navigation"], [role="dialog"]'):
         element.decompose()
+    _remove_tag_clouds(root)
     # Some publishers put the principal quotation in a quoteslider.
     # The extractor mistakes its wrapper for an unrelated slideshow.
     # Preserve semantic blockquotes while removing those presentation hints.
@@ -251,7 +361,21 @@ def _extract_article(markup: bytes | str, final_url: str) -> BodyResult:
                 break
             parent.attrs.pop("class", None)
             parent.attrs.pop("id", None)
-    text = trafilatura.extract(str(root), url=final_url,
+    if bounded:
+        # The boundary is already settled, so trafilatura's id-based body anchors can
+        # only narrow it further - never widen it back - and a publisher whose anchor
+        # wraps just the lead loses the rest of the article. verkehrsrundschau.de puts
+        # its standfirst in <div id="article-content-wrapper"> and the six sections
+        # that follow outside it, which cost ~40% of every story. Classes are kept:
+        # they carry the same junk signals without naming a body.
+        for element in root.find_all(id=True):
+            element.attrs.pop("id", None)
+    # Hand over one unambiguous document. trafilatura rejects a bare fragment
+    # outright - load_html treats markup whose first 50 characters lack "html" as
+    # not-quite-HTML and returns None unless the root has 2+ children - so a single
+    # <article> holding one wrapper div extracted to nothing at all, and the caller
+    # retired the URL as "no article text even after rendering".
+    text = trafilatura.extract(f"<html><body>{root}</body></html>", url=final_url,
                                include_comments=False, include_tables=True)
     text = normalize_text(text or "")
     if len(text) < 200 or sum(c.isalpha() for c in text) < 100:
@@ -269,7 +393,8 @@ def _extract_article(markup: bytes | str, final_url: str) -> BodyResult:
     if _is_login_wall(title, text):
         return BodyResult("unavailable", url=final_url, error="subscriber login page")
     return BodyResult("ok", text=text, title=normalize_text(title) if title else None,
-                      url=final_url, published_at=published)
+                      url=final_url, published_at=published,
+                      published_at_raw=published_raw)
 
 
 def _extract_pdf(data: bytes, final_url: str) -> BodyResult:
@@ -457,12 +582,33 @@ def fetch_body(url: str) -> BodyResult:
     return result
 
 
+def discovery_date_source(payload: dict[str, Any], published: str | None) -> str | None:
+    """Provenance label for a date that came from discovery rather than the page.
+
+    Collection now records ``feed``, ``news_sitemap``, ``lastmod`` or
+    ``frontpage`` in the hint. Rows collected before 2026-09-11 recorded
+    ``discovery`` for all of them, which hid the one distinction a report needs:
+    a feed <pubDate> may be printed, a sitemap <lastmod> may not. Those are
+    relabelled from ``discovered_via``; a sitemap's flavour cannot be recovered
+    after the fact and stays ``sitemap``.
+    """
+    if published is None:
+        return None
+    current = payload.get("published_at_source")
+    if current not in (None, "discovery", "page"):
+        return current
+    return {"rss": "feed", "sitemap": "sitemap", "frontpage": "frontpage"}.get(
+        payload.get("discovered_via"))
+
+
 def store_body(conn: sqlite3.Connection, run_id: int, task: sqlite3.Row,
                result: BodyResult) -> int:
-    """Enrichment appends a version; only title/body changes append another.
+    """Enrichment appends a version for content or normalized metadata changes.
 
     Compare with the latest material, so a genuine A -> B -> A correction is
-    preserved. Dates, extraction timestamps and whitespace are not content.
+    preserved. Extraction timestamps and whitespace are not content.  A corrected
+    page date is versioned even when body text is stable; otherwise an extractor
+    fix could never repair an already-fetched row.
     """
     latest = conn.execute(
         "SELECT * FROM raw_item WHERE source_slug=? AND external_id=? "
@@ -477,18 +623,40 @@ def store_body(conn: sqlite3.Connection, run_id: int, task: sqlite3.Row,
     body = normalize_text(result.text or "")
     content_hash = digest({"url": task["external_id"], "title": " ".join((title or "").split()),
                            "body_text": " ".join(body.split())})
-    if payload.get("body_text") and latest["content_hash"] == content_hash:
+    published = result.published_at or latest["published_at"]
+    if result.published_at:
+        published_source = "page"
+    elif payload.get("body_text") and payload.get("published_at_source") == "page":
+        # A page date read earlier outranks the hint; a refetch that finds none
+        # keeps it rather than demoting the row back to a discovery date.
+        published_source = "page"
+    else:
+        published_source = discovery_date_source(payload, published)
+    # Compare against what the stored row means, not the literal it carries, so
+    # relabelling a legacy ``discovery`` row is not itself a metadata change.
+    previous_source = ("page" if payload.get("published_at_source") == "page"
+                       else discovery_date_source(payload, latest["published_at"]))
+    published_raw = (result.published_at_raw if result.published_at_raw is not None
+                     else payload.get("published_at_raw"))
+    metadata_changed = (
+        published != latest["published_at"] or
+        published_source != previous_source or
+        published_raw != payload.get("published_at_raw")
+    )
+    if (payload.get("body_text") and latest["content_hash"] == content_hash
+            and not metadata_changed):
         return 0
     fetched = utcnow()
     # The page outranks the discovery hint, whose date may be a <lastmod> the
     # publisher rewrites in bulk. Record which one this is: a date we read from the
     # article is evidence of age, a date we inherited is not.
-    published = result.published_at or latest["published_at"]
     payload.update({"title": title, "body_text": body, "body_fetched_at": fetched,
                     "body_url": result.url or latest["url"],
                     "published_at": published,
-                    "published_at_source": "page" if result.published_at else "discovery",
+                    "published_at_source": published_source,
                     "body_extractor": "trafilatura", "body_status": "ok"})
+    if published_raw is not None:
+        payload["published_at_raw"] = published_raw
     conn.execute(
         "INSERT INTO raw_item (source_slug, source_kind, external_id, version, url, "
         "title, published_at, fetched_at, first_run_id, content_hash, payload) "
@@ -504,7 +672,7 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
                    refresh: bool = False, retry_unavailable: bool = False,
                    db_path: Path | None = None) -> dict[str, Any]:
     """Fetch a bounded batch, including old hints and failures outside the crawl window."""
-    from src.collect import slug_for
+    from src.collect import slug_for, url_is_excluded
     from vendor.newscrawler.source_loader import sources
 
     if limit < 1:
@@ -526,6 +694,8 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
             ).fetchall()
             for row in rows:
                 payload = json.loads(row["payload"])
+                if url_is_excluded(row["url"], entry, row["title"]):
+                    continue
                 # Respect narrowed sitemap sections when enriching the old DB.
                 if payload.get("discovered_via") == "sitemap" and not url_matches_dirs(
                         row["url"], entry.get("allowed_dirs")):
@@ -563,16 +733,27 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
             result = fetch_body(task["external_id"])
         except Exception as exc:
             result = BodyResult("failed", error=f"{type(exc).__name__}: {exc}")
+        # ``attempts`` counts consecutive unsuccessful tries; a success resets it
+        # and so does a changed hint. Past the cap a failure is retired rather
+        # than retried on every run forever. The diagnosis is kept in the error
+        # so the row stays recognisable, and --retry-unavailable reopens it -
+        # which is how a URL retired under a broken extractor gets recovered
+        # once the extractor is fixed.
+        attempts = task["attempts"] + 1
+        if result.status == "failed" and attempts >= BODY_FETCH_MAX_ATTEMPTS:
+            result = BodyResult("unavailable", url=result.url,
+                                error=f"gave up after {attempts} attempts: {result.error}")
         # Commit each outcome before fetching another URL. A stopped run keeps
         # completed work, and every untouched task remains pending/retryable.
         with session(db_path) as conn:
             stored = store_body(conn, run_id, task, result) if result.status == "ok" else 0
             conn.execute(
-                "UPDATE body_fetch SET status=?, attempts=attempts+1, attempted_at=?, "
+                "UPDATE body_fetch SET status=?, attempts=?, attempted_at=?, "
                 "error=?, last_run_id=? WHERE source_slug=? AND external_id=? "
                 "AND discovery_hash=?",
-                (result.status, utcnow(), result.error, run_id, task["source_slug"],
-                 task["external_id"], task["discovery_hash"]),
+                (result.status, 0 if result.status == "ok" else attempts, utcnow(),
+                 result.error, run_id, task["source_slug"], task["external_id"],
+                 task["discovery_hash"]),
             )
         source = counts[task["source_slug"]]
         for counter in (summary, source):
@@ -586,7 +767,11 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
     with session(db_path) as conn:
         for slug, counts_for_source in counts.items():
             errors = counts_for_source.pop("errors")
-            status = "failed" if errors else "ok" if counts_for_source["attempted"] else "zero"
+            # ``unavailable`` is a valid terminal item outcome (404, declared
+            # paywall, scan without a text layer).  Keep its diagnosis visible,
+            # but fail a source/run only for retryable technical failures.
+            status = ("failed" if counts_for_source["failed"] else
+                      "ok" if counts_for_source["attempted"] else "zero")
             record_source_result(conn, run_id, slug, status,
                                  items_found=counts_for_source["attempted"],
                                  items_stored=counts_for_source["stored"],
@@ -598,7 +783,7 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
                 if row["external_id"] in ids and row["status"] in remaining:
                     remaining[row["status"]] += 1
         summary["remaining"] = remaining
-        finish_run(conn, run_id, "failed" if summary["failed"] or summary["unavailable"] else "ok",
+        finish_run(conn, run_id, "failed" if summary["failed"] else "ok",
                    note=f"{summary['ok']} bodies ok, {summary['stored']} new versions; "
                    f"{summary['failed']} failed, {summary['unavailable']} unavailable; "
                    f"{summary['deferred']} deferred")

@@ -189,6 +189,20 @@ class TestSourceRules:
         s = self._load(tmp_path, [{"url": "https://example.de/", "feeds": True}])
         assert s.get_site_rules("https://example.de/")["feed_urls"] == []
 
+    def test_extra_sitemap_urls_reach_the_rules(self, tmp_path):
+        s = self._load(tmp_path, [{
+            "url": "https://example.de/", "sitemap": True,
+            "extra_sitemap_urls": ["https://example.de/news-sitemap.xml"],
+        }])
+        rules = s.get_site_rules("https://example.de/some/article-here")
+        assert rules["extra_sitemap_urls"] == [
+            "https://example.de/news-sitemap.xml",
+        ]
+
+    def test_extra_sitemap_urls_default_empty(self, tmp_path):
+        s = self._load(tmp_path, [{"url": "https://example.de/", "sitemap": True}])
+        assert s.get_site_rules("https://example.de/")["extra_sitemap_urls"] == []
+
     def test_unknown_domain_has_no_rules(self, tmp_path):
         s = self._load(tmp_path, [{"url": "https://example.de/"}])
         assert s.get_site_rules("https://other.de/") is None

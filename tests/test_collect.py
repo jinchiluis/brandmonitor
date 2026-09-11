@@ -15,10 +15,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.collect import (  # noqa: E402
     collect_source, is_furniture, is_malformed, slug_for, store_hints,
+    url_is_excluded,
 )
 from src.db import migrate, session, start_run  # noqa: E402
 from vendor.newscrawler.crawler import (  # noqa: E402
-    BERLIN_TZ, ArticleHint, _is_news_sitemap,
+    BERLIN_TZ, ArticleHint, _is_news_sitemap, discover_sitemaps,
 )
 
 
@@ -194,6 +195,51 @@ class TestHintDeduplication:
         hints, _ = collect_source(self._entry(), now - timedelta(days=30), now, 100)
         assert {h.url for h in hints} == {"https://x.de/a-one", "https://x.de/a-two"}
 
+    def test_excluded_dirs_apply_to_every_discovery_method(self, monkeypatch):
+        entry = self._entry()
+        entry["excluded_dirs"] = ["paid"]
+        monkeypatch.setattr("src.collect.pick_accessible_origin",
+                            lambda s, u: "https://x.de")
+        monkeypatch.setattr(
+            "src.collect.collect_from_sitemaps",
+            lambda *a, **k: [hint("https://x.de/paid/sitemap-story"),
+                             hint("https://x.de/news/sitemap-story")])
+        monkeypatch.setattr(
+            "src.collect.collect_from_feeds",
+            lambda *a, **k: [hint("https://x.de/paid/feed-story", source="rss"),
+                             hint("https://x.de/news/feed-story", source="rss")])
+        now = datetime.now(tz=BERLIN_TZ)
+        hints, error = collect_source(entry, now - timedelta(days=30), now, 100)
+        assert error is None
+        assert {h.url for h in hints} == {
+            "https://x.de/news/sitemap-story", "https://x.de/news/feed-story"}
+
+    def test_source_specific_url_fragments_exclude_indexes_not_sibling_news(self):
+        entry = self._entry()
+        entry["excluded_url_substrings"] = ["newsuebersicht"]
+        assert url_is_excluded(
+            "https://x.de/news/acme-newsuebersicht-123.html", entry)
+        assert not url_is_excluded(
+            "https://x.de/news/acme-eroeffnet-paketzentrum-124.html", entry)
+
+    def test_url_fragments_see_the_query_string(self):
+        """BPEX pagination and PDF copies share the bare section path with real
+        items one level down; only the query separates them."""
+        entry = self._entry()
+        entry["excluded_url_substrings"] = ["/aktuelles?"]
+        assert url_is_excluded("https://x.de/aktuelles?page_a12=2", entry)
+        assert url_is_excluded(
+            "https://x.de/aktuelles?file=files%2Fbiek%2FPM_KEP-Studie.pdf", entry)
+        assert not url_is_excluded(
+            "https://x.de/aktuelles/meldung/interview-markttrends-2026", entry)
+
+    def test_source_specific_title_fragments_catch_retitled_indexes(self):
+        entry = self._entry()
+        entry["excluded_title_substrings"] = ["Newsübersicht"]
+        url = "https://x.de/news/personalie-michael-loeckener-139966.html"
+        assert url_is_excluded(url, entry, "Trans-o-flex: Newsübersicht")
+        assert not url_is_excluded(url, entry, "Michael Löckener steigt auf")
+
 
 class TestSlug:
     def test_strips_www(self):
@@ -328,3 +374,102 @@ class TestNewsSitemapPriority:
                   ("https://x.de/news-sitemap.xml", when)]
         ordered = sorted(nested, key=lambda x: (_is_news_sitemap(x[0]), x[1]), reverse=True)
         assert ordered[0][0] == "https://x.de/news-sitemap.xml"
+
+    def test_news_root_is_traversed_before_general_root(self, monkeypatch):
+        from vendor.newscrawler import crawler
+
+        when = datetime(2026, 9, 10, tzinfo=BERLIN_TZ)
+        fetched = []
+
+        monkeypatch.setattr(crawler.sources, "get_site_rules", lambda url: {})
+        monkeypatch.setattr(
+            crawler, "discover_sitemaps",
+            lambda session, site_url, extra=None: [
+                "https://x.de/sitemap.xml",
+                "https://x.de/news-sitemap.xml",
+            ],
+        )
+
+        def fake_fetch(session, url):
+            fetched.append(url)
+            return ([(f"https://x.de/{len(fetched)}", when, url, "news_sitemap")], [])
+
+        monkeypatch.setattr(crawler, "fetch_sitemap_urls", fake_fetch)
+        hints = crawler.collect_from_sitemaps(
+            None, "https://x.de/", when - timedelta(days=1),
+            when + timedelta(days=1), max_per_source=1,
+        )
+
+        assert fetched == ["https://x.de/news-sitemap.xml"]
+        assert hints[0].title == "https://x.de/news-sitemap.xml"
+
+
+class TestExtraSitemapUrls:
+    """Known sitemap roots supplement, rather than replace, robots.txt."""
+
+    class Response:
+        status_code = 200
+        text = "Sitemap: https://www.example.de/sitemap.xml\n"
+
+    class Session:
+        def get(self, *args, **kwargs):
+            return TestExtraSitemapUrls.Response()
+
+    def test_extra_sitemap_is_merged_with_declared_sitemap(self):
+        found = discover_sitemaps(
+            self.Session(), "https://www.example.de/",
+            ["https://www.example.de/news-sitemap.xml"],
+        )
+        assert found == [
+            "https://www.example.de/sitemap.xml",
+            "https://www.example.de/news-sitemap.xml",
+        ]
+
+    def test_relative_extra_sitemap_is_resolved_and_duplicates_are_removed(self):
+        found = discover_sitemaps(
+            self.Session(), "https://www.example.de/",
+            ["news-sitemap.xml", "https://example.de/sitemap.xml", ""],
+        )
+        assert found == [
+            "https://www.example.de/sitemap.xml",
+            "https://www.example.de/news-sitemap.xml",
+        ]
+
+
+class TestSitemapDateProvenance:
+    """<news:publication_date> says when an article appeared; <lastmod> says only
+    that the URL changed. Both land in the same hint field, so the hint must say
+    which one it carries - a report may print the first and never the second."""
+
+    SITEMAP = b"""<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">
+  <url><loc>https://x.de/news/a</loc><lastmod>2026-09-01T10:00:00+02:00</lastmod>
+    <news:news><news:title>A</news:title>
+    <news:publication_date>2026-08-30T08:00:00+02:00</news:publication_date></news:news></url>
+  <url><loc>https://x.de/b</loc><lastmod>2026-09-01T10:00:00+02:00</lastmod></url>
+  <url><loc>https://x.de/c</loc></url>
+</urlset>"""
+
+    def test_entries_are_labelled_by_the_field_that_dated_them(self, monkeypatch):
+        from vendor.newscrawler import crawler
+
+        class Response:
+            status_code = 200
+            headers = {"Content-Type": "application/xml"}
+            content = self.SITEMAP
+
+            def raise_for_status(self):
+                pass
+
+        monkeypatch.setattr(crawler, "polite_get", lambda session, url: Response())
+        entries, nested = crawler.fetch_sitemap_urls(None, "https://x.de/sitemap.xml")
+        assert nested == []
+        assert [(loc, source) for loc, _when, _title, source in entries] == [
+            ("https://x.de/news/a", "news_sitemap"),
+            ("https://x.de/b", "lastmod"),
+            ("https://x.de/c", None),
+        ]
+        # The news date wins over lastmod when both are present.
+        assert entries[0][1].date().isoformat() == "2026-08-30"
+        assert entries[0][2] == "A"

@@ -1,0 +1,1458 @@
+{
+  "_about": [
+    "Hand labels for the body gate: would a weekly J&T Express Germany report carry",
+    "this item? Labelled by reading the full stored body, before any model saw it.",
+    "Keyed by URL; bodies stay in the database. 'unsure' means either gate verdict is",
+    "acceptable, so scoring counts misses on 'relevant' and keeps on 'irrelevant'.",
+    "Results of the gate runs against these labels are in",
+    "docs/selection_and_assessment.md. Some URLs are no longer selected (the UPS and",
+    "BPEX fixes of 2026-09-11); their labels stay valid as ground truth."
+  ],
+  "labelled": "2026-09-11",
+  "samples": {
+    "round1": "30 at random (seed 20260911) from the 748 bodies profile 2026-09-11 selected, news and regulatory together",
+    "round2": "30 news bodies with a brand or topic match (seed 20260912, pool 167), 15 regulatory bodies the selector picked and 15 it skipped (seed 20260913, pools 50 and 335); profile 2026-09-11.2; round-1 URLs excluded"
+  },
+  "rules": {
+    "news": "relevant = a weekly J&T Express Germany report could carry it (parcel/KEP market, couriers, postal law; customs, duties, import, product-safety or platform rules for e-commerce imports; a competitor or customer as a business). unsure = touches that area only indirectly. irrelevant = accidental keyword match or general logistics/HR/IT/corporate. Labelled by reading the full body, before any model call.",
+    "regulatory": "relevant = a new or changed rule, decision, enforcement action, consultation or official figure on postal/parcel law and the parcel market; customs and import tax on e-commerce parcels; product safety and market surveillance of imported goods; rules and enforcement on online marketplaces; packaging/returns rules for e-commerce shipping; competition cases on carriers or platforms; trade measures hitting e-commerce imports. unsure = horizontal rules that apply to J&T as to any company, or a digest where the relevant part is minor. irrelevant = other sectors, consumer advice, organisational news, speeches without a relevant decision. Labelled by reading the full body, before any model call."
+  },
+  "counts": {
+    "round1/selected_random": {
+      "relevant": 4,
+      "unsure": 4,
+      "irrelevant": 22
+    },
+    "round2/news_brand_topic": {
+      "relevant": 11,
+      "unsure": 5,
+      "irrelevant": 14
+    },
+    "round2/reg_selected": {
+      "relevant": 1,
+      "unsure": 0,
+      "irrelevant": 14
+    },
+    "round2/reg_unselected": {
+      "relevant": 0,
+      "unsure": 0,
+      "irrelevant": 15
+    }
+  },
+  "items": [
+    {
+      "round": "round1",
+      "n": 1,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "ohn.haendlerbund.de",
+      "url": "https://ohn.haendlerbund.de/recht/rechtsfragen/ppwr-werben",
+      "title": "Mit „PPWR-konform“ werben: Was Händler beachten müssen",
+      "reasons": [
+        "keyword:online commerce",
+        "keyword:regulatory instrument"
+      ],
+      "label": "unsure",
+      "note": "PPWR is relevant regulation, but the angle is merchant advertising law"
+    },
+    {
+      "round": "round1",
+      "n": 2,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/gewerkschaften-ig-metall-kuendigt-widerstand-gegen-vw-werksschliessungen-281692.html",
+      "title": "Gewerkschaften: IG Metall kündigt Widerstand gegen VW-Werksschließungen an",
+      "reasons": [
+        "keyword:China/chinesisch",
+        "keyword:customs",
+        "keyword:labor"
+      ],
+      "label": "irrelevant",
+      "note": "IG Metall vs VW plant closures; China/Zoll only in a car-import quote"
+    },
+    {
+      "round": "round1",
+      "n": 3,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "bpex-ev.de",
+      "url": "https://bpex-ev.de/aktuelles?page_a12=5",
+      "title": "Aktuelles",
+      "reasons": [
+        "keyword:marketplace/platform",
+        "keyword:parcel",
+        "keyword:KEP",
+        "keyword:parcel sector"
+      ],
+      "label": "irrelevant",
+      "note": "BPEX pagination hub of 2023-24 KEP teasers; config residue, not an article"
+    },
+    {
+      "round": "round1",
+      "n": 4,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/logistikimmobilien-reichelt-elektronik-will-mit-neuem-versandzentrum-wachstum-ankurbeln-282217.html",
+      "title": "Logistikimmobilien: Reichelt Elektronik will mit neuem Versandzentrum Wachstum ankurbeln",
+      "reasons": [
+        "brand:UPS",
+        "keyword:parcel"
+      ],
+      "label": "irrelevant",
+      "note": "Reichelt warehouse opening; UPS matched on 'Set-ups'"
+    },
+    {
+      "round": "round1",
+      "n": 5,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "etailment.de",
+      "url": "https://www.etailment.de/magazin/2026-07-22-eu-97-prozente-aller-pakete-aus-dem-e-commerce",
+      "title": "EU: 97 Prozente aller Pakete aus dem E-Commerce",
+      "reasons": [
+        "keyword:online commerce",
+        "keyword:parcel",
+        "topic:Marktüberwachung",
+        "keyword:customs",
+        "keyword:import",
+        "keyword:third country",
+        "keyword:enforcement"
+      ],
+      "label": "relevant",
+      "note": "EU customs overwhelmed by third-country e-commerce parcels, 60% non-compliant, customs reform"
+    },
+    {
+      "round": "round1",
+      "n": 6,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "verkehrsrundschau.de",
+      "url": "https://www.verkehrsrundschau.de/nachrichten/transport-logistik/norddeutsche-laender-fordern-500-millionen-euro-fuer-haefen-3893903",
+      "title": "Norddeutsche Länder fordern 500 Millionen Euro für Häfen",
+      "reasons": [
+        "keyword:China/chinesisch",
+        "keyword:import",
+        "keyword:supply chain"
+      ],
+      "label": "irrelevant",
+      "note": "northern states want port funding"
+    },
+    {
+      "round": "round1",
+      "n": 7,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "etailment.de",
+      "url": "https://www.etailment.de/magazin/2026-09-09-australien-algorithmen-oder-nur-abonnierter-content",
+      "title": "Australien: Algorithmen oder nur abonnierter Content",
+      "reasons": [
+        "topic:Digital Services Act",
+        "keyword:marketplace/platform",
+        "keyword:regulation",
+        "keyword:enforcement"
+      ],
+      "label": "irrelevant",
+      "note": "Australia social-media feed law; DSA only as comparison"
+    },
+    {
+      "round": "round1",
+      "n": 8,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/spionagevorwurf-fuer-russland-spioniert-haftstrafe-fuer-wegwerf-agenten-279515.html",
+      "title": "Spionagevorwurf: Für Russland spioniert? Haftstrafe für „Wegwerf-Agenten“",
+      "reasons": [
+        "brand:DHL",
+        "keyword:parcel",
+        "keyword:parcel sector"
+      ],
+      "label": "unsure",
+      "note": "spy trial over parcels sent via Ukrainian parcel service; DHL Leipzig incendiary parcel as background"
+    },
+    {
+      "round": "round1",
+      "n": 9,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/lagertechnik-im-geplanten-novogenia-zentrallager-bewegen-sich-amr-lift-vier-stockwerke-220870.html",
+      "title": "Lagertechnik: Im geplanten Novogenia-Zentrallager bewegen sich AMR per Lift in vier Stockwerke",
+      "reasons": [
+        "keyword:marketplace/platform",
+        "keyword:parcel"
+      ],
+      "label": "irrelevant",
+      "note": "Novogenia/Knapp warehouse automation"
+    },
+    {
+      "round": "round1",
+      "n": 10,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/e-commerce-ikea-muttergesellschaft-uebernimmt-logistikmanagement-plattform-locus-229061.html",
+      "title": "E-Commerce: Ikea-Muttergesellschaft übernimmt Logistikmanagement-Plattform Locus",
+      "reasons": [
+        "keyword:online commerce",
+        "keyword:marketplace/platform",
+        "keyword:supply chain"
+      ],
+      "label": "irrelevant",
+      "note": "Ikea's Ingka buys last-mile software Locus"
+    },
+    {
+      "round": "round1",
+      "n": 11,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/personalie-steffen-beniers-ist-neuer-standortleiter-bei-galaxus-krefeld-233203.html",
+      "title": "Personalie: Steffen Beniers ist neuer Standortleiter bei Galaxus in Krefeld",
+      "reasons": [
+        "keyword:online commerce",
+        "keyword:supply chain"
+      ],
+      "label": "irrelevant",
+      "note": "Galaxus site-lead personnel change"
+    },
+    {
+      "round": "round1",
+      "n": 12,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "haendlerbund.de",
+      "url": "https://www.haendlerbund.de/de/news/aktuelles/wissenssnack/ohg-gruenden",
+      "title": "OHG gründen in 5 Schritten » Der Weg zum eigenen Unternehmen",
+      "reasons": [
+        "keyword:online commerce",
+        "keyword:regulatory instrument",
+        "keyword:enforcement"
+      ],
+      "label": "irrelevant",
+      "note": "evergreen guide to founding an OHG"
+    },
+    {
+      "round": "round1",
+      "n": 13,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "etailment.de",
+      "url": "https://www.etailment.de/magazin/2026-08-12-voo-store-verabschiedet-sich-vom-online-handel",
+      "title": "Voo Store verabschiedet sich vom Online-Handel",
+      "reasons": [
+        "keyword:online commerce"
+      ],
+      "label": "irrelevant",
+      "note": "Berlin concept store quits online sales"
+    },
+    {
+      "round": "round1",
+      "n": 14,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "ohn.haendlerbund.de",
+      "url": "https://ohn.haendlerbund.de/ki-tech/cyberkriminalitaet/china-shop-statt-deutscher-haendler-verbraucher-online-kauf-getaeuscht",
+      "title": "China-Shop statt deutscher Händler: So werden Verbraucher beim Online-Kauf getäuscht",
+      "reasons": [
+        "keyword:China/chinesisch"
+      ],
+      "label": "relevant",
+      "note": "China-operated shops posing as German retailers, ignoring EU rules; HDE and consumer centres"
+    },
+    {
+      "round": "round1",
+      "n": 15,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/auszeichnung-ecr-award-2025-praemiert-kooperationen-mit-kundennutzen-227831.html",
+      "title": "Auszeichnung: ECR Award 2025 prämiert Kooperationen mit Kundennutzen",
+      "reasons": [
+        "keyword:marketplace/platform",
+        "keyword:supply chain"
+      ],
+      "label": "irrelevant",
+      "note": "ECR Award winners"
+    },
+    {
+      "round": "round1",
+      "n": 16,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/start-ups-jungheinrich-legt-venture-capital-fonds-mit-100-millionen-euro-auf-281893.html",
+      "title": "Start-ups: Jungheinrich legt Venture-Capital-Fonds mit 100 Millionen Euro auf",
+      "reasons": [
+        "keyword:China/chinesisch",
+        "keyword:marketplace/platform"
+      ],
+      "label": "irrelevant",
+      "note": "Jungheinrich venture fund"
+    },
+    {
+      "round": "round1",
+      "n": 17,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "etailment.de",
+      "url": "https://www.etailment.de/magazin/2026-07-21-885-mio-euro-strafe-fuer-tripcom",
+      "title": "885 Mio. Euro Strafe für Trip.com",
+      "reasons": [
+        "keyword:China/chinesisch",
+        "keyword:marketplace/platform",
+        "keyword:enforcement"
+      ],
+      "label": "irrelevant",
+      "note": "China antitrust fine for Trip.com"
+    },
+    {
+      "round": "round1",
+      "n": 18,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/logistikdienstleistung-dhl-will-500-millionen-euro-im-nahen-osten-investieren-217497.html",
+      "title": "Logistikdienstleistung: DHL will 500 Millionen Euro im Nahen Osten investieren",
+      "reasons": [
+        "brand:DHL",
+        "keyword:online commerce",
+        "keyword:supply chain"
+      ],
+      "label": "unsure",
+      "note": "DHL (competitor) invests in the Middle East; outside J&T's market"
+    },
+    {
+      "round": "round1",
+      "n": 19,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/it-fuer-procurement-coupa-will-scoutbee-uebernehmen-229458.html",
+      "title": "IT für Procurement: Coupa will Scoutbee übernehmen",
+      "reasons": [
+        "keyword:marketplace/platform",
+        "keyword:supply chain"
+      ],
+      "label": "irrelevant",
+      "note": "Coupa acquires Scoutbee (procurement IT)"
+    },
+    {
+      "round": "round1",
+      "n": 20,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "etailment.de",
+      "url": "https://www.etailment.de/magazin/2026-08-04-wax-lyrical-duftet-jetzt-auch-online",
+      "title": "Wax Lyrical duftet jetzt auch online",
+      "reasons": [
+        "keyword:online commerce",
+        "keyword:marketplace/platform"
+      ],
+      "label": "irrelevant",
+      "note": "UK candle maker launches DTC shop"
+    },
+    {
+      "round": "round1",
+      "n": 21,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "ohn.haendlerbund.de",
+      "url": "https://ohn.haendlerbund.de/recht/rechtsfragen/136646-retoure-widerruf-verloren-haftung-ruecksendung",
+      "title": "Retoure geht nach Widerruf verloren – Wer haftet?",
+      "reasons": [
+        "keyword:online commerce",
+        "keyword:parcel"
+      ],
+      "label": "irrelevant",
+      "note": "evergreen legal Q&A: lost return parcel liability"
+    },
+    {
+      "round": "round1",
+      "n": 22,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/us-zoelle-haendlerbund-fordert-klarheit-zu-neuen-versandregeln-226013.html",
+      "title": "US-Zölle: Händlerbund fordert Klarheit zu neuen Versandregeln",
+      "reasons": [
+        "brand:DHL",
+        "topic:de-minimis",
+        "keyword:online commerce",
+        "keyword:parcel",
+        "keyword:customs",
+        "keyword:parcel sector",
+        "keyword:enforcement"
+      ],
+      "label": "relevant",
+      "note": "US de-minimis changes; Handlerbund on parcel shipping rules; de-minimis is a customer topic"
+    },
+    {
+      "round": "round1",
+      "n": 23,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "verkehrsrundschau.de",
+      "url": "https://www.verkehrsrundschau.de/nachrichten/transport-logistik/gruber-manager-uebernimmt-logistikplattform-alice-3897154",
+      "title": "GRUBER-Manager übernimmt Logistikplattform ALICE",
+      "reasons": [
+        "keyword:marketplace/platform",
+        "keyword:supply chain",
+        "keyword:enforcement"
+      ],
+      "label": "irrelevant",
+      "note": "ALICE logistics platform elects chair"
+    },
+    {
+      "round": "round1",
+      "n": 24,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/personalie-neuer-coo-fuer-fuchs-schmitt-225503.html",
+      "title": "Personalie: Neuer COO für Fuchs Schmitt",
+      "reasons": [
+        "keyword:customs",
+        "keyword:supply chain"
+      ],
+      "label": "irrelevant",
+      "note": "fashion company appoints COO"
+    },
+    {
+      "round": "round1",
+      "n": 25,
+      "stratum": "selected_random",
+      "source_kind": "regulatory",
+      "source": "bundesnetzagentur.de",
+      "url": "http://www.bundesnetzagentur.de/SharedDocs/Pressemitteilungen/DE/2026/20260729_KI_VO.html",
+      "title": "Bundesnetzagentur übernimmt zentrale Rolle bei der Umsetzung der KI-Verordnung",
+      "reasons": [
+        "topic:Marktüberwachung",
+        "keyword:regulation",
+        "keyword:regulatory instrument",
+        "keyword:enforcement"
+      ],
+      "label": "unsure",
+      "note": "BNetzA becomes AI Act market-surveillance authority; horizontal regulation, not e-commerce specific"
+    },
+    {
+      "round": "round1",
+      "n": 26,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "ohn.haendlerbund.de",
+      "url": "https://ohn.haendlerbund.de/themen/marktplaetze/kommt-es-jetzt-auch-bei-ebay-zu-auszahlungsverzoegerungen",
+      "title": "Kommt es jetzt auch bei Ebay zu Auszahlungsverzögerungen?",
+      "reasons": [
+        "keyword:online commerce",
+        "keyword:marketplace/platform"
+      ],
+      "label": "irrelevant",
+      "note": "eBay seller payout timing"
+    },
+    {
+      "round": "round1",
+      "n": 27,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/zukunftsstudie-kuenstliche-intelligenz-und-die-lieferketten-von-2035-226015.html",
+      "title": "Zukunftsstudie: Künstliche Intelligenz und die Lieferketten von 2035",
+      "reasons": [
+        "keyword:supply chain",
+        "keyword:marketplace/platform"
+      ],
+      "label": "irrelevant",
+      "note": "supply chain 2035 study"
+    },
+    {
+      "round": "round1",
+      "n": 28,
+      "stratum": "selected_random",
+      "source_kind": "regulatory",
+      "source": "verbraucherzentrale.de",
+      "url": "https://www.verbraucherzentrale.de/verbandsklagen/klage-gegen-yd-yourdelivery-gmbh-105076",
+      "title": "Klage gegen yd. yourdelivery GmbH",
+      "reasons": [
+        "keyword:marketplace/platform",
+        "keyword:enforcement"
+      ],
+      "label": "irrelevant",
+      "note": "Verbraucherzentrale case vs Lieferando fee, plus teaser furniture"
+    },
+    {
+      "round": "round1",
+      "n": 29,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "ohn.haendlerbund.de",
+      "url": "https://ohn.haendlerbund.de/recht/rechtsfragen/ruecksendeetikett-selbst-bezahlt-erstattet",
+      "title": "Rücksendeetikett selbst bezahlt – wer erstattet die Kosten?",
+      "reasons": [
+        "keyword:online commerce",
+        "keyword:parcel",
+        "keyword:regulatory instrument"
+      ],
+      "label": "irrelevant",
+      "note": "evergreen legal Q&A: who pays return labels"
+    },
+    {
+      "round": "round1",
+      "n": 30,
+      "stratum": "selected_random",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/e-commerce-dhl-analysiert-trends-fuer-den-onlinehandel-216553.html",
+      "title": "E-Commerce: DHL analysiert Trends für den Onlinehandel",
+      "reasons": [
+        "brand:DHL",
+        "keyword:online commerce",
+        "keyword:marketplace/platform"
+      ],
+      "label": "relevant",
+      "note": "DHL E-Commerce trends report with German delivery/returns figures (competitor)"
+    },
+    {
+      "round": "round2",
+      "n": 1,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "bpex-ev.de",
+      "url": "https://bpex-ev.de/themen-und-positionen/postgesetz",
+      "title": "Postgesetz und Wettbewerb",
+      "reasons": [
+        "topic:Postgesetz",
+        "brand:DHL",
+        "topic:Paketmarkt",
+        "keyword:parcel",
+        "keyword:regulation",
+        "keyword:parcel sector"
+      ],
+      "label": "relevant",
+      "note": "BPEX position: postal law lets DHL cross-subsidise parcels from letter postage"
+    },
+    {
+      "round": "round2",
+      "n": 2,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/kep-paketbranche-verzeichnet-fuer-2024-ein-plus-beim-sendungsvolumen-von-2-8-prozent-218601.html",
+      "title": "KEP: Paketbranche verzeichnet für 2024 ein Plus beim Sendungsvolumen von 2,8 Prozent",
+      "reasons": [
+        "keyword:parcel",
+        "keyword:KEP",
+        "topic:Paketmarkt",
+        "keyword:online commerce",
+        "keyword:regulation",
+        "keyword:parcel sector"
+      ],
+      "label": "relevant",
+      "note": "KEP study 2025: parcel volumes, B2C share, forecast"
+    },
+    {
+      "round": "round2",
+      "n": 3,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "etailment.de",
+      "url": "https://www.etailment.de/magazin/2026-09-01-oesterreichs-paketsteuer-740-euro-aufschlag",
+      "title": "Österreichs Paketsteuer: 7,40 Euro Aufschlag",
+      "reasons": [
+        "keyword:parcel",
+        "brand:Temu",
+        "brand:AliExpress",
+        "topic:Paketabgabe",
+        "keyword:China/chinesisch",
+        "keyword:online commerce",
+        "keyword:marketplace/platform",
+        "keyword:customs",
+        "keyword:import",
+        "keyword:regulation",
+        "keyword:supply chain"
+      ],
+      "label": "relevant",
+      "note": "Austria parcel tax + EU 3-euro import fee; Temu/AliExpress volumes halved"
+    },
+    {
+      "round": "round2",
+      "n": 4,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "etailment.de",
+      "url": "https://www.etailment.de/magazin/2026-07-17-tiktok-macht-seinen-agenturpartnern-konkurrenz",
+      "title": "Tiktok macht seinen Agenturpartnern Konkurrenz",
+      "reasons": [
+        "brand:TikTok Shop",
+        "keyword:China/chinesisch",
+        "keyword:online commerce",
+        "keyword:marketplace/platform"
+      ],
+      "label": "unsure",
+      "note": "TikTok Shop managed services in the US; customer, but outside the market"
+    },
+    {
+      "round": "round2",
+      "n": 5,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "bpex-ev.de",
+      "url": "https://bpex-ev.de/aktuelles?page_a12=6",
+      "title": "Aktuelles",
+      "reasons": [
+        "topic:Einfuhrumsatzsteuer",
+        "topic:Postgesetz",
+        "keyword:parcel",
+        "keyword:import",
+        "keyword:parcel sector"
+      ],
+      "label": "irrelevant",
+      "note": "BPEX pagination hub of 2020-23 teasers; config residue"
+    },
+    {
+      "round": "round2",
+      "n": 6,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "ohn.haendlerbund.de",
+      "url": "https://ohn.haendlerbund.de/themen/marktplaetze/eu-zoll-temu-billigimporte-china-gehen-zurueck",
+      "title": "EU-Zoll trifft Temu & Co.: Billigimporte aus China gehen deutlich zurück",
+      "reasons": [
+        "brand:Temu",
+        "keyword:China/chinesisch",
+        "keyword:customs",
+        "brand:Shein",
+        "brand:AliExpress",
+        "brand:DHL",
+        "keyword:online commerce",
+        "keyword:marketplace/platform",
+        "keyword:parcel",
+        "keyword:import",
+        "keyword:product safety",
+        "keyword:regulatory instrument"
+      ],
+      "label": "relevant",
+      "note": "EU flat duty on low-value parcels: imports from Temu, AliExpress, Shein down 30-50%"
+    },
+    {
+      "round": "round2",
+      "n": 7,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "ohn.haendlerbund.de",
+      "url": "https://ohn.haendlerbund.de/logistik/paketdienste/dhl-dpd-welcher-paketdienst-zuverlaessig",
+      "title": "DHL, DPD und Co.: Welcher Paketdienst löst Probleme am zuverlässigsten?",
+      "reasons": [
+        "brand:DHL",
+        "brand:DPD",
+        "keyword:parcel",
+        "keyword:parcel sector",
+        "brand:Hermes",
+        "brand:UPS",
+        "brand:GLS",
+        "keyword:marketplace/platform"
+      ],
+      "label": "relevant",
+      "note": "complaint-handling study of DHL, DPD, GLS, Hermes, UPS"
+    },
+    {
+      "round": "round2",
+      "n": 8,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "ohn.haendlerbund.de",
+      "url": "https://ohn.haendlerbund.de/recht/rechtsfragen/gpsr-print-on-demand-hersteller",
+      "title": "GPSR bei Print-on-Demand: Wer ist eigentlich Hersteller?",
+      "reasons": [
+        "topic:GPSR",
+        "keyword:product safety",
+        "keyword:regulatory instrument"
+      ],
+      "label": "unsure",
+      "note": "GPSR legal Q&A on print-on-demand; relevant regulation, merchant-advice angle"
+    },
+    {
+      "round": "round2",
+      "n": 9,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/logix-award-2025-jury-nominiert-sechs-finalisten-219554.html",
+      "title": "Logix Award 2025: Jury nominiert sechs Finalisten",
+      "reasons": [
+        "brand:DHL"
+      ],
+      "label": "irrelevant",
+      "note": "Logix Award finalists; DHL only in member list"
+    },
+    {
+      "round": "round2",
+      "n": 10,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "bvdw.org",
+      "url": "https://www.bvdw.org/news-und-publikationen/digitalabgabe/",
+      "title": "Richtige Ziele, falsches Instrument — BVDW-Position zur Digitalabgabe",
+      "reasons": [
+        "topic:Digital Services Act",
+        "topic:Digital Markets Act",
+        "keyword:marketplace/platform"
+      ],
+      "label": "irrelevant",
+      "note": "BVDW position on a German digital levy for media"
+    },
+    {
+      "round": "round2",
+      "n": 11,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "etailment.de",
+      "url": "https://www.etailment.de/magazin/2026-08-12-shein-sprintet-an-die-boerse",
+      "title": "Shein sprintet an die Börse",
+      "reasons": [
+        "brand:Shein",
+        "keyword:online commerce",
+        "keyword:regulation"
+      ],
+      "label": "relevant",
+      "note": "Shein IPO valuation, margins, regulatory pressure"
+    },
+    {
+      "round": "round2",
+      "n": 12,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "ohn.haendlerbund.de",
+      "url": "https://ohn.haendlerbund.de/themen/marktplaetze/ebay-dhl-tracking-paeckchen",
+      "title": "Ebay und DHL ermöglichen Tracking von Päckchen",
+      "reasons": [
+        "brand:DHL",
+        "keyword:marketplace/platform",
+        "keyword:parcel"
+      ],
+      "label": "relevant",
+      "note": "eBay and DHL add tracking for Paeckchen"
+    },
+    {
+      "round": "round2",
+      "n": 13,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/nachhaltigkeit-geberit-reduziert-mit-dhl-express-verpackungsmuell-225726.html",
+      "title": "Nachhaltigkeit: Geberit reduziert mit DHL Express Verpackungsmüll",
+      "reasons": [
+        "brand:DHL"
+      ],
+      "label": "unsure",
+      "note": "DHL Express reusable pallet wraps for Geberit; minor competitor PR"
+    },
+    {
+      "round": "round2",
+      "n": 14,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/logistik-consulting-hoeveler-holzmann-ist-jetzt-valantic-225665.html",
+      "title": "Logistik-Consulting: Höveler Holzmann ist jetzt Valantic",
+      "reasons": [
+        "brand:DPD",
+        "keyword:supply chain"
+      ],
+      "label": "irrelevant",
+      "note": "consultancy rebrand; DPD only in client list"
+    },
+    {
+      "round": "round2",
+      "n": 15,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "ohn.haendlerbund.de",
+      "url": "https://ohn.haendlerbund.de/haendlerbund-news/amazon-haendlerbund-sellerday-2026-naechste-runde",
+      "title": "Amazon und mehr: Der Händlerbund SellerDay geht 2026 in die nächste Runde",
+      "reasons": [
+        "brand:DHL",
+        "keyword:online commerce"
+      ],
+      "label": "irrelevant",
+      "note": "Haendlerbund SellerDay event; DHL as exhibitor"
+    },
+    {
+      "round": "round2",
+      "n": 16,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "ohn.haendlerbund.de",
+      "url": "https://ohn.haendlerbund.de/ki-tech/unternehmen/google-suche-umbau-eu-regeln-staerken-konkurrenz",
+      "title": "Google-Suche vor großem Umbau: EU-Regeln stärken Konkurrenz",
+      "reasons": [
+        "topic:Digital Markets Act",
+        "keyword:enforcement"
+      ],
+      "label": "irrelevant",
+      "note": "Google search changes under DMA"
+    },
+    {
+      "round": "round2",
+      "n": 17,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "bpex-ev.de",
+      "url": "https://bpex-ev.de/sitemap",
+      "title": "Sitemap",
+      "reasons": [
+        "topic:Postgesetz",
+        "keyword:KEP",
+        "keyword:customs"
+      ],
+      "label": "irrelevant",
+      "note": "BPEX sitemap page"
+    },
+    {
+      "round": "round2",
+      "n": 18,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "bpex-ev.de",
+      "url": "https://bpex-ev.de/themen-und-positionen/zoll",
+      "title": "Zoll",
+      "reasons": [
+        "keyword:customs",
+        "topic:Einfuhrumsatzsteuer",
+        "keyword:import"
+      ],
+      "label": "irrelevant",
+      "note": "BPEX evergreen 'Zoll' section page, no position or news"
+    },
+    {
+      "round": "round2",
+      "n": 19,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "haendlerbund.de",
+      "url": "https://www.haendlerbund.de/de/news/aktuelles/wissenssnack/tiktok-datenschutz",
+      "title": "Kurz erklärt » TikTok Datenschutz",
+      "reasons": [
+        "brand:TikTok Shop",
+        "topic:Digital Services Act",
+        "keyword:China/chinesisch",
+        "keyword:marketplace/platform",
+        "keyword:parcel",
+        "keyword:enforcement"
+      ],
+      "label": "irrelevant",
+      "note": "evergreen TikTok data-protection guide for merchants"
+    },
+    {
+      "round": "round2",
+      "n": 20,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/transport-logistic-2025-logistikservices-aus-einer-hand-bei-ups-209963.html",
+      "title": "transport logistic 2025: Logistikservices aus einer Hand bei UPS",
+      "reasons": [
+        "brand:UPS",
+        "keyword:online commerce",
+        "keyword:parcel"
+      ],
+      "label": "relevant",
+      "note": "UPS Global Checkout: duties shown at checkout for cross-border e-commerce"
+    },
+    {
+      "round": "round2",
+      "n": 21,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/personalie-anabela-pires-ist-neue-ceo-von-dhl-freight-225681.html",
+      "title": "Personalie: Anabela Pires ist neue CEO von DHL Freight",
+      "reasons": [
+        "brand:DHL",
+        "keyword:supply chain"
+      ],
+      "label": "irrelevant",
+      "note": "DHL Freight (road freight) CEO appointment"
+    },
+    {
+      "round": "round2",
+      "n": 22,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "bpex-ev.de",
+      "url": "https://bpex-ev.de/presse/meldung/statement-sektorgutachten-monopolkommission",
+      "title": "Postrecht braucht dringend weitere Reformen",
+      "reasons": [
+        "brand:DHL",
+        "topic:Postgesetz",
+        "topic:Paketmarkt",
+        "keyword:parcel",
+        "keyword:KEP",
+        "keyword:customs",
+        "keyword:parcel sector"
+      ],
+      "label": "relevant",
+      "note": "BPEX on Monopolkommission: DHL dominance in parcels, VAT privilege"
+    },
+    {
+      "round": "round2",
+      "n": 23,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/logistikdienstleistung-ups-bringt-nachhaltige-versandloesung-auf-den-deutschen-markt-216372.html",
+      "title": "Logistikdienstleistung: UPS bringt nachhaltige Versandlösung auf den deutschen Markt",
+      "reasons": [
+        "brand:UPS",
+        "keyword:parcel",
+        "keyword:import",
+        "keyword:supply chain"
+      ],
+      "label": "unsure",
+      "note": "UPS SmartEnergy emissions product in Germany"
+    },
+    {
+      "round": "round2",
+      "n": 24,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/personalie-neue-fuehrung-bei-dhl-supply-chain-europe-225569.html",
+      "title": "Personalie: Neue Führung bei DHL Supply Chain Europe",
+      "reasons": [
+        "brand:DHL",
+        "keyword:supply chain"
+      ],
+      "label": "irrelevant",
+      "note": "DHL Supply Chain Europe CEO appointment"
+    },
+    {
+      "round": "round2",
+      "n": 25,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "etailment.de",
+      "url": "https://www.etailment.de/magazin/2026-07-16-suedkorea-macht-temu-und-shein-haftbarer",
+      "title": "Südkorea macht Temu und Shein haftbarer",
+      "reasons": [
+        "brand:Temu",
+        "brand:Shein",
+        "brand:AliExpress",
+        "keyword:online commerce",
+        "keyword:marketplace/platform",
+        "keyword:product safety",
+        "keyword:regulatory instrument",
+        "keyword:enforcement"
+      ],
+      "label": "unsure",
+      "note": "South Korea makes Temu/Shein/AliExpress name liable local agents; customers, outside EU"
+    },
+    {
+      "round": "round2",
+      "n": 26,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "ohn.haendlerbund.de",
+      "url": "https://ohn.haendlerbund.de/themen/marktplaetze/ebay-live-waechst-massiv-vorteile-haendler",
+      "title": "Ebay Live wächst massiv – So groß sind die Vorteile für Händler mit Live-Angeboten",
+      "reasons": [
+        "brand:TikTok Shop",
+        "keyword:marketplace/platform"
+      ],
+      "label": "irrelevant",
+      "note": "eBay Live growth; TikTok Shop only as comparison"
+    },
+    {
+      "round": "round2",
+      "n": 27,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "logistik-heute.de",
+      "url": "https://logistik-heute.de/news/kep-temu-und-die-oesterreichische-post-bauen-gemeinsamen-abhol-und-zustelldienst-auf-225413.html",
+      "title": "KEP: Temu und die Österreichische Post bauen gemeinsamen Abhol- und Zustelldienst auf",
+      "reasons": [
+        "brand:Temu",
+        "keyword:KEP",
+        "keyword:online commerce",
+        "keyword:marketplace/platform"
+      ],
+      "label": "relevant",
+      "note": "Temu and Austrian Post build PUDO service; Temu local-to-local warehouses"
+    },
+    {
+      "round": "round2",
+      "n": 28,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "bpex-ev.de",
+      "url": "https://bpex-ev.de/ueber-uns/mitglieder",
+      "title": "Mitglieder",
+      "reasons": [
+        "brand:Hermes",
+        "brand:UPS",
+        "brand:DPD",
+        "brand:GLS",
+        "keyword:parcel"
+      ],
+      "label": "irrelevant",
+      "note": "BPEX member list"
+    },
+    {
+      "round": "round2",
+      "n": 29,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "etailment.de",
+      "url": "https://www.etailment.de/magazin/2026-07-27-shein-rutscht-vor-dem-ipo-ins-minus",
+      "title": "Shein rutscht vor dem IPO ins Minus",
+      "reasons": [
+        "brand:Shein",
+        "topic:de-minimis",
+        "keyword:online commerce",
+        "keyword:parcel",
+        "keyword:customs",
+        "keyword:import",
+        "keyword:regulation"
+      ],
+      "label": "relevant",
+      "note": "Shein Q1 loss blamed on end of US de-minimis"
+    },
+    {
+      "round": "round2",
+      "n": 30,
+      "stratum": "news_brand_topic",
+      "source_kind": "news",
+      "source": "etailment.de",
+      "url": "https://www.etailment.de/magazin/2026-09-04-compare-group-startet-in-vier-neuen-maerkten",
+      "title": "Compare Group startet in vier neuen Märkten",
+      "reasons": [
+        "topic:Digital Markets Act",
+        "keyword:marketplace/platform",
+        "keyword:regulation",
+        "keyword:enforcement"
+      ],
+      "label": "irrelevant",
+      "note": "price-comparison group expands; Google DMA fine as background"
+    },
+    {
+      "round": "round2",
+      "n": 31,
+      "stratum": "reg_selected",
+      "source_kind": "regulatory",
+      "source": "ec.europa.eu",
+      "url": "https://ec.europa.eu/commission/presscorner/detail/en/ip_26_1772",
+      "title": "Commission designates ChatGPT, Reddit, Roblox under Digital Services Act*",
+      "reasons": [
+        "topic:Digital Services Act",
+        "keyword:marketplace/platform"
+      ],
+      "label": "irrelevant",
+      "note": "DSA designations of ChatGPT, Reddit, Roblox; no marketplace"
+    },
+    {
+      "round": "round2",
+      "n": 32,
+      "stratum": "reg_selected",
+      "source_kind": "regulatory",
+      "source": "verbraucherzentrale.de",
+      "url": "https://www.verbraucherzentrale.de/verbandsklagen/klage-gegen-bond-street-partners-ltd-90893",
+      "title": "Klage gegen Bond Street Partners Ltd.",
+      "reasons": [
+        "keyword:import",
+        "keyword:enforcement"
+      ],
+      "label": "irrelevant",
+      "note": "consumer case: supplement advertising"
+    },
+    {
+      "round": "round2",
+      "n": 33,
+      "stratum": "reg_selected",
+      "source_kind": "regulatory",
+      "source": "ec.europa.eu",
+      "url": "https://ec.europa.eu/commission/presscorner/detail/en/mex_26_1768",
+      "title": "Daily News 28 / 08 / 2026",
+      "reasons": [
+        "keyword:import",
+        "keyword:regulation"
+      ],
+      "label": "irrelevant",
+      "note": "EC daily news: defence, aid, fisheries, agri trade"
+    },
+    {
+      "round": "round2",
+      "n": 34,
+      "stratum": "reg_selected",
+      "source_kind": "regulatory",
+      "source": "ec.europa.eu",
+      "url": "https://ec.europa.eu/commission/presscorner/detail/en/mex_26_1789",
+      "title": "Daily News 02 / 09 / 2026",
+      "reasons": [
+        "keyword:regulation",
+        "keyword:supply chain"
+      ],
+      "label": "irrelevant",
+      "note": "EC daily news: maritime alliance, capacity mechanism, mergers"
+    },
+    {
+      "round": "round2",
+      "n": 35,
+      "stratum": "reg_selected",
+      "source_kind": "regulatory",
+      "source": "ec.europa.eu",
+      "url": "https://ec.europa.eu/commission/presscorner/detail/en/speech_26_1781",
+      "title": "Keynote speech by Commissioner Hoekstra at the Opening of the Academic Year in Delft: 'Europe's Industrial and Technological Renaissance'",
+      "reasons": [
+        "keyword:China/chinesisch",
+        "keyword:import",
+        "keyword:supply chain"
+      ],
+      "label": "irrelevant",
+      "note": "Hoekstra speech on clean tech and China"
+    },
+    {
+      "round": "round2",
+      "n": 36,
+      "stratum": "reg_selected",
+      "source_kind": "regulatory",
+      "source": "ec.europa.eu",
+      "url": "https://ec.europa.eu/commission/presscorner/detail/en/speech_26_1786",
+      "title": "Commissioner Roswall's address at the High Level Roundtable, 'Water in the Boardroom'",
+      "reasons": [
+        "keyword:regulation",
+        "keyword:supply chain"
+      ],
+      "label": "irrelevant",
+      "note": "Roswall speech on water resilience"
+    },
+    {
+      "round": "round2",
+      "n": 37,
+      "stratum": "reg_selected",
+      "source_kind": "regulatory",
+      "source": "ec.europa.eu",
+      "url": "https://ec.europa.eu/commission/presscorner/detail/en/speech_26_1807",
+      "title": "Keynote Speech by Executive Vice-President Teresa Ribera at the OECD Conference ‘Modernising merger control for an evolving world'",
+      "reasons": [
+        "keyword:import",
+        "keyword:supply chain"
+      ],
+      "label": "irrelevant",
+      "note": "Ribera speech on merger guidelines"
+    },
+    {
+      "round": "round2",
+      "n": 38,
+      "stratum": "reg_selected",
+      "source_kind": "regulatory",
+      "source": "ec.europa.eu",
+      "url": "https://ec.europa.eu/commission/presscorner/detail/en/qanda_26_1819",
+      "title": "Questions and answers on the EU Public Procurement Act",
+      "reasons": [
+        "keyword:marketplace/platform",
+        "keyword:regulation",
+        "keyword:third country",
+        "keyword:supply chain"
+      ],
+      "label": "irrelevant",
+      "note": "Q&A on the Public Procurement Act"
+    },
+    {
+      "round": "round2",
+      "n": 39,
+      "stratum": "reg_selected",
+      "source_kind": "regulatory",
+      "source": "bundesnetzagentur.de",
+      "url": "http://www.bundesnetzagentur.de/SharedDocs/Pressemitteilungen/DE/2026/20260706_DSC_ebay.html",
+      "title": "Digital Services Coordinator in der Bundesnetzagentur fordert eBay zur Einhaltung von Nutzerrechten nach dem Digital Services Act auf",
+      "reasons": [
+        "topic:Digital Services Act",
+        "keyword:marketplace/platform",
+        "keyword:regulatory instrument",
+        "keyword:enforcement"
+      ],
+      "label": "relevant",
+      "note": "BNetzA DSC finds eBay DSA breaches incl. trader traceability"
+    },
+    {
+      "round": "round2",
+      "n": 40,
+      "stratum": "reg_selected",
+      "source_kind": "regulatory",
+      "source": "verbraucherzentrale.de",
+      "url": "https://www.verbraucherzentrale.de/wissen/vertraege-reklamation/abzocke/finanzdienstleister-werben-auf-dem-unicampus-92094",
+      "title": "Finanzdienstleister werben auf dem Uni-Campus",
+      "reasons": [
+        "keyword:marketplace/platform",
+        "keyword:parcel"
+      ],
+      "label": "irrelevant",
+      "note": "consumer advice: finance sellers on campus"
+    },
+    {
+      "round": "round2",
+      "n": 41,
+      "stratum": "reg_selected",
+      "source_kind": "regulatory",
+      "source": "ec.europa.eu",
+      "url": "https://ec.europa.eu/commission/presscorner/detail/en/speech_26_1796",
+      "title": "Commissioner Roswall's speech at the Environment Ireland Conference 2026",
+      "reasons": [
+        "keyword:import",
+        "keyword:regulation"
+      ],
+      "label": "irrelevant",
+      "note": "Roswall speech on nature restoration"
+    },
+    {
+      "round": "round2",
+      "n": 42,
+      "stratum": "reg_selected",
+      "source_kind": "regulatory",
+      "source": "ec.europa.eu",
+      "url": "https://ec.europa.eu/commission/presscorner/detail/en/mex_26_1775",
+      "title": "Daily News 31 / 08 / 2026",
+      "reasons": [
+        "topic:Digital Services Act",
+        "keyword:marketplace/platform",
+        "keyword:import",
+        "keyword:regulation",
+        "keyword:third country",
+        "keyword:supply chain"
+      ],
+      "label": "irrelevant",
+      "note": "EC daily news: DSA designations, recovery fund, steel melt-and-pour"
+    },
+    {
+      "round": "round2",
+      "n": 43,
+      "stratum": "reg_selected",
+      "source_kind": "regulatory",
+      "source": "taxation-customs.ec.europa.eu",
+      "url": "https://taxation-customs.ec.europa.eu/news/european-commission-publishes-guidance-cbam-verifiers-and-accreditation-bodies-2026-08-24_en",
+      "title": "The European Commission publishes guidance for CBAM verifiers and accreditation bodies",
+      "reasons": [
+        "keyword:customs",
+        "keyword:import",
+        "keyword:regulation"
+      ],
+      "label": "irrelevant",
+      "note": "CBAM verifier guidance; heavy-industry imports, not parcels"
+    },
+    {
+      "round": "round2",
+      "n": 44,
+      "stratum": "reg_selected",
+      "source_kind": "regulatory",
+      "source": "ec.europa.eu",
+      "url": "https://ec.europa.eu/commission/presscorner/detail/en/ip_26_1798",
+      "title": "Commission approves €400 million German State aid to enhance insulin supply resilience",
+      "reasons": [
+        "keyword:import",
+        "keyword:third country",
+        "keyword:supply chain"
+      ],
+      "label": "irrelevant",
+      "note": "state aid for insulin supply"
+    },
+    {
+      "round": "round2",
+      "n": 45,
+      "stratum": "reg_selected",
+      "source_kind": "regulatory",
+      "source": "ec.europa.eu",
+      "url": "https://ec.europa.eu/commission/presscorner/detail/en/ip_26_1817",
+      "title": "Commission proposes simpler and more strategic Public Procurement rules",
+      "reasons": [
+        "keyword:marketplace/platform",
+        "keyword:regulation",
+        "keyword:third country",
+        "keyword:supply chain"
+      ],
+      "label": "irrelevant",
+      "note": "Public Procurement Regulation proposal"
+    },
+    {
+      "round": "round2",
+      "n": 46,
+      "stratum": "reg_unselected",
+      "source_kind": "regulatory",
+      "source": "bundesnetzagentur.de",
+      "url": "http://www.bundesnetzagentur.de/DE/Allgemeines/Presse/Amtsblatt/Einzeldownloads/Amtsblatt_26_7.html",
+      "title": "Amtsblatt 7/2026",
+      "reasons": [],
+      "label": "irrelevant",
+      "note": "BNetzA gazette: telecoms and energy only, no post section"
+    },
+    {
+      "round": "round2",
+      "n": 47,
+      "stratum": "reg_unselected",
+      "source_kind": "regulatory",
+      "source": "verbraucherzentrale.de",
+      "url": "https://www.verbraucherzentrale.de/verbandsklagen/klage-gegen-lsw-energie-gmbh-co-kg-124110",
+      "title": "Klage gegen LSW Energie GmbH & Co. KG",
+      "reasons": [],
+      "label": "irrelevant",
+      "note": "consumer case: district heating price clause"
+    },
+    {
+      "round": "round2",
+      "n": 48,
+      "stratum": "reg_unselected",
+      "source_kind": "regulatory",
+      "source": "verbraucherzentrale.de",
+      "url": "https://www.verbraucherzentrale.de/verbandsklagen/klage-gegen-mapa-finanz-gmbh-116127",
+      "title": "Klage gegen MAPA Finanz GmbH",
+      "reasons": [],
+      "label": "irrelevant",
+      "note": "consumer case: finance contract clauses"
+    },
+    {
+      "round": "round2",
+      "n": 49,
+      "stratum": "reg_unselected",
+      "source_kind": "regulatory",
+      "source": "bundesnetzagentur.de",
+      "url": "http://www.bundesnetzagentur.de/SharedDocs/Pressemitteilungen/DE/2026/20260814_WACC.html",
+      "title": "Bundesnetzagentur kon­sul­tiert pau­scha­lier­te Ka­pi­tal­ver­zin­sung für die Gas­netz­be­trei­ber",
+      "reasons": [],
+      "label": "irrelevant",
+      "note": "gas network WACC consultation"
+    },
+    {
+      "round": "round2",
+      "n": 50,
+      "stratum": "reg_unselected",
+      "source_kind": "regulatory",
+      "source": "verbraucherzentrale.de",
+      "url": "https://www.verbraucherzentrale.de/verbandsklagen/klage-gegen-emobg-services-germany-gmbh-123662",
+      "title": "Klage gegen EMobG Services Germany GmbH",
+      "reasons": [],
+      "label": "irrelevant",
+      "note": "consumer case page with only teaser furniture (car sharing)"
+    },
+    {
+      "round": "round2",
+      "n": 51,
+      "stratum": "reg_unselected",
+      "source_kind": "regulatory",
+      "source": "verbraucherzentrale.de",
+      "url": "https://www.verbraucherzentrale.de/verbandsklagen/klage-gegen-loewen-fitness-119158",
+      "title": "Klage gegen Löwen Fitness",
+      "reasons": [],
+      "label": "irrelevant",
+      "note": "consumer case: gym reviews"
+    },
+    {
+      "round": "round2",
+      "n": 52,
+      "stratum": "reg_unselected",
+      "source_kind": "regulatory",
+      "source": "verbraucherzentrale.de",
+      "url": "https://www.verbraucherzentrale.de/verbandsklagen/klage-gegen-finn-assets-ii-gmbh-116648",
+      "title": "Klage gegen Finn Assets II GmbH",
+      "reasons": [],
+      "label": "irrelevant",
+      "note": "consumer case: car rental clauses"
+    },
+    {
+      "round": "round2",
+      "n": 53,
+      "stratum": "reg_unselected",
+      "source_kind": "regulatory",
+      "source": "bundesnetzagentur.de",
+      "url": "http://www.bundesnetzagentur.de/SharedDocs/Pressemitteilungen/DE/2026/20260630_WettebwerbFernverkehr.html",
+      "title": "Mehr Wett­be­werb im Fern­ver­kehr – Bundesnetzagentur will fai­re Chan­cen für neue An­bie­ter schaf­fen",
+      "reasons": [],
+      "label": "irrelevant",
+      "note": "rail long-distance competition clause"
+    },
+    {
+      "round": "round2",
+      "n": 54,
+      "stratum": "reg_unselected",
+      "source_kind": "regulatory",
+      "source": "edpb.europa.eu",
+      "url": "https://www.edpb.europa.eu/news/data-protection-commission-announces-final-decision-following-inquiry-into-the-health-service_en",
+      "title": "Data Protection Commission announces Final Decision following Inquiry into the Health Service Executive (HSE) | European Data Protection Board",
+      "reasons": [],
+      "label": "irrelevant",
+      "note": "Irish DPC fine against health service"
+    },
+    {
+      "round": "round2",
+      "n": 55,
+      "stratum": "reg_unselected",
+      "source_kind": "regulatory",
+      "source": "bundesnetzagentur.de",
+      "url": "http://www.bundesnetzagentur.de/DE/Fachthemen/ElektrizitaetundGas/Ausschreibungen/Wind_Onshore/GT03082026/artikel.html",
+      "title": "Wind an Land: Ge­bots­ter­min 1. Au­gust 2026",
+      "reasons": [],
+      "label": "irrelevant",
+      "note": "onshore wind auction"
+    },
+    {
+      "round": "round2",
+      "n": 56,
+      "stratum": "reg_unselected",
+      "source_kind": "regulatory",
+      "source": "verbraucherzentrale.de",
+      "url": "https://www.verbraucherzentrale.de/verbandsklagen/klage-gegen-american-express-europe-101568",
+      "title": "Klage gegen American Express Europe",
+      "reasons": [],
+      "label": "irrelevant",
+      "note": "consumer case: credit card chargebacks"
+    },
+    {
+      "round": "round2",
+      "n": 57,
+      "stratum": "reg_unselected",
+      "source_kind": "regulatory",
+      "source": "verbraucherzentrale.de",
+      "url": "https://www.verbraucherzentrale.de/verbandsklagen/klage-gegen-deutsches-maklerkontor-noris-ug-123517",
+      "title": "Klage gegen Deutsches Maklerkontor Noris UG",
+      "reasons": [],
+      "label": "irrelevant",
+      "note": "consumer case: debt-restructuring broker clauses"
+    },
+    {
+      "round": "round2",
+      "n": 58,
+      "stratum": "reg_unselected",
+      "source_kind": "regulatory",
+      "source": "verbraucherzentrale.de",
+      "url": "https://www.verbraucherzentrale.de/verbandsklagen/klage-gegen-ningbo-deye-inverter-technology-co-ltd-109759",
+      "title": "Klage gegen Ningbo Deye Inverter Technology Co., Ltd.",
+      "reasons": [],
+      "label": "irrelevant",
+      "note": "consumer case vs Chinese inverter maker; body is teaser furniture only"
+    },
+    {
+      "round": "round2",
+      "n": 59,
+      "stratum": "reg_unselected",
+      "source_kind": "regulatory",
+      "source": "ec.europa.eu",
+      "url": "https://ec.europa.eu/commission/presscorner/detail/en/speech_26_1816",
+      "title": "Speech by Commissioner Šefčovič at BoKoWiTa, the Conference of the Heads of German Missions Abroad Business Forum",
+      "reasons": [],
+      "label": "irrelevant",
+      "note": "Sefcovic speech on trade policy and China"
+    },
+    {
+      "round": "round2",
+      "n": 60,
+      "stratum": "reg_unselected",
+      "source_kind": "regulatory",
+      "source": "verbraucherzentrale.de",
+      "url": "https://www.verbraucherzentrale.de/verbandsklagen/klage-gegen-hellofresh-verfahren-iii-107193",
+      "title": "Klage gegen HelloFresh, Verfahren III",
+      "reasons": [],
+      "label": "irrelevant",
+      "note": "consumer case: HelloFresh debt collection"
+    }
+  ]
+}

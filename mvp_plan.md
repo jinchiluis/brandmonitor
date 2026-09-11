@@ -1,6 +1,8 @@
 # Brandmonitor MVP Plan
 
-Status: **pre-build**. This is the implementation plan for the first customer pilot.
+Status: **in progress**. Collection, storage, body enrichment, client profiles, the
+deterministic selector, Safety Gate alerts, and DSA aggregates are built. Assessment
+and report generation remain. This is the implementation plan for the first customer pilot.
 The longer product plans remain available as research and future ideas.
 
 ## 1. Goal
@@ -37,27 +39,25 @@ profile and prompt, then analyzing the already collected material.
 
 ### Regulatory
 
-- Copy four files from the reference repository's `src/crawler_gov/`: `bundestag.py`,
-  `europarl.py`, `europarl_epdb.py`, `pdf_utils.py`. Leave `track_history.py` and
-  everything under `src/agents/`.
-- Delete `"f.wahlperiode": 21` from the params in `fetch_vorgaenge`. Hardcoded, it
-  returns nothing after the next federal election, with no error. Keep
-  `f.vorgangstyp` and `f.aktualisiert.start`.
-- Move the DIP API key out of `bundestag.py` into `.env`. It expires in May 2027 and
-  is shared with another project.
-- Collect procedures, documents, and lifecycle updates for a fixed time window.
-  Measured volume: 75 legislative procedures per 14 days without the Wahlperiode
-  filter, 58 with it. Filtering is for precision, not volume reduction.
-- Filter against the customer's product categories, materials, sourcing countries,
-  EU legal role, and company-size bands.
-- Deep-assess only relevant or uncertain items.
+- Keep the eight configured German/EU regulatory article sources independent from
+  news collection and assess them by topic rather than brand.
+- The EU Safety Gate collector stores the strongest measured item-level source,
+  including product, brand, risk, measure, origin, notifying country, recall URL,
+  and online trader.
+- Keep DSA Transparency Database data as a small aggregate background series. It
+  contains no useful product-level detail and says nothing directly about J&T.
+- Store each source's native payload inside the shared raw-item envelope; do not
+  force structured alerts or aggregates into the article schema.
+- Deep-assess only relevant or uncertain records.
 
 ### Reputation
 
-- Reuse `vendor/newscrawler/` for the customer-confirmed websites.
-- Use the customer's brands, aliases, products, sellers, and executives for matching.
-- Use deterministic entity matching first and an LLM only for ambiguity and
-  assessment.
+- Continue daily collection from the configured news, trade, and association sites.
+- Use the versioned client profile for brands, competitors, customers, topics, and
+  sector vocabulary.
+- Use deterministic selection first, a cheap title relevance check for title-only
+  publishers, and full assessment only after body evidence exists.
+- Fetch title-only bodies only after a match; do not bulk-fetch paid publications.
 - Include social or manual collection only where the customer has explicitly
   confirmed the platform and method.
 
@@ -91,10 +91,11 @@ assessment is stored.
 
 ## 5. Customer inputs required
 
-Before the pilot:
+Still required before the pilot report:
 
-- confirmed website and social-platform list;
-- complete brand/entity/alias list;
+- confirmation whether the September 10 keyword list extends or replaces the earlier
+  monitoring terms;
+- explanation of the customer's identifier `01519` and expected alert cadence;
 - product and material categories;
 - sourcing countries and EU legal role;
 - approximate turnover/headcount bands where relevant;
@@ -106,13 +107,14 @@ generic configuration framework is needed.
 
 ## 6. First vertical slice
 
-1. Make one existing collector run through brandmonitor with visible source errors.
-2. Store its raw output in SQLite.
-3. Run one customer relevance/assessment prompt over the stored records.
-4. Store the structured assessment with its prompt/profile version.
-5. Render a minimal report from stored assessments.
-6. Repeat for the other track.
-7. Run both tracks over one fixed pilot window and review the result manually.
+1. ~~Run collectors through brandmonitor with visible source errors.~~
+2. ~~Store versioned raw output and enriched bodies in SQLite.~~
+3. ~~Apply a versioned client profile and deterministic candidate selector.~~
+4. ~~Build Safety Gate and store its native structured payload.~~
+5. Sketch the report and define the structured assessment output it requires.
+6. Implement title gating, fetch-on-match, and full assessment.
+7. Store assessments with prompt/profile/source versions.
+8. Render a minimal Chinese report and run both tracks over one fixed pilot window.
 
 Build sequentially in that order. Do not scaffold every future connector or analysis
 stage before the first source completes the full path.
