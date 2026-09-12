@@ -276,12 +276,13 @@ def _body_metrics(conn: sqlite3.Connection, latest_runs: dict[str, dict[str, Any
             "GROUP BY source_slug, status ORDER BY source_slug, status"
         )
     ]
-    stuck = [
+    repeated_failures = [
         dict(row)
         for row in conn.execute(
-            "SELECT source_slug, COUNT(*) AS n, MAX(attempts) AS max_attempts "
+            "SELECT source_slug, external_id AS url, attempts, attempted_at, error, "
+            "last_run_id "
             "FROM body_fetch WHERE status = 'failed' AND attempts >= 3 "
-            "GROUP BY source_slug ORDER BY source_slug"
+            "ORDER BY source_slug, attempts DESC, external_id"
         )
     ]
     incidents = [
@@ -289,10 +290,9 @@ def _body_metrics(conn: sqlite3.Connection, latest_runs: dict[str, dict[str, Any
             row["source_slug"],
             "repeated_body_failures",
             "warning",
-            f"{row['n']} body URL(s) remain retryable after at least three attempts "
-            f"(maximum {row['max_attempts']})",
+            f"{row['url']} remains retryable after {row['attempts']} attempts",
         )
-        for row in stuck
+        for row in repeated_failures
     ]
     latest_body_runs = {
         kind: run["id"]
@@ -314,6 +314,7 @@ def _body_metrics(conn: sqlite3.Connection, latest_runs: dict[str, dict[str, Any
         "available": True,
         "queue_totals": totals,
         "by_source": by_source,
+        "repeated_failures": repeated_failures,
         "latest_runs": outcomes,
     }, incidents
 

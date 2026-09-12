@@ -143,3 +143,45 @@ def test_missing_source_result_is_detected_without_changing_database(tmp_path):
     assert any(item["check"] == "missing_source_result" for item in result["incidents"])
     with session(db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM run_source").fetchone()[0] == 0
+
+
+def test_repeated_body_failure_incident_names_the_url(tmp_path):
+    db = tmp_path / "db.sqlite3"
+    migrate(db)
+    run_id = _add_news_run(db, 0, 12)
+    failed_url = "https://verbraucher.test/verbandsklagen/example"
+    with session(db) as conn:
+        conn.execute(
+            "INSERT INTO body_fetch "
+            "(source_slug, external_id, discovery_hash, hint_payload, status, attempts, "
+            " attempted_at, error, last_run_id) "
+            "VALUES (?, ?, 'hash', '{}', 'failed', 4, ?, 'HTTP 403', ?)",
+            ("verbraucherzentrale.de", failed_url, "2026-09-12T04:00:00Z", run_id),
+        )
+    news, regulatory, canary_config = _inputs(tmp_path)
+    canary = _canary(tmp_path / "canary.json", run_id)
+
+    result = analyze(
+        db_path=db,
+        news_sources=news,
+        regulatory_sources=regulatory,
+        canary_config=canary_config,
+        canary_file=canary,
+        output_dir=tmp_path / "health",
+        cycle_date="2026-09-13",
+    )
+
+    incident = next(
+        item for item in result["incidents"]
+        if item["check"] == "repeated_body_failures"
+    )
+    assert incident["source"] == "verbraucherzentrale.de"
+    assert incident["message"] == f"{failed_url} remains retryable after 4 attempts"
+    assert result["body_fetch"]["repeated_failures"] == [{
+        "source_slug": "verbraucherzentrale.de",
+        "url": failed_url,
+        "attempts": 4,
+        "attempted_at": "2026-09-12T04:00:00Z",
+        "error": "HTTP 403",
+        "last_run_id": run_id,
+    }]
