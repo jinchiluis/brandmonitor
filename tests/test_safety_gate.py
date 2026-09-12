@@ -13,8 +13,9 @@ from src.db import get_watermark, migrate, session, set_watermark, start_run
 from src.profile import load_profile
 from src.safety_gate import (
     SOURCE_KIND, WATERMARK_SCOPE, SafetyGateError, WeeklyReport,
-    client_match_reasons, parse_report_detail, parse_report_list,
-    run_safety_gate_collection, store_alert,
+    client_match_reasons, compose_body, parse_measures, parse_report_detail,
+    parse_report_list, run_safety_gate_collection, select_client_alerts,
+    store_alert,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -154,3 +155,109 @@ def test_pilot_view_requires_germany_and_china_then_matches_online_trader():
         "notifying_country:Germany", "origin:China", "online_trader:Shein")
     assert client_match_reasons(dict(payload, notifyingCountry="Ireland"), profile) == ()
     assert client_match_reasons(dict(payload, countryOfOrigin="Italy"), profile) == ()
+
+
+def test_measures_split_into_one_dict_each_with_iso_dates():
+    # The field arrives run together: label, value, next label, no separators.
+    text = ("Type of economic operator taking notified measure(s): Manufacturer"
+            "Category of measure(s): Recall of the product from end users"
+            "Date of entry into force: 22/05/2026"
+            "Type of economic operator taking notified measure(s): Manufacturer"
+            "Category of measure(s): Withdrawal of the product from the market"
+            "Date of entry into force: 25/06/2026")
+    assert parse_measures(text) == [
+        {"operator": "Manufacturer",
+         "category": "Recall of the product from end users",
+         "in_force": "2026-05-22"},
+        {"operator": "Manufacturer",
+         "category": "Withdrawal of the product from the market",
+         "in_force": "2026-06-25"},
+    ]
+
+
+def test_measures_tolerate_an_unlabelled_string_and_an_empty_one():
+    # The fixture export states a measure with no labels at all.
+    assert parse_measures("Removal of this product listing by the online marketplace") == [
+        {"operator": None,
+         "category": "Removal of this product listing by the online marketplace",
+         "in_force": None},
+    ]
+    assert parse_measures(None) == []
+    assert parse_measures("   ") == []
+
+
+def test_composed_body_carries_the_fields_an_assessor_needs():
+    body = compose_body(alerts()[0])
+    assert body.startswith(
+        "EU Safety Gate alert SR/02420/26, Serious risk, published 2026-09-11")
+    for expected in ("Product: Necklace", "Risk: Chemical", "Notified by: Germany",
+                     "Country of origin: People's Republic of China",
+                     "Sold online through: Other(Shein (sj23050389953853544))",
+                     "The rate of nickel release is too high.",
+                     "Removal of this product listing by the online marketplace"):
+        assert expected in body, expected
+    # A nil field is omitted rather than printed as "None".
+    assert "Brand:" not in body and "None" not in body
+
+
+def test_composed_body_resolves_html_entities():
+    # Stored payloads carry "Y&amp;H" - a customer must not read the escape.
+    body = compose_body(dict(alerts()[0], brand="Y&amp;H"))
+    assert "Brand: Y&H" in body
+
+
+def test_client_view_composes_a_body_and_names_the_matched_customers(db):
+    with session(db) as conn:
+        run_id = start_run(conn, SOURCE_KIND, "2026-09-11", "2026-09-11")
+        for payload in alerts():
+            store_alert(conn, run_id, payload)
+
+    view = select_client_alerts("jt-express", db_path=db)
+    # Only the German Chinese-origin alert; the Greek/Italian one is excluded.
+    assert [a["case_number"] for a in view] == ["SR/02420/26"]
+    alert = view[0]
+    assert alert["key_customers"] == ("Shein",)
+    assert alert["measures"][0]["category"] == (
+        "Removal of this product listing by the online marketplace")
+    assert alert["body_text"] == compose_body(alert["payload"])
+
+
+def test_client_view_stays_out_of_the_selector_and_the_gates(db):
+    """Safety Gate relevance is two fields, so it must not reach a gate."""
+    from src.selector import selection_from_db
+
+    with session(db) as conn:
+        run_id = start_run(conn, SOURCE_KIND, "2026-09-11", "2026-09-11")
+        for payload in alerts():
+            store_alert(conn, run_id, payload)
+
+    result = selection_from_db(
+        db, ((Path("input/germany_medias.json"), "news"),
+             (Path("input/regulatory_sources.json"), "regulatory")),
+        "all", load_profile("jt-express"))
+    assert not [c for c in result.candidates if c.source_kind == SOURCE_KIND]
+    assert result.eligible == 0
+
+
+def test_measures_read_the_second_operator_spelling():
+    # Both spellings are live in the stored corpus; only one was handled at first.
+    parsed = parse_measures(
+        "Type of economic operator to whom the measure(s) were ordered: Distributor"
+        "Category of measure(s): Removal of this product listing by the online marketplace"
+        "Date of entry into force: 14/08/2026")
+    assert parsed == [{"operator": "Distributor",
+                       "category": "Removal of this product listing by the online marketplace",
+                       "in_force": "2026-08-14"}]
+
+
+def test_an_undatable_measure_has_no_date_rather_than_the_word_unknown():
+    parsed = parse_measures(
+        "Type of economic operator taking notified measure(s): Other"
+        "Category of measure(s): Stop of sales"
+        "Date of entry into force: Unknown")
+    assert parsed == [{"operator": "Other", "category": "Stop of sales",
+                       "in_force": None}]
+    body = compose_body(dict(alerts()[0], measures=(
+        "Category of measure(s): Stop of salesDate of entry into force: Unknown")))
+    assert "Stop of sales" in body
+    assert "Unknown" not in body and "in force" not in body

@@ -14,7 +14,8 @@
       "https://taxation-customs.ec.europa.eu/node/2/rss_en"
     ],
     "notes": "de-minimis and low-value parcel import reform; feed is neither advertised nor at a standard path",
-    "content_mode": "full_text"
+    "content_mode": "full_text",
+    "access": "free"
   },
   {
     "country": "EU",
@@ -31,7 +32,8 @@
       "https://ec.europa.eu/commission/presscorner/api/rss?search?language=en&policyarea=23&pagesize=100"
     ],
     "notes": "DSA and platform enforcement announcements; Temu and Shein are designated VLOPs. The official RSS policyarea=23 filter limits collection to Digital economy and society; deterministic/client assessment still removes unrelated digital-policy items.",
-    "content_mode": "full_text"
+    "content_mode": "full_text",
+    "access": "free"
   },
   {
     "country": "EU",
@@ -45,7 +47,8 @@
     "frontpage": false,
     "allowed_dirs": [],
     "notes": "EU consumer organisation; campaigns against platforms. Feed at the conventional /rss.xml",
-    "content_mode": "full_text"
+    "content_mode": "full_text",
+    "access": "free"
   },
   {
     "country": "EU",
@@ -59,7 +62,8 @@
     "frontpage": false,
     "allowed_dirs": [],
     "notes": "EU-level GDPR enforcement and guidance",
-    "content_mode": "full_text"
+    "content_mode": "full_text",
+    "access": "free"
   },
   {
     "country": "Germany",
@@ -73,7 +77,8 @@
     "frontpage": false,
     "allowed_dirs": [],
     "notes": "German competition proceedings against platforms and logistics; advertises its own feed",
-    "content_mode": "full_text"
+    "content_mode": "full_text",
+    "access": "free"
   },
   {
     "country": "Germany",
@@ -96,7 +101,8 @@
       "DE/Allgemeines/Presse/Amtsblatt",
       "DE/Fachthemen/ElektrizitaetundGas",
       "DE/Fachthemen/Telekommunikation"
-    ]
+    ],
+    "access": "free"
   },
   {
     "country": "Germany",
@@ -110,7 +116,8 @@
     "frontpage": false,
     "allowed_dirs": [],
     "notes": "German consumer association; litigates against platforms",
-    "content_mode": "full_text"
+    "content_mode": "full_text",
+    "access": "free"
   },
   {
     "country": "Germany",
@@ -128,6 +135,57 @@
       "wissen/vertraege-reklamation/abzocke"
     ],
     "notes": "consumer advice; whole-site sitemap of 5057 URLs. Narrowed 2026-09-09 to event-bearing sections only: class actions, court rulings, and named fake-shop warnings. Excluded /wissen otherwise (1832 urls, 6% relevant, and evergreen guides that re-publish in bulk - 421 pages touched in June alone), plus /rezepte, /bildung, /veranstaltungen. See todo.md",
-    "content_mode": "full_text"
+    "content_mode": "full_text",
+    "access": "free"
+  },
+  {
+    "country": "Germany",
+    "organization": "Bundestag and Bundesrat (DIP)",
+    "type": "立法机构",
+    "domain": "立法",
+    "language": "德语",
+    "url": "https://dip.bundestag.de/",
+    "collector": "dip",
+    "sitemap": false,
+    "feeds": false,
+    "frontpage": false,
+    "allowed_dirs": [],
+    "excluded_vorgangstypen": [
+      "Anmerkung zur Plenarsitzung",
+      "Besetzung externer Gremien durch BR",
+      "Besetzung externer Gremien durch BT",
+      "Besetzung interner Gremien des BT",
+      "Bestellung und Abberufung von MdBR und stellv. MdBR",
+      "Entlastung der Bundesregierung",
+      "Entlastung des Bundesrechnungshofes",
+      "Geschäftsordnung",
+      "Immunitätsangelegenheit",
+      "Wahl der Ausschussvorsitzenden BR",
+      "Wahl im BT",
+      "Wahlperiodenwechsel",
+      "Wahlprüfungsverfahren"
+    ],
+    "notes": "Every Bundestag and Bundesrat procedure - bills, Bundesrat resolutions, written and minor questions with the government's answers, EU documents forwarded to parliament - stored by `run.py collect-dip`, not crawled. Every type except the procedural ones above (seats, elections, standing orders, immunity, discharge: 392 of 9,382 records over 90 days). Bills alone would have missed every relevant item found in the 2026-09-11 probe. Record dates are the latest step, not adoption; aktualisiert is a re-indexing stamp. See src/dip.py and docs/source_coverage.md, 'Parliament'.",
+    "content_mode": "full_text",
+    "access": "free"
+  },
+  {
+    "country": "EU",
+    "organization": "European Parliament (Legislative Observatory)",
+    "type": "立法机构",
+    "domain": "立法",
+    "language": "英语",
+    "url": "https://oeil.secure.europarl.europa.eu/",
+    "collector": "ep_procedures",
+    "keyword_prefilter": false,
+    "sitemap": false,
+    "feeds": false,
+    "frontpage": false,
+    "allowed_dirs": [],
+    "procedure_types": ["COD", "CNS", "APP"],
+    "since_year": 2021,
+    "notes": "Every EU legislative procedure since since_year, stored by `run.py collect-ep` from the EP Open Data API, not crawled. Measured 2026-09-11: 609 procedures since 2021, 217 still open, about 3 MB for the open set and a few MB a year of changes. Resolutions (RSP) and own-initiative reports (INI) are out until a report shows the need. It began as a hand-picked list of 14 files for J&T, which made collection client-specific; what that list knew is now clients/jt-express/labels/ep_procedures_2026-09-11.json, an expectation checked against the gate. keyword_prefilter is off because the set is small and titles such as 'Clean corporate vehicles' match no profile keyword, so every procedure goes to the body gate. The API rate-limits without warning: pacing, backoff and a stop-and-resume rule are in src/ep_procedures.py. See docs/source_coverage.md, 'Parliament'.",
+    "content_mode": "full_text",
+    "access": "free"
   }
 ]

@@ -356,6 +356,12 @@ rules are applied later by `select_client_alerts` using the versioned client pro
 Re-fetching an identical alert writes nothing, while a changed official payload
 appends a version.
 
+**Reviewed 2026-09-12 and kept.** All 50 pilot-view alerts were hand-labelled;
+47 were usable, none named a carrier, and the measure-to-publication lag rules
+out immediate alerting. The routing decision is in
+`docs/selection_and_assessment.md`, "Safety Gate"; the labels are in
+`clients/jt-express/labels/safety_gate_2026-09-12.json`.
+
 ### The contract's six domains
 
 `德国及欧盟监管信息监测` names no sources. Its operative sentence is a list of
@@ -557,7 +563,17 @@ client's own brand this source is a structural zero rather than a thin one.
 So the source is a background metric, not a signal source. It supports a chart
 and a sentence about how a platform's enforcement mix is shifting. For something
 that *names* a Chinese-origin product sold in Germany, EU Safety Gate is the
-source — see todo.md §2.
+source.
+
+**Decided 2026-09-12: no weekly slot, and not in `run_daily.bat`.** Over the
+stored 30 days the one client-facing quantity — the unsafe/prohibited-products
+share — is either flat or unreadable: TikTok 0.00 %, AliExpress 0.65 % median
+(0.33–1.08), Temu 63 % median but swinging 29–93 % day to day, and Shein filed
+on 3 of 30 days. A range that wide on a batch-filed series is filing behaviour,
+not enforcement behaviour, so no weekly sentence can be written honestly from
+it. Keep collecting manually — four API calls a day — so a year of history
+exists for a comparative paragraph in a quarterly or first-cycle review. See
+todo.md §2.
 
 ### Not machine-readable
 
@@ -599,6 +615,191 @@ material sits in the trade press:
 So the trade press covers Zoll's *decisions and their business consequences*, which
 is what the client needs, while Zoll's own feed would have supplied drug seizures.
 Dropping it improves the signal-to-noise ratio rather than costing coverage.
+
+### Parliament: Bundestag, Bundesrat and the European Parliament — measured 2026-09-11
+
+The regulatory sources above are regulators' and associations' publications: they
+report enforcement and finished laws, not the legislative pipeline, while the
+customer's row 3 asks for logistics law and policy. GRM (`c:\apps\NewsCrawler`)
+already crawls both parliaments, so its approach was probed live before anything
+was taken from it. Nothing was vendored in the end: both collectors are new and
+small (`src/dip.py`, `src/ep_procedures.py`).
+
+**Bundestag and Bundesrat — the DIP API.** 90 days of changed records
+(2026-06-11 → 09-11): 9,382, of which 7,460 from the current term — 5,470 written
+questions, 978 minor questions, 630 bills. What mattered to a parcel carrier:
+
+| Found in DIP | Type | In the 21,551 stored items? |
+|---|---|---|
+| Bundesrat, "Verbraucher beim Online-Einkauf schützen – … Angebote aus Drittstaaten auf Onlineplattformen" (fee on parcels from third countries, end of the duty exemption); adopted 2025-07-11, government reply 2026-07-16 | Bundesrat resolution | no |
+| Bundesrat, "Marktüberwachung des Online-Handels im Bereich der Produktsicherheit ertüchtigen" | Bundesrat resolution | no |
+| "Kontrollquote bei E-Commerce-Sendungen aus dem Ausland" | written question | no |
+| "Schwerpunktbereichsprüfungen der Finanzkontrolle Schwarzarbeit im Bereich der Kurier-, Express- und Paketdienste" | written question | no |
+| "Gesundheitliche Auswirkungen von schwerem Heben und Tragen bei Paketzustellern"; "PFAS-Belastungen in Textilien der Online-Handelsplattform SHEIN" | written questions | no |
+| Packaging law adapted to the PPWR; EU customs reform | bill; minor question | yes, trade press |
+
+GRM queries bills only (`f.vorgangstyp=Gesetzgebung`) and would have returned
+none of the "no" rows. The large laws reach us through the trade press anyway; what
+DIP adds is the political pre-signal and the government's own figures. So every
+type is collected except the procedural ones in the source entry's
+`excluded_vorgangstypen` (seats, elections, standing orders, immunity, discharge —
+392 of the 9,382).
+
+Two date traps, both the `lastmod` lesson:
+
+- **`aktualisiert` is a re-indexing stamp.** In one 14-day window 1,306 of the
+  1,858 touched current-term records were written questions whose own date was a
+  median 340 days old — the documentation service adding their abstracts — and all
+  614 touched records of earlier terms were over a year old. Collected naively, the
+  archive enters the corpus looking new. A procedure seen for the first time is
+  therefore stored only if its latest step falls in the window (less 60 days for
+  documentation lag). On the first real run, 3,841 records touched in 31 days
+  became 1,656 stored procedures; 2,133 were skipped as re-indexed archive.
+- **A record's `datum` is its latest step, not its adoption.** The marketplace
+  resolution carries 2026-07-16, the federal government's reply to a resolution the
+  Bundesrat adopted on 2025-07-11. The body lists the dated steps so the report
+  can say which step happened.
+
+Freshly documented records carry DIP's subject descriptors (96–100 %), which is
+what found the marketplace resolution when its title did not. A written question's
+abstract — the question itself — arrives only when it is re-indexed, typically a
+year later, and then writes a new version.
+
+First pass through the client funnel (30-day window, J&T profile 2026-09-11.3):
+
+| Stage | DIP | EP (the 14 of the first shape) |
+|---|---:|---:|
+| stored | 1,656 | 14 |
+| selected by the profile | 52 (≈ 12/week) | 14 (no keyword prefilter) |
+| body gate relevant / unsure / irrelevant | 6 / 7 / 39 | 7 / 5 / 2 |
+
+59,069 input tokens for the 66 gate calls. The DIP keeps: the customs-administration
+and FKS law, the Jahressteuergesetz 2026's platform rules, a DSA activity report,
+PFAS in Shein textiles — and two false keeps, the EU–US tariff regulations forwarded
+as EU documents, which are trade policy rather than low-value imports. The 39 drops
+were migration, energy, police law, China geopolitics and three homonyms:
+*Drittstaaten* (deportation), *Regulierung* (neurotech, solar) and *Hermesdeckung*
+(export credit insurance, not the carrier). A recall check over the stored
+procedures the profile did not select found one miss: a written question on
+automated stations replacing postal branches, tagged *Postfiliale*. The profile
+has no general postal vocabulary; see todo.md.
+
+Not covered, and accepted: ministry drafts (*Referentenentwürfe*), the earliest
+stage of a German law. DIP sees a bill once the cabinet sends it to the Bundesrat,
+still months before it takes effect.
+
+**The documents behind the steps — measured 2026-09-11.** A step names a document,
+and DIP's `/drucksache-text/{id}` returns its text. Over the 1,656 stored
+procedures the steps reference 942 written questions (one question each in a
+collective Drucksache), 411 minor questions and 305 answers, 276 plenary protocols,
+134 bills, 178 *Unterrichtungen* - 65 of them list entries, one line in a list of
+EU documents referred to committees - and a tail of motions, committee reports,
+Bundesrat recommendations and opinions, and ordinances. The documents behind the
+13 procedures the gate judged relevant or unsure:
+
+| Document | Full text (chars) | What matters | Cut to |
+|---|---:|---|---:|
+| Written questions, collective Drucksachen of 200+ questions | 170,992-627,020 | the one question | 750-4,500, answer included |
+| Bills | 154,025-1,112,457 | the opening summary, A to F | 5,400-6,800 |
+| Minor question and its answer | 9,076 + 22,064 | all of it | whole |
+| Plenary protocol, step "Mitteilung" | 692,156 | a one-line "taken note" notice | skipped |
+| Referral of an EU document | 4,794 | a list entry; the proposal itself is on EUR-Lex | skipped |
+| DSC activity report | 82,568 | no summary section | first 30,000 |
+
+Samples of the other types: committee reports (*Beschlussempfehlung und Bericht*)
+and ordinances open with the same A-F summary; Bundesrat committee recommendations
+(up to 421,837), Bundesrat opinions (228,226) and EU proposals forwarded to the
+Bundesrat (up to 514,991) do not. The layouts are fixed, so the cut is code: a
+written question runs from its "209. Abgeordnete" line to the next question's, and
+a summary from "A. Problem" to the draft ("Entwurf eines"), the committee's
+recommendation ("Der Bundestag wolle beschließen"), or - in every Bundesrat
+Drucksache sampled - its header printed again above the cover letter.
+
+The documents are where the signal is. The record of the question on PFAS in Shein
+textiles names only the question; the answer adds that customs fees on parcels
+from outside the EU apply since 1 July 2026 and the 150-euro threshold is gone.
+The customs bill's record and summary say nothing about parcels, while one
+amended paragraph deep in its text obliges postal and parcel operators to give
+customs investigators sender and recipient, dimensions and weight, tracking number,
+pickup-station number and time-and-place data for a shipment.
+
+DIP's text lags the document: on 2026-09-11 every Drucksache dated that day came
+back without text, and so did an answer dated 09-08. The first run over the six
+relevant procedures fetched five documents, 2.28 million characters; the two
+EU-US tariff keeps reference nothing worth fetching. European Parliament documents
+were not measured: the EP document server (doceo) answered 202 with an empty body,
+a bot check.
+
+**European Parliament — a watch-list, not a feed.** GRM's "europarl" module is
+really EUR-Lex/CELLAR Commission proposals, with the Parliament used only to look
+up procedure events. Twelve months of proposals: 279, of which 13 matched parcel
+vocabulary and none was relevant — tariff suspensions, WCO positions, road-transport
+committees. And GRM's event lookup derives the procedure id from the CELEX number,
+which fails on the file that matters most: the customs reform's 52023PC0258 becomes
+`2023-0258`, the API answers an empty 204, and the procedure is skipped without a
+word. Its reference is 2023/0156(COD): 18 events, the provisional agreement approved
+in committee on 2026-04-16, the report tabled 2026-09-04, and a plenary debate
+(2026-09-14) and vote (2026-09-16) on the agenda.
+
+**What is collected, and why not a watch-list.** The first shape, on 2026-09-11,
+was a hand-picked list of 14 files chosen for J&T. That put client relevance into
+a collection input: another client could not reuse the corpus, and cutting a quiet
+procedure for J&T would have removed it for everyone. Corrected 2026-09-12 —
+collection now takes **every legislative procedure** (COD, CNS, APP) since 2021,
+the same set for every client, and each client's body gate decides. What the list
+knew became `clients/jt-express/labels/ep_procedures_2026-09-11.json`, an
+expectation checked against the gate: a core or moderate procedure the gate calls
+irrelevant is a miss.
+
+Size, measured before the change: 609 legislative procedures since 2021, 217 still
+open; a stored version is a median 12 KB (p90 22 KB), so the open set is about
+3 MB and its changes a few MB a year, against a 48.7 MB database. New procedures
+arrive at 120–140 a year (2024's 40 is the election year). One call per procedure
+returns its events, stage and scheduled activities, so a newly scheduled vote
+writes a version before it happens.
+
+Two measured properties shape the polling. The API **rate-limits without saying
+so**: after a burst, 31 of 40 requests returned HTTP 429 at one request per
+second, with no Retry-After header and no published limit, so requests are paced
+slowly and a run that keeps being refused stops and leaves the rest for the next
+one. Its change feed is no substitute — the one-day view timed out after 180 s and
+the one-week view returned nothing. And **most open procedures are dormant**: only
+30 of 82 sampled had an event in twelve months, so procedures with recent or
+scheduled activity are polled every run, the rest weekly, and one published in the
+Official Journal never again.
+
+A third property cost the first live run 10 procedures: the Parliament **splits
+files**, so 2021/0211A(COD) and 2021/0211B(COD) are real references, as are the
+`R` and `M` variants of a consent procedure. No reference-to-id rule derives those,
+and the first run rejected them as malformed. The ids now come from the listing,
+which carries the API's own `process_id` for every entry.
+
+**First full run, 2026-09-12.** 605 procedures listed, 598 due: 218 fetched, 204
+stored with a body, 370 stored as law that predates us, and the 10 split files
+recovered by the second run. That run listed 601 and found only 152 due, because
+the dormant ones now wait for their weekly sweep — which is the daily cost from
+here: about 150 requests, some ten minutes at this pacing.
+
+The regulatory gate then read all 224 gateable procedures for J&T: **8 relevant,
+31 unsure, 185 irrelevant**, 189,195 input tokens. Checked against the 14
+expectations in `clients/jt-express/labels/ep_procedures_2026-09-11.json`, there
+were **no misses**: every procedure the hand review expected to be kept was kept,
+two marginal ones came back relevant rather than unsure, and two came back
+irrelevant. Beyond the 14 the gate kept one procedure the hand review had passed
+over — 2025/0348(CNS), prosecutor and anti-fraud access to VAT data, on the
+grounds that VAT enforcement touches low-value imports. That is a weak keep, and
+it is the whole measured difference between judging 14 files by hand and judging
+601 by model: the hand review missed nothing that mattered, and the gate costs
+five cents a pass.
+
+Two of the 224 carry no title in any language (2026/0265(COD), 2026/0268(COD),
+both filed in the last weeks), so the gate saw a procedure number and answered
+unsure. See todo.md: relevance is decided once per procedure, so a title arriving
+later is never reconsidered.
+
+New EU proposals also arrive through the other sources: DIP carries every
+Commission proposal forwarded to the Bundestag (`EU-Vorlage`, German titles), and
+the Commission's customs and press feeds are regulatory sources already.
 
 ## Signal yield — measured 2026-09-09
 

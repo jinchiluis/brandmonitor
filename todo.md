@@ -1,157 +1,325 @@
 # Brandmonitor active backlog
 
-This file contains unfinished work, unresolved decisions, and operational hazards.
-Completed implementation and measurements live in the linked permanent documents.
+Unfinished work, unresolved decisions, and operational hazards. Nothing already
+built or already decided belongs here — that lives in the permanent documents
+below, and a decision recorded there is not re-litigated here.
 
 Authoritative references:
 
 - `mvp_plan.md` — current pilot scope and completion criteria
 - `docs/source_coverage.md` — source audits, measured yield, and paywall evidence
-- `docs/body_collection.md` — body-fetch commands, storage, and retry semantics
+- `docs/body_collection.md` — body-fetch commands, storage, page dates, retries
 - `docs/selection_and_assessment.md` — selection rationale and assessment funnel
 - `docs/source_audit_prompt.md` — repeatable source-audit method
 
 ## Current state
 
-Working: news and regulatory discovery, SQLite storage/versioning, durable body
-queue, public/PDF/browser extraction, source path policy, DSA daily aggregates,
-client profile loading, deterministic body-aware candidate selection, the title
-gate (a cheap LLM check on the day's new title-only candidates, `run.py gate`), and
-the body gate (a cheap LLM relevance check on every selected news and regulatory
-body, `run.py body-gate`, decisions in `assessment`).
+Built and running daily: news and regulatory discovery, SQLite storage and
+versioning, the durable body queue, public/PDF/browser extraction, source path
+policy, DIP and EP procedures, EU Safety Gate, the deterministic selector, the
+title gate, title-only fetch-on-match, the body gate, and the DIP documents behind
+the procedures it keeps. DSA aggregates are collected by hand, not daily.
 
-Not built: title-only fetch-on-match, full LLM assessment, immediate alerts, and
-report generation. The `report` table is empty; `assessment` holds only body-gate
-decisions so far.
+Built and run by hand, weekly: the report stack in `src/report_agent/` —
+`run.py export-window / assess / report / verify-report`. It produces a Chinese
+weekly report, an editorial ledger accounting for every identity, a coverage
+page and a verification file. It is validated structurally, not yet by
+measurement; see §1.3.
 
-Explicitly outside the current build: customer complaints and service-quality
-monitoring from reviews/comments. Those require a separate social/review collection
-path and must not be implied by the news-monitoring deliverable.
+**Not built: alert delivery.** `assessment` still holds only gate decisions —
+the weekly stage keeps its output in the bundle rather than in that table,
+because its key is an issue rather than an item. The `report` table is filled
+only by `run.py report --record`.
 
-## 0. Finish and validate body coverage
+Outside the current build: customer complaints and service-quality monitoring from
+reviews and comments. That needs a separate social/review collection path and must
+not be implied by the news-monitoring deliverable.
+
+## 1. The analysis path — the whole remaining MVP
+
+### 1.1 Assessment cadence and windowing — decided 2026-09-12
+
+The frame that settles this: **only the network stages are irreversible.**
+
+| Stage | Reversible? | Cadence |
+|---|---|---|
+| Collection | **No** — news sitemaps hold titles ~48 h; a missed day is gone | daily |
+| Body fetch | **Mostly not** — pages get pulled, paywalled, restamped | daily |
+| Gates | Yes, cheap, read-only on the database | daily |
+| Full assessment | **Completely** — reads only the database | weekly |
+
+The assessor never touches the network, `raw_item` is immutable and versioned, and
+bodies live in its payload. So an item collected on Monday can be assessed on
+Friday, next month, or three times under three schemas, with nothing lost. The
+`assessment` key `(raw_item_id, client_slug, prompt_version, profile_version)`
+makes re-assessment additive rather than destructive — already demonstrated in
+practice, since two regulatory gate prompt versions coexist in the table today.
+
+**Run the full assessment weekly, not daily.** Three reasons, in order of weight:
+
+1. The schema is not settled. Every daily run under a schema that will change
+   produces rows to discard at real cost — roughly 4 runs before the first customer
+   report instead of 28.
+2. Part of what the report must say is only visible across a week. Three sunscreen
+   recalls in one week, all AliExpress, is a sentence no assessor looking at one
+   item at a time can write; daily assessment would need a second clustering pass
+   anyway.
+3. Version churn. 3,051 of 18,379 news items carry more than one version (max 4),
+   and DIP re-indexing adds roughly 65 a day. Assessing daily assesses an
+   intermediate version of something that changes again before the report.
+
+Cost is not the deciding factor: steady state is ~25 news and ~5 regulatory bodies
+a day reaching the gate, which keeps about a third, so the assessor's weekly input
+is roughly 70 items plus ~4 Safety Gate alerts.
+
+**Window on `raw_item.fetched_at`, not `assessment.created_at`, and never on
+`published_at`.** `fetched_at` is populated on 100 % of 25,339 stored rows;
+`published_at` is missing on 2.6 %. Windowing on when something *surfaced* is a
+fact the product owns, so undated sources cost a display field and never a window.
+`created_at` is rejected specifically because a re-run or a retrospective pass
+stamps everything with the day it ran, making the window irreproducible — the
+property this section exists to protect.
+
+Consequences to build to:
+
+- **Do not put the cadence in the code.** `run.py assess --since --until --client`
+  takes an explicit window and skips anything already assessed at the current
+  prompt and profile version. Daily versus weekly then becomes one line in
+  `run_daily.bat`, changeable after the first pilot cycle.
+- **Own-brand alerting is decoupled from assessment cadence.** The taxonomy marks
+  `own_brand` as an alert push, and a weekly assessment cannot deliver a same-day
+  alert — but the deterministic selector already finds `role: own` brand matches
+  with no model at all, and J&T returned zero German media mentions in 30 days. A
+  daily deterministic check carries it; the full assessor is not in that path.
+- **Risk accepted:** a weekly run that fails on report day leaves no slack, where a
+  daily one would have surfaced the failure earlier. Acceptable while the pipeline
+  is run by hand; once scheduled, run the assessment the day before the report.
+
+### 1.2 Assessment schema — settled 2026-09-12
+
+The report sketch and the schema it implies are done and built
+(`report_plan.md`, `docs/selection_and_assessment.md` "Weekly assessment and
+report"). The treatment vocabulary, the issue register and the tool surface are
+fixed; what is left is measurement, below.
+
+Still open:
+
+- Decide when a profile-version change triggers reassessment of historical items.
+  The bundle records the profile version it froze and `assess` warns when the two
+  differ, but nothing re-opens an earlier cycle.
+- Alert types: the deterministic `matches` block plus assessor-assigned
+  `alert_types` are still unimplemented — the register carries `use` and
+  `next`, not a taxonomy tag. For the alert-word audit list, give the taxonomy's
+  German terms a `*` suffix first; whole words miss *Bußgelder*.
+- Own-brand alerting stays out of this stage, per §1.1: the deterministic
+  selector carries it daily.
+
+### 1.3 Validate the report stack
+
+Built, and not yet trusted. In priority order:
+
+- **Run-to-run variance in the report's shape.** Two runs over the same frozen
+  week gave the same findings but split them very differently between numbered
+  sections and the watchlist table (10 sections versus 4 plus 6 watchlist rows).
+  Either the split needs a rule instead of the writer's judgment, or the
+  variance needs measuring over several runs. Nothing else on this list matters
+  as much for a weekly deliverable.
+- **Cost and runtime per cycle are unmeasured across cycles.** One run is ~15
+  minutes, 380k input and 55k output tokens; each bundle's
+  `assessment-manifest.json` has the per-step split. No price is pinned for
+  `gpt-5.6-sol`, so `report_plan.md` §8 stays open.
+- **Week-over-week detection is unproven.** Collection began 2026-09-09, so no
+  real earlier window exists to carry forward from and the first cycle has an
+  empty register by construction. Carry-forward is covered by unit tests with a
+  synthetic prior bundle; the first genuine test is the second real cycle.
+- **Recall is unmeasured.** Hand-label a relevant/irrelevant sample and measure
+  false positives and negatives before sending any customer deliverable. The
+  labels in `clients/jt-express/labels/` cover the gates, not this stage's
+  output, and triage is the step that can lose an item silently.
+- **Chinese output quality has had one model-written, one-pass review.** That is
+  the pilot arrangement, not the target.
+- **Where the human review gate sits.** For the pilot, mandatory review before any
+  client sees a report, with the reviewer marking which items changed a decision,
+  which were excessive, and which expected developments were absent.
+- Feed parliamentary documents in properly: a DIP procedure reaches the assessor
+  through its record, but `procedure_excerpt` from `src/dip_documents.py` is not
+  yet a tool, so a long Drucksache is only reachable as stored text.
+- Safety Gate items reach the assessor through the client view and cluster like
+  anything else. Confirm on a real cycle that the grouped block the customer
+  needs — key-customer items named individually, the rest by product class and
+  risk — actually comes out of clustering rather than needing its own rule.
+- Alert delivery is not built at all.
+- Run one fixed pilot window end to end twice. Verify no duplicate raw items or
+  assessments, complete source accounting, stable versions, runtime and LLM cost.
+
+### 1.4 Client questions still required
+
+- Does the September 10 keyword list extend or replace the earlier customs, GPSR,
+  de-minimis and DSA topics?
+- Is "local logistics industry" parcel and e-commerce logistics only, or also port
+  strikes, truck tolls and rail funding? The profile assumes the former; the
+  measured cost of the latter is in `docs/selection_and_assessment.md`.
+- What must trigger an immediate alert, and what delivery time is promised?
+- Confirm product/material categories, sourcing countries, EU legal role, and any
+  company-size thresholds needed for regulation assessment.
+- Safety Gate wording: confirm the report may say *your customer's listing was
+  pulled* and never *J&T carried this parcel*. It is the one claim the source
+  cannot support — no carrier is named in any alert.
+- Safety Gate geography: Germany-notified only yields 1.7 key-customer alerts a
+  week. Every notifying country adds 53 more (France 29, Luxembourg 10, Ireland 5),
+  and none of the 53 repeat a product/brand pair already in the German set — a
+  different, larger set rather than deduplication. Theirs to answer.
+
+## 2. Pilot-period watching
+
+Cheap recurring checks that only pay off once real cycles run.
+
+- Skim the body gate's drops weekly — `relevant = 0` under a `body_gate-%` prompt
+  version. A wrong drop never reaches the full assessment. For DIP and EP also skim
+  `relevant IS NULL`: there, unsure stops an item.
+- Skim the title gate's dropped items weekly in `data/title_gate/<client>/`. A
+  wrong drop is recorded nowhere else.
+- Now and then, and whenever the Bundesnetzagentur publishes a postal decision,
+  gate the regulatory bodies the selector skipped and read what it keeps. That is
+  where missing vocabulary shows. Two cases already found: a written question on
+  automated stations replacing postal branches (*Postfiliale*, *Universaldienst*),
+  and the customs bill's shipment-data duty (*Postsendungen*, *Postdienste*),
+  neither selected by any rule. Decide at the next profile revision whether narrow
+  postal vocabulary goes in — `postsendung*`, `postdienst*`, never a bare `post*`
+  (Postfach, Posten, Postbank).
+- After four weekly reports, check the EP source against
+  `clients/jt-express/labels/ep_procedures_2026-09-11.json`: a core or moderate
+  procedure the gate called irrelevant is a miss, and anything the gate keeps that
+  the hand review passed over is worth reading.
+- If trade-policy EU documents keep getting through — the gate kept two EU-US
+  tariff regulations forwarded to the Bundestag — add them to the profile's
+  `regulatory_false_matches`.
+- Once the corpus is a year old, watch DIP version churn: re-indexing adds
+  abstracts to written questions about a year after their answer, roughly 65 a day,
+  each a new version.
+- Review the retained Verbraucherzentrale event sections once real assessment data
+  exists.
+
+## 3. Body and source quality
 
 - Sample the **page-dated** bodies for quality: navigation, teaser or login copy
-  leaking into an otherwise fine article. The 2026-09-11 pass covered only the rows
-  without a page date (all classified, see `docs/source_coverage.md`); the 1,966
-  page-dated rows have not been sampled for body quality.
-- Residue the hub gate and config do not reach: Verbraucherzentrale `/wissen`
-  evergreen pages that slip in under the narrowed `abzocke` prefix. Known false
-  positives of the gate: four LOGISTIK HEUTE editorial newsletters and one ohn page
-  whose templates state no date. Decide whether editorials should be excluded by
-  config instead of quietly skipped.
+  leaking into an otherwise fine article. The 2026-09-11 pass covered only rows
+  without a page date; the 1,966 page-dated rows have not been sampled.
+- Re-run the selector recall measurement with the hub gate on: 24 rows drop out of
+  the eligible set, and the keyword-only body finds were the class most likely to
+  have come from concatenated teasers.
 - Strip Verbraucherzentrale's sidebar teaser block at extraction, as the LOGISTIK
   HEUTE tag cloud is stripped. It sits on 158 of 203 case pages, 9 of them hold
   nothing else, and its product-recall blurb made the body gate keep unrelated
   cases.
+- Residue the hub gate and config do not reach: Verbraucherzentrale `/wissen`
+  evergreen pages slipping in under the narrowed `abzocke` prefix. Known gate false
+  positives: four LOGISTIK HEUTE editorial newsletters and one ohn page whose
+  templates state no date. Decide whether editorials are excluded by config instead
+  of quietly skipped.
 - bevh `/positionen` is kept in `allowed_dirs` on the section name alone: in the
-  stored window it held only the AI whitepaper chapters (navigation-only HTML,
-  correctly `unavailable`) and three 315-character quiz pages. Drop it if a real
-  position paper never shows up.
-- ~~Re-run selector recall measurement after body coverage is representative.~~
-  Done 2026-09-10 on 2,336 bodies: 604 of 1,148 full-text selections are found only
-  in the body, 112 of them brand or topic finds. Figures and the labelled examples
-  are in `docs/selection_and_assessment.md`. Partly answered 2026-09-11: in 30
-  random selected bodies, 1 of the 22 keyword-only picks was relevant (labels in
-  `clients/jt-express/labels/`).
-- Re-run that recall measurement once with the hub gate on: 24 rows drop out of
-  the eligible set, and the keyword-only body finds were the class most likely to
-  have come from concatenated teasers.
-
-## 1. Complete the MVP analysis path
-
-### Report sketch and assessment schema
-
-- Sketch the weekly Chinese report before finalizing the assessment output. Include
-  executive summary, regulatory developments, reputation/market items, actions,
-  source coverage, and explicit source failures/zero-yield sources.
-- Select the full-assessment model. Relevance is its own cheap stage, the body gate
-  below, not a field of the full assessment.
-- Define structured assessment output from what the report actually needs. Every
-  assessment must retain client, prompt version, profile version, and source version.
-- Decide when a profile-version change triggers reassessment of historical items.
-
-### Title-only fetch-on-match
-
-- Allow an explicit selected URL to enter the body queue regardless of its source's
-  `content_mode`. Do not turn mainstream sources into bulk full-text sources.
-- Queue the title gate's survivors for that fetch. `run.py gate` decides and logs
-  but queues nothing yet, and `run_body_fetch` still takes only `full_text` sources.
-- Integrate paid accounts only for this small fetch-on-match set and only after the
-  subscription-value and terms review below.
-
-### Body gate
-
-Built 2026-09-11; design and figures in `docs/selection_and_assessment.md`.
-
-- Drain the backlog: on 2026-09-11, 669 news and 49 regulatory bodies had no
-  decision. The daily run gates 300 per tier, so news clears in about three runs;
-  `body-gate --limit 700` clears it in one (about a million input tokens).
-- During the pilot, skim the gate's drops weekly - `relevant = 0` under a
-  `body_gate-%` prompt version. A wrong drop never reaches the full assessment.
-- Now and then, and whenever the Bundesnetzagentur publishes a postal decision,
-  gate the regulatory bodies the selector skipped once and read what it keeps. That
-  is where missing vocabulary (*Porto*, *Briefentgelt*, *Deutsche Post*) would show.
-- The legal-Q&A body false match does not bite: both returns Q&As in the labels are
-  kept as parcel liability. Leave it unless the full assessment's volume says
-  otherwise.
-
-### Client questions still required
-
-- Does the September 10 keyword list extend or replace the earlier customs, GPSR,
-  de-minimis, and DSA topics?
-- Is "local logistics industry" meant as parcel and e-commerce logistics, or does
-  the customer also want port strikes, truck tolls and rail funding? The profile
-  assumes the former; the measured cost of the latter is in
-  `docs/selection_and_assessment.md`.
-- What does `01519` identify?
-- What must trigger an immediate alert, and what delivery time is promised?
-- Confirm product/material categories, sourcing countries, EU legal role, and any
-  company-size thresholds needed for regulation assessment.
-
-### Implement and validate
-
-- Implement the full structured assessment.
-- During the pilot, skim the title gate's dropped items weekly in
-  `data/title_gate/<client>/`. A wrong drop is recorded nowhere else.
-- Implement report rendering and immediate alert output after their schemas settle.
-- Hand-label a small relevant/irrelevant sample and measure false positives and false
-  negatives before sending a customer deliverable. The 90 body-gate labels in
-  `clients/jt-express/labels/` cover the gate, not the full assessment's output.
-- Run one fixed pilot window end to end twice. Verify no duplicate raw items or
-  assessments, complete source accounting, stable versions, runtime, and LLM cost.
-
-## 2. Validate whether Safety Gate is useful to J&T
-
-- Hand-review 15–20 Safety Gate alerts as `direct`, `customer exposure`, `market
-  trend`, or `irrelevant`, then confirm the useful product/seller/SKU/shipment scope
-  with J&T and decide immediate-alert versus clustered-weekly treatment. A marketplace
-  match does not prove J&T carried the item. In the same review, decide whether DSA
-  aggregates merit any background coverage; never treat them as item-level alerts,
-  and retain their stored CC BY 4.0 attribution if they appear in customer output.
-
-## 3. Remaining source and subscription decisions
-
-- Review the retained Verbraucherzentrale event sections after real assessment data
-  exists.
-- Before buying or integrating any subscription, ask what is already active and what
-  it costs. Audit only client-relevant title hits for unique paid evidence, permitted
-  automated access, integration effort, and expected useful items per month. Then
-  choose `subscribe`, `title-only/manual`, or `drop`; paid access remains
+  stored window it held only navigation-only AI whitepaper chapters (correctly
+  `unavailable`) and three 315-character quiz pages. Drop it if a real position
+  paper never appears.
+- An EP procedure filed in the last weeks can carry no title in any language — 2 of
+  224 on 2026-09-12 — so the gate judges a procedure number and answers unsure,
+  which for parliamentary items stops it. Relevance is decided once per procedure,
+  so a title arriving later changes nothing. Either hold an untitled procedure back
+  or re-gate when a title appears; two items justified neither yet.
+- Before buying or integrating any subscription, ask what is already active and
+  what it costs. Audit only client-relevant title hits for unique paid evidence,
+  permitted automated access, integration effort, and expected useful items per
+  month. Then choose `subscribe`, `title-only/manual`, or `drop`; paid access stays
   fetch-on-match rather than a bulk archive crawl.
 
-## 5. Dates, scheduling, and operations
+### Deliberately unbuilt
 
-- Decide how title-only sources obtain or validate publication dates. Their pages are
-  not opened during discovery, so a future CMS restamp could go undetected. The
-  full-text tier has the same problem for a different reason — see §6.
-- Surface undated records for human review in weekly reports. Do not silently drop
-  them: BNetzA and BPEX can carry real signal without usable dates. Now measured:
-  67 and 47 undated body rows respectively, and for BPEX that is frontpage discovery,
-  which carries no date by construction.
+- **Passage-finding inside a long parliamentary document.** One bill showed the
+  gap: the customs bill's summary says nothing about the shipment-data duty it puts
+  on parcel carriers, a paragraph deep in 1.1 million characters, and profile
+  keywords cannot point to it. That is a single case, and the record was not blind
+  to it — DIP's descriptors name *Brief-, Post- und Fernmeldegeheimnis*. A found
+  passage would be evidence for the assessor, never customer text. Revisit only if
+  a pilot assessment of a bill reads too thin to carry; the candidates then are a
+  small model reading the document in chunks (~300,000 input tokens for the largest
+  bill) or passages around rules that are rare in the document, which needs the
+  postal vocabulary in §2.
+- **European Parliament documents.** The doceo document server answers 202 with an
+  empty body, a bot check. Watch-list procedures reach the assessment on their
+  record alone.
+
+## 4. Dates: what is still open
+
+The extraction, provenance and refresh work landed 2026-09-11 and the rules are in
+`docs/source_coverage.md` and `docs/body_collection.md` ("Page dates"), including
+why regulators stay undated, why `lastmod` is stored only as a change signal, and
+why htmldate is not used for stored dates.
+
+- Decide how title-only sources obtain or validate publication dates. Their pages
+  are never opened during discovery, so a future CMS restamp goes undetected.
+- Surface undated records for human review in weekly reports rather than dropping
+  them silently: BNetzA and BPEX carry real signal without usable dates — 67 and 47
+  undated body rows, and for BPEX that is frontpage discovery, which carries no
+  date by construction.
+- Rows collected before 2026-09-11 carry `published_at_source = discovery`; readers
+  resolve it from `discovered_via`, but a sitemap row's flavour (news sitemap or
+  `lastmod`) is unrecoverable. It corrects itself as rows are refetched; a one-off
+  relabel is not worth a migration.
+
+### Extend `probe` to open article pages — for new crawled sources only
+
+`src/probe.py` stops at discovery: it reports which methods work and how URLs
+divide across prefixes, but never opens an article. So a new source can be added
+with confident-looking `allowed_dirs` and still yield undated teasers — which is
+how Verbraucherzentrale got 204 rows with 204 `lastmod` dates. Neither 2026-09-11
+protection covers onboarding: the hub gate needs 20 stored bodies first, and the
+config narrowing was only possible because rows already existed.
+
+Build it the first time a new crawled source is added; nothing waits on it now.
+Per path prefix, fetch two or three of the URLs the probe already found and print:
+
+- **which mechanism dated the page** — JSON-LD, meta, lone `<time>`, or none. The
+  one signal that separated every hub in the sample, and it decides whether the
+  selector's hub gate will ever apply to the source.
+- extraction outcome: text, no text, paywall, login wall.
+- body length, so identical furniture pages stand out.
+
+Dropped from the earlier plan: date-stamp density and length-to-median ratio. Both
+catch only the big hubs and miss small section indexes. The output is a table to
+read, not a verdict — BVDW's WordPress dates every page, so "dated" never proves
+"article".
+
+### Stored-row audit: `src/audit.py`, wired as `run.py audit`
+
+The 2026-09-11 narrowing was done with three throwaway scripts, and they answered
+the audit questions better than any live probe could because they use every stored
+row rather than a sample. Same shape as `probe`: code in `src/audit.py`, `run.py`
+only registers the subcommand, read-only on the database. Three views:
+
+- **provenance by prefix**, per source: rows and bodies split by `page` / `feed` /
+  `news_sitemap` / `lastmod` / undated, with a path-prefix histogram of the
+  non-page rows. This is where hub sections show up.
+- **config dry run**: for a proposed `allowed_dirs` / `excluded_dirs`, what the
+  change keeps and drops, listing every page-dated row it would drop. This caught
+  two Händlerbund press releases and BVDW's 89 dated non-articles before the config
+  was written.
+- **gate dry run**: which rows the selector would currently skip, with URLs.
+
+The restamp check CLAUDE.md prescribes — distinct publication days against row
+count, lag from the busiest day — belongs here rather than in a one-off query.
+
+## 5. Scheduling and operations
+
 - Schedule collection daily on the Windows laptop. News sitemaps retain titles for
   roughly 48 hours; missed runs permanently reduce title coverage.
 - Verify laptop-to-VPS backups. A fresh heartbeat says the pipeline ran, not that
   the database is recoverable; check those separately.
+- Add only the paywall credentials justified by the subscription audit, and the LLM
+  keys chosen for assessment.
+- Record runtime and variable cost for the complete pilot cycle.
+- The public DIP API key expires at the end of May 2027. Request a personal key
+  (dip.bundestag.de/über-dip/hilfe/api) and set `DIP_API_KEY` in `.env` before
+  then; a rejected key makes `collect-dip` exit 2.
 
 ### VPS check on the scheduled laptop run
 
@@ -161,137 +329,42 @@ whether a human should look. It stays pull-based; the VPS must not run a second
 scheduled collection pipeline.
 
 Freshness is the primary alarm, not the exit code. The worst failure — the run did
-not happen, because the laptop slept, lost network, or the scheduled task stopped
-firing — produces no process and therefore no exit code at all. Missed news
-collection is unrecoverable: news sitemaps retain titles for roughly 48 hours.
+not happen, because the laptop slept, lost network, or the task stopped firing —
+produces no process and therefore no exit code at all, and missed news collection
+is unrecoverable.
 
 - **Alarm on staleness first.** No marker newer than about 26 hours is an alarm on
-  its own, regardless of what the last marker said.
-- **Then on exit 2** from any stage: the command aborted — missing credential,
-  unreadable source list, locked database, unhandled exception. Exit 1 (every
-  source in that stage failed) is worth a look the same day. Exit 0 with individual
-  sources down is not an alarm; that is what the run summary and `run_source` are
-  for. The full contract is in the `run.py` module docstring.
-- **Then on trends across runs**, which is where the real signal lives and which no
+  its own, whatever the last marker said.
+- **Then on exit 2** from any stage: the command aborted. Exit 1 (every source in
+  that stage failed) is worth a look the same day. Exit 0 with individual sources
+  down is not an alarm; that is what the run summary and `run_source` are for.
+- **Then on trends across runs**, where the real signal lives and which no
   single-run exit code can express:
   - a source at `zero` for K consecutive runs — dead, but never "failed" on any one
     day;
-  - a source that failed on this run *and* the previous one, as opposed to one blip;
-  - an `unavailable` rate that jumps for one source — 5% to 90% means the extractor
-    broke, which is exactly the VerkehrsRundschau signature and went unnoticed for
-    the whole time the old exit semantics were returning 1 every day;
-  - `deferred by limit` recurring, which means the body queue is falling behind
-    rather than failing.
-- Implement that as `run.py health` over `run` and `run_source`, run on the laptop
-  and folded into the marker. The VPS then needs no database access, no schema
-  knowledge, and no Python.
-- Transport: the VPS already holds admin SSH to the laptop (`contabo-server` key),
-  so it can pull the marker over the existing channel.
-- Add only the paywall credentials justified by the subscription audit and the LLM
-  keys chosen for assessment.
-- Record runtime and variable cost for the complete pilot cycle.
-- Track the Bundestag DIP API key expiry in May 2027 only if that source returns to
-  scope.
+  - a source that failed on this run *and* the previous one, not one blip;
+  - an `unavailable` rate that jumps for one source — 5 % to 90 % means the
+    extractor broke, the VerkehrsRundschau signature that went unnoticed for as
+    long as the old exit semantics returned 1 every day;
+  - `deferred by limit` recurring, meaning the body queue is falling behind rather
+    than failing.
+- Implement as `run.py health` over `run` and `run_source`, run on the laptop and
+  folded into the marker. The VPS then needs no database access, no schema
+  knowledge and no Python. It already holds admin SSH (`contabo-server` key), so it
+  can pull the marker over the existing channel.
 
-## 6. Dates: what is still open
+## Execution order
 
-The extraction, provenance, fixture and refresh work landed 2026-09-11; the
-measured picture and the rules are in `docs/source_coverage.md` ("What the
-non-page-dated bodies actually were") and `docs/body_collection.md` ("Page dates").
-The short version: of the 444 rows once blamed on the extractor, about ten were the
-extractor, ~215 were hub pages, 202 were Verbraucherzentrale case records with no
-publication date to find, and the rest were feed-dated and fine.
-
-Decisions taken, recorded here so they are not re-litigated:
-
-- **Regulators and associations without a structured date stay undated.** They are
-  not daily news, and assessment reads the dates in the body. No URL-date rule for
-  Bundesnetzagentur, no listing-date scraping for BPEX.
-- **Verbraucherzentrale `lastmod` stays stored as a change signal**, labelled
-  `lastmod`, never printed as a publication date. The case's own dates are in the
-  body for the assessment to read.
-- **htmldate is not used for stored dates.** It is installed as a trafilatura
-  dependency and its fast mode gets several templates right, but it reads text
-  from any element whose class contains "date": it confidently dated every hub
-  page from teaser dates and took a class action's filing date as publication.
-  It may be useful as a probe diagnostic, nothing more.
-
-Still open:
-
-- Sources collected before 2026-09-11 carry `published_at_source = discovery` on
-  their older rows; readers resolve it from `discovered_via`, but a sitemap row's
-  flavour (news sitemap or `lastmod`) is unrecoverable. It corrects itself as rows
-  are refetched; a one-off relabel is not worth a migration.
-- `title_only` sources now record their discovery label, but a title-only source
-  whose sitemap is restamped still has no page to contradict it. §5 still applies.
-
-### Extend `probe` to open article pages — for new sources only
-
-`src/probe.py` deliberately stops at discovery: it reports which methods work and how
-URLs divide across prefixes, but never opens an article. So a new source can be added
-with confident-looking `allowed_dirs` and still yield undated teasers — which is how
-Verbraucherzentrale got 204 rows with 204 `lastmod` dates. Neither of the 2026-09-11
-protections covers onboarding: the hub gate needs 20 stored bodies before it judges a
-source, and the config narrowing was only possible because the rows already existed.
-
-Build it the first time a new **crawled** source is added; nothing is waiting on it
-now (Safety Gate is an API). Scope it to what 2026-09-11 measured as useful. Per path
-prefix, fetch two or three of the URLs the probe already found and print:
-
-- **which mechanism dated the page**: JSON-LD, meta, lone `<time>`, or none. This is
-  the one signal that separated every hub in the sample, and it decides whether the
-  selector gate will ever apply to the source.
-- extraction outcome: text, no text, paywall, login wall.
-- body length, so identical furniture pages (the eight 885-character VerkehrsRundschau
-  sections) stand out.
-
-Dropped from the earlier plan: date-stamp density and length-to-median ratio. Both
-catch only the big LOGISTIK HEUTE hubs and miss the small section indexes. The output
-is a table to read, not a verdict: BVDW's WordPress dates every page, so "dated" alone
-never proves "article". htmldate may run here as a diagnostic column, never stored.
-
-### Stored-row audit for existing sources: `src/audit.py`, wired as `run.py audit`
-
-The 2026-09-11 narrowing was done with three throwaway scripts against the database,
-and they answered the §3 audit questions better than any live probe could, because
-they use every stored row rather than a sample. They should exist as a module, same
-shape as `probe`: code in `src/audit.py`, `run.py` only registers the subcommand.
-Read-only on the database. Three views:
-
-- **provenance by prefix**, per source: rows and bodies split by `page` /
-  `feed` / `news_sitemap` / `lastmod` / undated, with a path-prefix histogram of
-  the non-page rows. This is where the hub sections show up.
-- **config dry run**: given a proposed `allowed_dirs` / `excluded_dirs` for one
-  source, what the change keeps and drops, split the same way, listing every
-  page-dated row it would drop. This caught the two Händlerbund press releases and
-  BVDW's 89 dated non-articles before the config was written.
-- **gate dry run**: which rows the selector would currently skip, with URLs, so a
-  threshold or a template change is checked against real rows and not trusted.
-
-Also the restamp check CLAUDE.md prescribes (distinct publication days against row
-count, lag from the busiest day) belongs here rather than in a one-off query.
-
-### Independent of all the above
-
-Window the weekly report on `assessment.created_at` or `raw_item.fetched_at`, not on
-`published_at`. That is a statement about what the product promises — "what surfaced
-this week", which is a fact we own — and it holds even with perfect extraction.
-`published_at` stays a display field, omitted or flagged where it cannot be backed.
-
-## Recommended execution order
-
-1. Finish body backfills and sample quality of the page-dated bodies (§0). Date
-   extraction and provenance are done; what remains in §6 is the stored-row audit
-   module, and the probe extension when the next crawled source arrives.
-2. Validate Safety Gate signal and decide whether DSA belongs in the product (§2).
-3. Sketch the report and lock the assessment schema.
-4. Implement title gating, fetch-on-match, and full assessment.
-5. Render the Chinese report and validate one repeatable pilot window.
-6. Audit subscriptions before purchasing or integrating another account.
+1. Sketch the report, then lock the assessment schema (§1.2).
+2. Implement the full assessment against that schema, windowed per §1.1 (§1.3).
+3. Render the Chinese report and validate one repeatable pilot window twice.
+4. Body and source quality sampling (§3) — in parallel; none of it blocks the
+   assessor.
+5. `run.py health` and daily scheduling (§5), before the pilot runs unattended.
+6. Audit subscriptions before purchasing or integrating another account (§3).
 
 My own comments (not written by claude):
-- a cheap body selector??
--> cheap summarize without losing info
--> cheap assess if it has something to do with J&T at all..
+- brightdata fallback in case of blocked crawl/scrape?
+  (I have already ISP IP with deposit)
 - Basic news sites like Spiegel, Zeit etc... almost contain no signal at all. That means IF they show stuff.. its probably important (and have big coverage) and should be weighted a bit more (belongs into llm assessment)
 - for alerts i wanna try wechat over ServerChan, thats a cool feature especially for chinese clients

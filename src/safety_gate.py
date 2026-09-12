@@ -12,6 +12,7 @@ and annotates online-trader matches from a versioned client profile.
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import re
 import sqlite3
@@ -398,6 +399,130 @@ def run_safety_gate_collection(*, weeks: Optional[int] = None,
     return summary
 
 
+# --- Reading an alert -------------------------------------------------------
+#
+# Safety Gate records carry no article text, so a body is composed from the
+# record itself - the same approach as `compose_body` in src/dip.py and
+# src/ep_procedures.py, and for the same reason: an LLM summariser would add
+# cost and a fabrication risk to fields that are already prose.
+#
+# Unlike those two, the body is composed when the alert is read rather than
+# stored in the payload. They must store it because the body gate reads
+# `payload.body_text` straight out of SQL; Safety Gate skips both gates (see
+# docs/selection_and_assessment.md, "Safety Gate"), so nothing queries it. That
+# keeps one copy of the text, lets a template fix reach the alerts already
+# stored, and needs no backfill.
+
+_MEASURE_LABELS = (
+    # Two operator spellings, both live: 505 and 358 of the 639 alerts stored on
+    # 2026-09-12. A measure ordered by an authority and one a company notified
+    # voluntarily are the same field to a reader, so they are not distinguished.
+    ("operator", "Type of economic operator taking notified measure(s):"),
+    ("operator", "Type of economic operator to whom the measure(s) were ordered:"),
+    ("category", "Category of measure(s):"),
+    ("in_force", "Date of entry into force:"),
+)
+_MEASURE_LABEL = re.compile(
+    "|".join(f"(?P<{field}_{index}>{re.escape(label)})"
+             for index, (field, label) in enumerate(_MEASURE_LABELS)))
+
+
+def parse_measures(text: Optional[str]) -> list[dict[str, Optional[str]]]:
+    """Split the run-together `measures` string into one dict per measure.
+
+    The field arrives with no separators at all - label, value, next label - and
+    an alert may carry several measures: 29 of the 50 in the 2026-09-12 pilot
+    review did, so reading only the first undercounts marketplace removals.
+    Labels are located rather than split on, because the string does not reliably
+    begin with one and an unknown spelling must cost only its own field.
+    A record that states a measure with no labels at all becomes a single measure
+    with only a category.
+    """
+    if not text or not text.strip():
+        return []
+    found = list(_MEASURE_LABEL.finditer(text))
+    if not found:
+        return [{"operator": None, "category": text.strip(), "in_force": None}]
+
+    measures: list[dict[str, Optional[str]]] = []
+    current: dict[str, Optional[str]] = {}
+    for index, match in enumerate(found):
+        field = match.lastgroup.rsplit("_", 1)[0]
+        end = found[index + 1].start() if index + 1 < len(found) else len(text)
+        # A repeated field starts the next measure; the API emits them in order.
+        if field in current:
+            measures.append(current)
+            current = {}
+        current[field] = text[match.end():end].strip() or None
+    if current:
+        measures.append(current)
+    for measure in measures:
+        measure.setdefault("operator", None)
+        measure.setdefault("category", None)
+        # The API writes a literal "Unknown" here - 267 of the 962 measures stored
+        # on 2026-09-12 - and anything it cannot date is no date at all. Keeping
+        # the word would print "in force Unknown" and would let a reader sort or
+        # compare it as if it were one.
+        in_force = measure.get("in_force")
+        try:
+            measure["in_force"] = _parse_eu_date(in_force) if in_force else None
+        except SafetyGateError:
+            measure["in_force"] = None
+    return measures
+
+
+def _clean(value: Any) -> Optional[str]:
+    """Payload text as written, with HTML entities resolved (\"Y&amp;H\")."""
+    text = html.unescape(str(value)).strip() if value is not None else ""
+    return text or None
+
+
+_BODY_FIELDS = (
+    ("Product", "product"), ("Brand", "brand"), ("Model or type", "type_numberOfModel"),
+    ("Batch", "batchNumber"), ("Barcode", "barcode"), ("Category", "category"),
+    ("Risk", "riskType"), ("Notified by", "notifyingCountry"),
+    ("Country of origin", "countryOfOrigin"),
+)
+
+
+def compose_body(payload: dict[str, Any]) -> str:
+    """The alert as readable text, for the assessor and for `safety-gate-view`."""
+    report = payload.get("report") or {}
+    header = f"EU Safety Gate alert {payload.get('caseNumber')}"
+    if _clean(payload.get("level")):
+        header += f", {_clean(payload['level'])}"
+    if report.get("publication_date"):
+        header += f", published {report['publication_date']}"
+    lines = [header]
+    lines += [f"{label}: {_clean(payload.get(key))}"
+              for label, key in _BODY_FIELDS if _clean(payload.get(key))]
+
+    # Kept verbatim rather than parsed into platform names: the field is free
+    # text ("Other(Temu: XU3531330) /"), and the seller reference in it is the
+    # only handle a customer has for finding the listing.
+    if _clean(payload.get("onlineTrader")):
+        lines.append("Sold online through: "
+                     + _clean(payload["onlineTrader"]).rstrip(" /"))
+    if _clean(payload.get("URLrecall")):
+        lines.append(f"Recall notice: {_clean(payload['URLrecall'])}")
+
+    for label, key in (("Description", "description"), ("Danger", "danger")):
+        if _clean(payload.get(key)):
+            lines += ["", f"{label}:", _clean(payload[key])]
+
+    measures = parse_measures(payload.get("measures"))
+    if measures:
+        lines += ["", "Measures:"]
+        for measure in measures:
+            text = measure.get("category") or "measure not stated"
+            if measure.get("operator"):
+                text += f" (by the {measure['operator'].lower()})"
+            if measure.get("in_force"):
+                text += f", in force {measure['in_force']}"
+            lines.append(text)
+    return "\n".join(lines)
+
+
 def _is_pilot_geography(payload: dict[str, Any]) -> bool:
     notifier = str(payload.get("notifyingCountry") or "").strip().casefold()
     origin = str(payload.get("countryOfOrigin") or "").strip().casefold()
@@ -442,6 +567,12 @@ def select_client_alerts(client_slug: str, *, db_path: Optional[Path] = None
                 selected.append({
                     "raw_item_id": row["id"], "case_number": row["external_id"],
                     "title": row["title"], "published_at": row["published_at"],
-                    "url": row["url"], "reasons": reasons, "payload": payload,
+                    "url": row["url"], "reasons": reasons,
+                    "key_customers": tuple(
+                        reason.removeprefix("online_trader:") for reason in reasons
+                        if reason.startswith("online_trader:")),
+                    "measures": parse_measures(payload.get("measures")),
+                    "body_text": compose_body(payload),
+                    "payload": payload,
                 })
     return selected

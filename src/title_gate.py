@@ -247,6 +247,7 @@ def run_gate(candidates: Sequence[Candidate], profile: ClientProfile, caller: Ca
                     "source": candidate.source_slug, "external_id": candidate.external_id,
                     "url": candidate.url, "label": item_label(candidate),
                     "reasons": list(candidate.reasons),
+                    "matched_in": list(candidate.matched_in),
                     "decision": "keep" if kept else "drop", "fail_open": fail_open,
                     "reply": reply, "error": error,
                 }, ensure_ascii=False) + "\n")
@@ -292,3 +293,38 @@ def prune_logs(log_dir: Path, keep_days: int, today: date | None = None) -> list
             path.unlink()
             removed.append(path)
     return removed
+
+
+def logged_keeps(client_slug: str, log_root: Path | None = None) -> list[dict]:
+    """Latest kept decision per URL from the client's retained JSONL logs.
+
+    The audit log is the client-specific handoff into body fetching.  A later
+    decision for the same URL supersedes an earlier one while both are retained.
+    Malformed lines abort the handoff instead of silently losing a selected URL.
+    """
+    log_dir = (log_root or LOG_ROOT) / client_slug
+    if not log_dir.exists():
+        return []
+    latest: dict[tuple[str, str], dict] = {}
+    for path in sorted(log_dir.glob("*.jsonl")):
+        try:
+            date.fromisoformat(path.stem)
+        except ValueError:
+            continue
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip():
+                continue
+            try:
+                decision = json.loads(line)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"invalid title-gate JSONL at {path}:{line_number}: {exc}") from exc
+            if decision.get("client") != client_slug:
+                continue
+            source, external_id = decision.get("source"), decision.get("external_id")
+            if not source or not external_id or decision.get("decision") not in {"keep", "drop"}:
+                raise ValueError(
+                    f"invalid title-gate decision at {path}:{line_number}")
+            latest[(source, external_id)] = decision
+    return [decision for decision in latest.values()
+            if decision["decision"] == "keep"]

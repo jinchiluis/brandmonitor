@@ -26,6 +26,11 @@ words together select nothing. Policy words are held that way: on headlines
 they never co-occur with a sector word, and two of them alone describe a law
 page rather than the client's market.
 
+A source entry with ``"keyword_prefilter": false`` skips the rules: every item
+it stores is a candidate. That is for a hand-picked list such as the European
+Parliament procedures, where the prefilter saves nothing and would lose items -
+"Clean corporate vehicles" matches no keyword, and the body gate judges it anyway.
+
 ``--no-bodies`` forces title/slug matching even where a body exists. That is how
 the recall cost of the title_only tier gets measured: run both over the full_text
 corpus and compare.
@@ -98,6 +103,9 @@ class SelectionResult:
 # and they must never be judged by a rule their articles cannot satisfy.
 PAGE_DATE_SHARE = 0.8
 PAGE_DATE_MIN_BODIES = 20
+
+# The reason given to an item that matched nothing on a source without the prefilter.
+UNFILTERED_REASON = "source:no keyword prefilter"
 
 
 def page_date_expected(rows: Iterable[sqlite3.Row]) -> set[tuple[str, str]]:
@@ -378,6 +386,8 @@ def selection_from_db(db_path: Path,
     hub_suspects = sum(1 for row, _title in eligible if is_hub_suspect(row, expected))
     eligible = [(row, title) for row, title in eligible
                 if not is_hub_suspect(row, expected)]
+    unfiltered = {key for key, entry in configured.items()
+                  if entry.get("keyword_prefilter") is False}
 
     selected: list[Candidate] = []
     unknowns: list[MetadataUnknown] = []
@@ -395,6 +405,8 @@ def selection_from_db(db_path: Path,
             continue
         body = _stored_body(row) if use_bodies else None
         reasons, fields = select_candidate(title, row["url"], profile, body)
+        if not reasons and (row["source_kind"], row["source_slug"]) in unfiltered:
+            reasons, fields = (UNFILTERED_REASON,), ("source",)
         if reasons:
             selected.append(Candidate(
                 source_slug=row["source_slug"],

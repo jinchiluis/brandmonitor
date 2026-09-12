@@ -27,7 +27,9 @@
       "backstage",
       "deinspiegel",
       "tests"
-    ]
+    ],
+    "access": "mixed",
+    "paywall_login": "spiegel.de"
   },
   {
     "country": "Germany",
@@ -63,7 +65,9 @@
       "serie",
       "bildung",
       "hamburg"
-    ]
+    ],
+    "access": "mixed",
+    "paywall_login": "zeit.de"
   },
   {
     "country": "Germany",
@@ -87,7 +91,8 @@
       "aktuell/fotografie",
       "video",
       "podcasts"
-    ]
+    ],
+    "access": "mixed"
   },
   {
     "country": "Germany",
@@ -110,7 +115,8 @@
       "die-welt-in-bildern-blickfang",
       "journalismus_live",
       "arts_und_style"
-    ]
+    ],
+    "access": "mixed"
   },
   {
     "country": "Germany",
@@ -151,7 +157,8 @@
       "reise",
       "auto",
       "jetzt"
-    ]
+    ],
+    "access": "mixed"
   },
   {
     "country": "Germany",
@@ -175,7 +182,8 @@
       "tagesschau_mit_gebaerdensprache",
       "wetter",
       "kultur"
-    ]
+    ],
+    "access": "free"
   },
   {
     "country": "Germany",
@@ -203,7 +211,9 @@
       "food",
       "iconmagazine",
       "newsletter"
-    ]
+    ],
+    "access": "mixed",
+    "paywall_login": "welt.de"
   },
   {
     "country": "Germany",
@@ -221,7 +231,8 @@
       "adv",
       "autoren",
       "podcast"
-    ]
+    ],
+    "access": "mixed"
   },
   {
     "country": "Germany",
@@ -245,7 +256,8 @@
       "landingpages"
     ],
     "notes": "robots sitemap yielded only 10/14d on 2026-09-11; its separately published Google News sitemap held 32 titled, publication-dated articles from the latest two days and is configured as an additive root. Paywalled/mixed access: index titles only and fetch on match rather than bulk-fetching the daily output. Excluded on stored rows: event, special-section, subscription, media-kit, advertorial and landing pages.",
-    "content_mode": "title_only"
+    "content_mode": "title_only",
+    "access": "mixed"
   },
   {
     "country": "Germany",
@@ -276,7 +288,8 @@
       "Alle News"
     ],
     "notes": "sitemap 238/14d; feeds 20. /fachmagazin excluded 2026-09-10: subscriber-only and not useful enough to retain as title-only evidence. /termine event listings and rolling company Newsübersicht pages excluded 2026-09-10 because they are not individual news articles. /branchenguide company directory, /produkte and /veranstaltungen excluded 2026-09-11: undated non-article templates. Rolling per-company hub pages sit under /news beside real articles, so only a title rule can reach them. Fragments extended 2026-09-10 on evidence: they match 12 rows carrying 1.13 MB - 26% of this source's body text - averaging 58 KB against a 2.8 KB article median, with zero false positives across all 2059 rows.",
-    "content_mode": "full_text"
+    "content_mode": "full_text",
+    "access": "free"
   },
   {
     "country": "Germany",
@@ -292,7 +305,8 @@
       "webinare"
     ],
     "notes": "sitemap 81/14d. /webinare excluded 2026-09-11: event registration pages, undated by the template, 6 of 163 stored bodies.",
-    "content_mode": "full_text"
+    "content_mode": "full_text",
+    "access": "free"
   },
   {
     "country": "Germany",
@@ -307,7 +321,8 @@
       "nachrichten"
     ],
     "notes": "sitemap 232/14d",
-    "content_mode": "full_text"
+    "content_mode": "full_text",
+    "access": "free"
   },
   {
     "country": "Germany",
@@ -320,7 +335,8 @@
     "frontpage": false,
     "allowed_dirs": [],
     "notes": "sitemap 22/14d; feeds 120; 2 feed(s) at non-standard paths",
-    "content_mode": "full_text"
+    "content_mode": "full_text",
+    "access": "mixed"
   },
   {
     "country": "Germany",
@@ -335,7 +351,8 @@
       "magazin"
     ],
     "notes": "sitemap 698/14d. Narrowed 2026-09-09 to /magazin: excluded /tag (442), /autoren, /themen, /experten, /format, /dossiers - 515 index pages of 2000. Its plain sitemap is unusable for dates: a 2026-08-13 migration restamped the whole archive, so stored rows were 90% pre-2025 and untitled. news-sitemap.xml carries titles and real publication dates and is now traversed first (see vendor/PROVENANCE.md); it is a rolling ~3-day, ~13/day window, so a missed daily run loses coverage permanently. No paywall: 53 pages sampled, all isAccessibleForFree=true. See todo.md",
-    "content_mode": "full_text"
+    "content_mode": "full_text",
+    "access": "free"
   },
   {
     "country": "Germany",
@@ -348,7 +365,8 @@
     "frontpage": false,
     "allowed_dirs": [],
     "notes": "feeds 30",
-    "content_mode": "full_text"
+    "content_mode": "full_text",
+    "access": "mixed"
   },
   {
     "country": "Germany",
@@ -361,7 +379,8 @@
     "frontpage": false,
     "allowed_dirs": [],
     "notes": "sitemap 2/14d; feeds 30; 1 feed(s) at non-standard paths",
-    "content_mode": "full_text"
+    "content_mode": "full_text",
+    "access": "free"
   },
   {
     "country": "Germany",
@@ -396,7 +415,8 @@
       "/aktuelles?"
     ],
     "notes": "frontpage-only fallback (48 links, undated); client wrote 'BPEX'; biek.de redirects here after the BIEK->BPEX rename. bpex.de is an unrelated consultancy - do not monitor it. Frontpage keeps every navigation link, so 38 of 57 stored rows were about, legal, listing and pagination pages (2026-09-11). Excluded: those sections, and '/aktuelles?' - the pagination and PDF copies of the /presse/meldung releases share the bare section path with real /aktuelles/meldung items. The PDFs were the only dated BPEX rows; the HTML releases are kept undated, as for other associations",
-    "content_mode": "full_text"
+    "content_mode": "full_text",
+    "access": "free"
   },
   {
     "country": "Germany",
@@ -412,7 +432,8 @@
       "presse"
     ],
     "notes": "sitemap 109/14d; 1 feed(s) at non-standard paths. Narrowed 2026-09-11 on stored rows: 114 URLs, 6 under /news-und-publikationen; the rest were /events (40), /gremien, /zertifizierungen, /ueber-uns, /campus, /person-unit, /download-typ and the English mirror. WordPress stamps a JSON-LD datePublished on every one of those pages, so a page date proves nothing about being an article here.",
-    "content_mode": "full_text"
+    "content_mode": "full_text",
+    "access": "free"
   },
   {
     "country": "Germany",
@@ -428,7 +449,8 @@
       "presse/meldungen"
     ],
     "notes": "association website, not a publisher: the sitemap is the whole site. Narrowed 2026-09-09 from 2002 items to blog posts + press releases (~30). Excluded /service, /files, /lore, /en, /logistik-indikator, /presse/multimedia photo galleries, plus membership and contact pages. All 5323 sitemap URLs share ONE lastmod, regenerated periodically - dates are meaningless and every regeneration re-queues every body. 0 brand hits; kept for the de-minimis blog post. See todo.md Switched to title_only 2026-09-09: 0 brand hits in 620 URLs, and sampled bodies are management/leadership essays, not events. Under the balanced selector policy only 3 of 620 slugs are worth opening. Its sitemap ships bare URLs, so the slug is the index - the selector matches on it.",
-    "content_mode": "title_only"
+    "content_mode": "title_only",
+    "access": "free"
   },
   {
     "country": "Germany",
@@ -443,7 +465,8 @@
       "de/aktuelles/meldung"
     ],
     "notes": "sitemap 5/14d. Narrowed 2026-09-11 on stored rows: 14 URLs, of which 3 were news items under /de/aktuelles/meldung; the rest were /de/termine event pages and /de/positionen and /de/publikation listings (the Stellungnahmen index carries 78 date stamps and no article). Article date is a <time datetime> holding epoch seconds.",
-    "content_mode": "full_text"
+    "content_mode": "full_text",
+    "access": "free"
   },
   {
     "country": "Germany",
@@ -456,7 +479,8 @@
     "frontpage": false,
     "allowed_dirs": [],
     "notes": "feeds 8; 2 feed(s) at non-standard paths",
-    "content_mode": "full_text"
+    "content_mode": "full_text",
+    "access": "free"
   },
   {
     "country": "Germany",
@@ -476,7 +500,8 @@
       "de/news/presse/haendlerbund-studien"
     ],
     "notes": "sitemap 124/14d. Excluded 2026-09-11 on stored rows: event listings and the press-mention and study indexes. /de/news/presse/pressemitteilungen is deliberately kept - it holds dated press releases.",
-    "content_mode": "full_text"
+    "content_mode": "full_text",
+    "access": "free"
   },
   {
     "country": "Germany",
@@ -497,7 +522,8 @@
       "service"
     ],
     "notes": "sitemap 33/14d; feeds 30; 1 feed(s) at non-standard paths. Excluded 2026-09-11 on stored rows: /category and /produkt-kategorie are WordPress archive pages (22 of 42 bodies, no article, no date of their own); /produkt, /seminare, /karriere and /service are shop, seminar and job pages that WordPress dates like articles. News items sit at the site root.",
-    "content_mode": "full_text"
+    "content_mode": "full_text",
+    "access": "free"
   },
   {
     "country": "Germany",
@@ -513,6 +539,7 @@
       "positionen"
     ],
     "notes": "sitemap 117/14d. Narrowed 2026-09-11 on stored rows: of 129 URLs only /detail (7, the news items) and /positionen carried anything article-shaped; dropped /veranstaltungen (52 event pages), /rechtshilfen (46 evergreen legal guides), /mitgliedschaft/mitgliederliste (11 member entries). Article date is a single <time itemprop=datePublished>, read since 2026-09-11.",
-    "content_mode": "full_text"
+    "content_mode": "full_text",
+    "access": "free"
   }
 ]

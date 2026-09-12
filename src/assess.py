@@ -1,4 +1,9 @@
-"""Client relevance assessment — STUB.
+"""Client relevance assessment — STUB, superseded and unused.
+
+Kept for its record of what was settled before the assessment stage existed. The
+stage that was built is ``src/report_agent/``: it assesses a frozen week rather
+than one item at a time, because ``merge`` and ``carry_forward`` are impossible
+for a per-item scorer (report_plan.md §2.1). Nothing imports this module.
 
 Deliberately unimplemented. The storage and collection halves of the vertical slice
 are well specified by mvp_plan.md; this half is not, and guessing at it would bake

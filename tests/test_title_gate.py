@@ -12,7 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.selector import Candidate  # noqa: E402
 from src.profile import load_profile  # noqa: E402
 from src.title_gate import (GateConfigError, parse_reply, prompt_version,  # noqa: E402
-                            prune_logs, render_batch, render_system_prompt, run_gate)
+                            logged_keeps, prune_logs, render_batch,
+                            render_system_prompt, run_gate)
 
 PROFILE = load_profile("jt-express")
 
@@ -185,3 +186,35 @@ def test_decision_logs_are_pruned_after_keep_days(tmp_path):
 
     assert [p.name for p in removed] == ["2026-08-01.jsonl"]
     assert sorted(p.name for p in tmp_path.iterdir()) == ["2026-09-05.jsonl", "notes.jsonl"]
+
+
+def test_logged_keeps_uses_the_latest_decision_per_url(tmp_path):
+    log_dir = tmp_path / PROFILE.slug
+    log_dir.mkdir()
+    first = [
+        {"client": PROFILE.slug, "source": "news.test", "external_id": "a",
+         "decision": "keep"},
+        {"client": PROFILE.slug, "source": "news.test", "external_id": "b",
+         "decision": "drop"},
+    ]
+    second = [
+        {"client": PROFILE.slug, "source": "news.test", "external_id": "a",
+         "decision": "drop"},
+        {"client": PROFILE.slug, "source": "news.test", "external_id": "b",
+         "decision": "keep"},
+    ]
+    (log_dir / "2026-09-10.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in first) + "\n", encoding="utf-8")
+    (log_dir / "2026-09-11.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in second) + "\n", encoding="utf-8")
+
+    assert [(row["source"], row["external_id"]) for row in
+            logged_keeps(PROFILE.slug, tmp_path)] == [("news.test", "b")]
+
+
+def test_a_malformed_decision_log_cannot_silently_lose_a_keep(tmp_path):
+    log_dir = tmp_path / PROFILE.slug
+    log_dir.mkdir()
+    (log_dir / "2026-09-11.jsonl").write_text("not json\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid title-gate JSONL"):
+        logged_keeps(PROFILE.slug, tmp_path)

@@ -17,11 +17,14 @@ that prompt lists legal areas instead of business topics. The templates in
 ``src/prompts/`` are shared by every client; what the client is, its areas and
 its measured false matches come from ``prompt`` in its profile.
 
-The input is the selector's candidates that carry a stored body and have no
-body-gate decision yet, newest first. An item is identified by source and
-external id, not by version: a restamp writes version 2 of an old URL and is not
-a new article. A profile or prompt change therefore applies to new items;
-``regate_from`` re-offers items decided under another version, deliberately.
+The input is stored bodies with no body-gate decision yet, newest first. Full-text
+news and regulatory bodies come through the selector. A body carrying this client's
+title-gate route skips this stage: the title gate already made the cheap relevance
+decision, so after enrichment it goes directly to the full assessor. An item is
+identified by source and external id, not by version: a restamp writes version 2 of
+an old URL and is not a new article. A profile or prompt change therefore applies
+to new items; ``regate_from`` re-offers items decided under another version,
+deliberately.
 
 Decisions are stored in ``assessment`` - relevant 1, unsure NULL, irrelevant 0 -
 under a prompt version ``body_gate-<kind>-<hash>``, with the verdict, reason,
@@ -219,9 +222,8 @@ def pending_items(profile: ClientProfile, kind: str, db_path: Path,
     """
     selection = selection_from_db(db_path, ((sources_path or SOURCES[kind], kind),),
                                   "all", profile)
-    candidates = [c for c in selection.candidates if c.has_body]
-    if not candidates:
-        return [], 0
+    candidates = {(c.source_slug, c.external_id): c for c in selection.candidates
+                  if c.has_body}
 
     prefix = f"{STAGE}-{kind}-"
     conn = sqlite3.connect(f"file:{Path(db_path).resolve().as_posix()}?mode=ro", uri=True)
@@ -229,10 +231,26 @@ def pending_items(profile: ClientProfile, kind: str, db_path: Path,
     try:
         latest: dict[tuple[str, str], sqlite3.Row] = {}
         for row in conn.execute(
-                "SELECT id, source_slug, external_id, published_at, fetched_at, payload "
+                "SELECT id, source_slug, external_id, url, title, published_at, fetched_at, payload "
                 "FROM raw_item WHERE source_kind = ? ORDER BY source_slug, external_id, version",
                 (kind,)):
             latest[(row["source_slug"], row["external_id"])] = row
+        if kind == "news":
+            # A title-gate keep is already client-approved. Its queue route is the
+            # durable handoff to the full assessor, so asking the body gate again
+            # would pay for a second cheap relevance decision and could contradict
+            # the first one merely because the fetched body uses different words.
+            for task in conn.execute(
+                    "SELECT source_slug, external_id, hint_payload FROM body_fetch "
+                    "WHERE status='ok'"):
+                key = (task["source_slug"], task["external_id"])
+                try:
+                    route = json.loads(task["hint_payload"]).get(
+                        "title_gate_routes", {}).get(profile.slug)
+                except (TypeError, ValueError):
+                    continue
+                if route:
+                    candidates.pop(key, None)
         query = ("SELECT DISTINCT r.source_slug, r.external_id FROM assessment a "
                  "JOIN raw_item r ON r.id = a.raw_item_id "
                  "WHERE a.client_slug = ? AND r.source_kind = ? "
@@ -247,7 +265,7 @@ def pending_items(profile: ClientProfile, kind: str, db_path: Path,
 
     ranked: list[tuple[str, GateItem]] = []
     already = 0
-    for candidate in candidates:
+    for candidate in candidates.values():
         key = (candidate.source_slug, candidate.external_id)
         if key in gated:
             already += 1

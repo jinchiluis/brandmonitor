@@ -41,6 +41,9 @@ profile and prompt, then analyzing the already collected material.
 
 - Keep the eight configured German/EU regulatory article sources independent from
   news collection and assess them by topic rather than brand.
+- Collect Bundestag and Bundesrat procedures (DIP, every procedure type, not only
+  bills) and a hand-picked list of European Parliament procedures as regulatory
+  items, assessed the same way. Ministry drafts before cabinet are not covered.
 - The EU Safety Gate collector stores the strongest measured item-level source,
   including product, brand, risk, measure, origin, notifying country, recall URL,
   and online trader.

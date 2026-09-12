@@ -14,6 +14,7 @@ is stored before applying a client profile.
 | Trade press and associations | Full text | A brand or rule can appear only in the body; the main trade sources carry most measured signal. |
 | Regulators | Full text | Regulatory relevance is topical and cannot reliably be judged from a headline. |
 | Mainstream publishers | Title and URL first; body only after a match | Volume is high, signal is low, and bulk use of paid accounts creates publisher and terms-of-service risk. |
+| Parliamentary procedures (DIP, EP) | The API record, with a body composed from it | The record already says what the procedure is and what happened; the documents behind a DIP step are fetched later, only for the procedures a client's gate kept. |
 
 Full text everywhere was rejected because paid-account bulk fetching is risky, not
 because storage is expensive. Title-only everywhere was rejected because it makes
@@ -164,6 +165,62 @@ regulatory items at roughly 40 % precision and raised full-text volume by a fift
 Those are historical measurements, not live dashboard values. Recalculate rather
 than copying them into a report.
 
+### Matched keywords in the report
+
+Chinese monitoring reports usually print the matched keywords (命中关键词) beside an
+item, and the customer's list reads like a query written for such a tool. The full
+assessment will store a deterministic `matches` block: per rule, the matched text,
+the field it was found in, and a count. It is computed when the full assessment
+runs, over title and body, and frozen in that `assessment` row beside its
+`profile_version`. Not at collection: matches depend on the client, `raw_item` is
+shared, and a profile edit would leave stored hits stale without any sign. Not
+from the body gate's `selector_reasons` either: those are rule names without the
+matched word or field, and a title-only item has no body until after its gate.
+
+Only what is matched exactly is printed:
+
+| Printed | From |
+|---|---|
+| Brand, with its role's category label (`DHL` → 核心竞品动态监测) | brand rule and `role`, labels in `alert_taxonomy.json` |
+| Topic (`Zollfreigrenze`, `GPSR`) | topic rule |
+| A parcel-sector keyword next to a body-only policy keyword (*Kurier + Verordnung*) | the customer's row 3 in its own terms |
+| 标题提及 for a title or slug match, 正文提及 for body only | the field |
+
+The item's own category is the assessor's call: a customs item that names DHL in
+its eighth paragraph is not competitor news. Other broad keywords stay internal.
+On 2026-09-11, 130 of the 249 bodies the body gate kept or left unsure had matched
+on broad keywords alone, and a tag such as *China + Plattform* explains why noise
+got in rather than why the item matters.
+
+Rows 4 and 5 are never printed as matched words. The assessor picks `alert_types`
+from `alert_taxonomy.json`, and the report shows one only when the assessor did.
+Measured over the same 724 body-gate decisions, 27 of 249 kept or unsure bodies and
+41 of 475 dropped ones contain a row-4/5 word, so the words do not separate relevant
+from irrelevant. Read one by one, the 27 kept hits are:
+
+- three events rows 4 and 5 exist for: the FTC investigating Shein, €550M against
+  AliExpress, Hermes's job cuts in a delivery restructuring;
+- three pieces of marketplace enforcement a report would carry: the DSC's
+  proceedings against eBay, the Commission's product-safety checks on e-commerce
+  parcels, its foreign-subsidies probe of JD.com;
+- seven studies: *Untersuchung* means a survey in 7 of its 13 hits (Swiss free
+  shipping, a Hessen funding round, a carrier complaints comparison);
+- three hypotheticals in merchant explainers ("kann mit einem Bußgeld von bis zu
+  100.000 € geahndet werden", whether a strike counts as force majeure);
+- the rest background mentions, the English word *brand* (*Brand Guardian*,
+  "Brand Trademark"), or events outside the client's world: Google's DMA fines,
+  port strikes, the taxi and bus trade.
+
+German morphology rules out tuning that away. 8, 14 and 8 kept bodies carry
+*Bußgeld*, *Sanktion* and *Strafe* only in another form: *Bußgelder*, *Sanktionen*,
+*Strafen*, but also *Vertragsstrafe*, *Haftstrafe*, *Handelssanktionen*. Substring
+matching finds all of those, and for *Ermittlung* also *Datenübermittlung* and
+*Vermittlungsdienste*.
+
+The hits do include the three real alerts, so they are kept in the payload for
+audit rather than dropped: a body carrying an alert word that the assessor gave no
+`alert_type` is the list to skim during the pilot.
+
 ## Assessment funnel
 
 ```text
@@ -171,24 +228,29 @@ title-only news           full-text news            regulators
       |                         |                        |
 deterministic selector    deterministic selector    deterministic selector
       |                         |                        |
-title gate (built)              |                        |
+title gate                body gate, news       body gate, regulatory
       |                         |                        |
-fetch body (not built)          |                        |
-      +------------+------------+                        |
-                   |                                     |
-       body gate, news prompt (built)     body gate, regulatory prompt (built)
-                   +------------------+------------------+
-                                      |
-                          full structured assessment
-                                      |
-                             Chinese report/alert
+JSONL keep -> body queue        |               DIP relevant: documents
+      |                         |               fetched, cut when read
+fetch selected body             |                        |
+      +-------------------------+------------------------+
+                                |
+                    full structured assessment
+                                |
+                       Chinese report/alert
 ```
 
 The title gate sees only title-level evidence and decides whether a body is
-fetched. Every body - fetched on a match or stored by a full-text source - then
-passes the body gate, which decides whether it is worth the full assessment.
-Regulatory records skip the title gate because their relevance is topical, and use
-their own body-gate prompt.
+fetched. Its JSONL `keep` records are the client-specific handoff; the existing
+`body_fetch` table is only the shared operational queue and retry state. A kept
+title-only item goes directly to the full assessor after fetching: the cheap title
+LLM already approved it for this client, so the fetched body is enrichment rather
+than input to a second relevance gate. Full-text news and regulatory bodies reach
+their body gates through the deterministic body-aware selector. Regulatory records
+skip the title gate because their relevance is topical, and use their own body-gate
+prompt. A DIP procedure the regulatory gate judges relevant also brings the
+documents behind its steps, cut to size when they are read ("Documents behind
+parliamentary procedures" below).
 
 Every stored assessment must identify the client, prompt version, profile version,
 and source version. The report schema should be sketched before the final assessment
@@ -213,8 +275,18 @@ candidates deserve a body fetch. `run_daily.bat` runs it after the news crawl.
 - **Decisions.** Kept and dropped, with versions, in
   `data/title_gate/<client>/<date>.jsonl`, pruned after 30 days. Dropped items are
   recorded nowhere else.
-- **No memory beyond the run.** A profile change applies to new items; `gate --all`
-  re-gates the corpus deliberately, `gate --run N` redoes one day.
+- **Fetch handoff.** `python run.py fetch-bodies --kind news
+  --title-gate-client <client>` reads the retained JSONL files and queues only their
+  latest `keep` per source URL, even though those sources have
+  `content_mode=title_only`. Once introduced, the existing `body_fetch` row owns
+  retries, so pruning the decision log cannot strand a failed request. The daily
+  script runs this as `title_bodies` immediately after the title gate. A successful
+  route is direct input to the full assessor and skips the body gate.
+- **No decision memory beyond the run.** A profile change applies to new items;
+  `gate --all` re-gates the corpus deliberately, `gate --run N` redoes one day.
+  The body queue remembers that an explicitly kept URL needs source material and
+  the client route plus original selector reasons needed for delivery to the full
+  assessor; the relevance decision itself remains in JSONL.
 
 The model was chosen on the 247 title-only candidates stored on 2026-09-11,
 hand-labelled under a strict rule: 23 keep, borderline items drop. Batches of 10,
@@ -270,11 +342,13 @@ activated on the account, so they are untested.
 selected body is a signal for the client. `run_daily.bat` runs it after both
 collections.
 
-- **Input.** The selector's news and regulatory candidates that carry a stored body
-  and have no body-gate decision yet, newest first, at most `limit` per tier and run
-  (config.json). It reads every such body rather than only today's, so a body that
-  arrives on a retry is gated when it arrives. An item is its source and external
-  id: a restamp's version 2 is not re-offered.
+- **Input.** News and regulatory candidates that carry a stored body, have no
+  body-gate decision yet, newest first, at most `limit` per tier and run
+  (`config.json`). Full-text news and regulatory items come through the body-aware
+  deterministic selector, and bodies carrying this client's successful title-gate
+  route are excluded because they already have a cheap relevance decision. It reads
+  every other selected body rather than only today's. An item is its source and
+  external id: a restamp's version 2 is not re-offered.
 - **Prompts.** `src/prompts/body_gate.md` shows a news body with the rules it
   matched; `src/prompts/body_gate_regulatory.md` shows a regulatory body without
   them and lists legal areas instead of business topics. The client's inputs come
@@ -359,19 +433,356 @@ selector picked and all 301 it skipped in the window:
   *Universaldienst*, *Deutsche Post*) is not in the profile, and no postal decision
   appeared in the window, so recall there is untested.
 
-So regulatory bodies reach the gate through the selector, as news bodies do: a
-recall-first keyword filter in front of a precision-first model, which make
-different mistakes. The selector's regulatory picks are 92 % noise, but the gate
-discards that cheaply; the gate's 4 % keep rate on noise is what the selector
-spares the full assessment. The selector module was renamed from
+So regulatory and full-text news bodies reach the gate through a recall-first
+keyword filter in front of a precision-first model; fetched title-gate keeps take
+the already-approved title route instead. The selector's regulatory picks are 92 %
+noise, but the gate discards that cheaply; the gate's 4 % keep rate on noise is what
+the selector spares the full assessment. The selector module was renamed from
 `src/news_selector.py` to `src/selector.py` for serving both tiers. The check to
 repeat now and then is the one above - gate the skipped regulatory bodies once and
 read what it keeps - because that is where missing vocabulary would show.
 
+### Parliamentary procedures
+
+Added 2026-09-11; the measurements are in `docs/source_coverage.md`, "Parliament".
+DIP procedures and European Parliament procedures are stored as regulatory items
+whose body is composed from the record - type, state, subject descriptors,
+abstract, dated steps - so they take the regulatory selector and gate unchanged,
+with two differences:
+
+- The EP source has `keyword_prefilter: false`. Every procedure is a candidate,
+  because the set is small - a few hundred, a handful new a month - and titles such
+  as "Clean corporate vehicles" match no keyword. The gate is that source's
+  selector, which is also why collecting all of them costs nothing extra: the
+  choice of which procedures matter is made per client, not in `input/`.
+- The regulatory prompt was widened the same day to name parliamentary material and
+  to count a question put to the government in the client's areas. An unanswered
+  minor question on customs checks of Temu parcels announces and decides nothing,
+  but it is the political signal. The 52 regulator bodies gated earlier keep their
+  decisions under the old prompt version and were not re-gated.
+
+Relevance is decided once per procedure. The gate identifies an item by source and
+external id, so a new step - a new version - is not gated again, and that is
+intended: a procedure's topic does not change when the Bundesrat votes on it. What
+happened this week is the report's question. It reads the versions stored in its
+window of procedures the gate kept, and names the step from the body.
+
+First pass: DIP 52 selected, 6 relevant, 7 unsure, 39 irrelevant; watch-list 14,
+7 / 5 / 2. Two DIP keeps are false, EU-US tariff regulations forwarded as EU
+documents. The one recall miss found is the postal vocabulary gap above, now
+measured: a written question on automated stations replacing postal branches,
+tagged *Postfiliale*, selected by nothing.
+
+Second pass, 2026-09-12, after EP collection widened from those 14 to every
+legislative procedure: 224 gateable procedures, 8 relevant, 31 unsure, 185
+irrelevant. The 14 expectations held with no miss, and the gate kept one procedure
+the hand review had passed over, 2025/0348(CNS) on prosecutor access to VAT data -
+a weak keep. So the gate is a fair stand-in for a hand review at this volume, which
+is what lets collection stay client-neutral.
+
+Only a relevant verdict goes on from here: for parliamentary procedures, unsure
+stops like irrelevant. Decided 2026-09-11 on the first pass. The documents behind
+all 7 DIP procedures the gate left unsure carried nothing for the client:
+settlement imports, two supply-chain-law questions, investment screening, an
+EU-India trade question, the deforestation bill (its six *Sendungen* are timber
+consignments), and a customs-and-financial-crime question whose 31,000 characters
+of question and answer never mention parcels, platforms or e-commerce. The 5
+unsure watch-list procedures are the list's own fleet and cross-sector entries:
+clean corporate vehicles, van CO2, heavy-vehicle weights, posted workers, the
+Digital Omnibus. Every real signal came as relevant, and so did the noise that
+costs something, the two tariff regulations. Unsure stays stored, to be skimmed
+during the pilot like the drops. The prompt is unchanged: it is shared with the
+regulators, and a model allowed to hedge keeps borderline items out of relevant.
+
+### Documents behind parliamentary procedures
+
+`python run.py fetch-dip-docs --client <client>` (`src/dip_documents.py`) runs in
+`run_daily.bat` after the body gate. For each DIP procedure whose latest regulatory
+body-gate decision for the client is relevant, it fetches every Drucksache the
+newest version references - the government's answer, the bill, the committee
+report - once per DIP document id, shared by every client. Relevance is decided
+once per procedure, but the document list comes from the newest version, so an
+answer that arrives later is fetched too. Plenary protocols and list entries are
+skipped; what the steps reference is measured in docs/source_coverage.md,
+"Parliament". The text is stored whole in `dip_document`; the storage and retry
+contract is in docs/body_collection.md, "Parliamentary documents".
+
+What the full assessment reads is cut from the stored text when it is read:
+
+| Document | Read as | Measured 2026-09-11 |
+|---|---|---|
+| Written question, in a collective Drucksache | the one question and its answer, by `frage_nummer` | 750-4,500 of 171,000-627,000 characters |
+| Bill, ordinance, committee report | the opening summary, from "A. Problem" to the draft, the recommendation, or the Bundesrat header repeated above the cover letter | 5,400-6,800 of 154,000-1,112,000 for three bills; 1,600-1,800 for two committee reports, recommendation included |
+| Anything else | from the start, up to 30,000 characters, marked when cut | an answer to a minor question, 21,600, whole |
+
+A procedure's documents, newest step first and within 40,000 characters, are its
+excerpt; a document not fetched yet is named, so the reader knows it exists.
+`fetch-dip-docs --show <procedure id>` prints the record and the excerpt as the
+full assessment will read them. Nothing reads them yet.
+
+A bill's summary does not always say what matters to the client. The customs bill's
+summary is about the Generalzolldirektion and money laundering; the obligation for
+postal and parcel operators to give customs investigators sender, weight, tracking
+number, pickup-station number and time-and-place data for a shipment sits in one
+amended paragraph, about 2,600 lines into 1.1 million characters. Passages around
+profile keywords do not find it: the profile has no postal vocabulary, and in that
+bill *customs* hits 2,146 times and the two body-only policy rules 671 and 618.
+
+Nothing is built for that, on purpose. It is one observed case; the record itself
+was not blind to it, since DIP's descriptors name *Brief-, Post- und
+Fernmeldegeheimnis* and the summary names the extended investigative powers of the
+Finanzkontrolle Schwarzarbeit, which audits the KEP sector; and a passage found
+this way would be evidence for the assessor rather than anything a customer reads.
+See todo.md before building it.
+
+## Safety Gate
+
+Decided 2026-09-12 from a hand review of the whole stored pilot window: every
+alert notified by Germany with a Chinese country of origin over the 12 weekly
+reports from 2026-06-26 to 2026-09-11, 50 in all. Labels are in
+`clients/jt-express/labels/safety_gate_2026-09-12.json`.
+
+| Label | Alerts | Per week |
+|---|---:|---:|
+| direct — J&T named or shown to have carried the item | **0** | 0 |
+| customer exposure — `onlineTrader` names a key customer | 20 | 1.7 |
+| market trend — Chinese-origin good acted on, no key customer named | 27 | 2.3 |
+| irrelevant | 3 | 0.3 |
+
+**`direct` is a structural zero, not an unlucky window.** No carrier is named in
+any of the 639 stored alerts, J&T or any competitor. Safety Gate records the
+product, the brand and the online trader; the carrier is not a field, because the
+duty falls on sellers and platforms. This is the same structural zero as the DSA
+database and it has the same consequence: Safety Gate can never produce an
+`own_brand` item for the alert push. A marketplace match does not prove J&T
+carried the item, and nothing in the record ever will.
+
+**The useful scope is the `onlineTrader` field, not the product.** Temu, Shein,
+AliExpress and TikTok Shop are `role: customer` in `profile.json` — J&T delivers
+for them — so an alert naming one is the customer's `key_customer` monitoring
+category (重点客户动态监测), which the taxonomy already pushes by newsletter. The
+split is AliExpress 11, Temu 5, Shein 4; TikTok Shop appears in none of the German
+50 and in 7 alerts notified elsewhere. 15 of the 20 list *Removal of this product
+listing by the online marketplace* among their measures: the key customer itself
+acted. The remaining 27 alerts are a sector fact about the goods flow J&T carries,
+which is what the `industry_policy` category is for. Product, brand, barcode and
+SKU are evidence inside the item, not a scope.
+
+**Treatment is clustered weekly, and immediate alerting is ruled out on the
+data.** The lag between a measure taking force and Safety Gate publishing it is a
+median of 30 days measured from the earliest measure and 28 from the latest
+(min 4, max 191; at most 2 of 47 within 7 days). 29 of the 50 carry more than one
+measure, so the lag is a range per alert rather than a single number. A weekly
+retrospective bulletin cannot carry an immediate alert whatever the content. The
+pilot view is also 50 of 50 *Serious risk*, so severity ranks nothing, and the
+product classes repeat: 10 of 50 are balloons, 9 adaptors or extension leads, 5
+bicycle helmets, 3 sand-filled toys. Per-item alerting would send four near
+duplicates a week. The report therefore carries one clustered block, key-customer
+items named individually and the rest grouped by product class and risk.
+
+**Germany-only remains the rule, with a measured cost.** Widening to every
+notifying country adds 53 key-customer alerts (France 29, Luxembourg 10, Ireland
+5), and **none of the 53 repeat a product/brand pair already in the German set** —
+so this is not deduplication, it is a different and larger set. Whether a Temu
+listing pulled in France is a J&T Germany item is a client scope question, not a
+collection one; see todo.md §2.
+
+**Wiring, built 2026-09-12.** Safety Gate rows reach neither the selector nor the
+body gate, and that is correct: the deterministic selector reads keywords over
+titles and bodies, while these are structured records whose relevance is decided
+by two fields. No relevance LLM call is justified when the geography rule already
+yields 47 of 50 usable items. They enter the funnel at the full assessment, on the
+`select_client_alerts` view, bypassing both gates.
+
+```text
+collect-safety-gate -> raw_item -> select_client_alerts -> full assessment
+                                   (geography + onlineTrader,     |
+                                    compose_body, no LLM)     assessment row
+```
+
+`select_client_alerts` returns each alert with `key_customers`, parsed `measures`
+and a composed `body_text`. `python run.py safety-gate-view [--key-customers]
+[--since] [--full]` prints that view and is read-only: no assessment rows, no
+model or network calls. It exists so the source is inspectable before the
+assessor is built, and remains the way to check the client rules after it is.
+
+`compose_body` follows `src/dip.py` and `src/ep_procedures.py` — a deterministic
+template over the record, no summarising model, because an LLM would add cost and
+a fabrication risk to fields that are already prose. It differs from those two in
+where the body lives: they store `body_text` in the payload because the body gate
+reads it straight out of SQL, whereas Safety Gate skips that gate, so the body is
+composed on read. That keeps one copy of the text, lets a template fix reach
+alerts already stored, and needs no backfill.
+
+Two traps in the `measures` field, both found by composing a body and reading it:
+
+- It is one run-together string — label, value, next label, no separators — and
+  **29 of the 50 pilot alerts carry more than one measure**, so reading only the
+  first undercounts marketplace removals. The parser locates labels rather than
+  splitting on them, because the string does not reliably start with one.
+- There are two live spellings of the operator label (505 and 358 of 639 alerts),
+  and the date is the literal string `Unknown` in 267 of 962 measures. An
+  undatable measure is stored as no date rather than as that word, which is the
+  same rule the rest of the project applies to dates.
+
+All 639 stored alerts parse into 962 measures, every one with a category; 695
+carry a real date and 267 none.
+
+## Historical funnel backfill
+
+Historical processing is an operator campaign, not a daily-pipeline mode. Use
+`tools\\backfill_funnel.bat`; it holds `data\\run.lock`, and no command from the
+tool is called by `run_daily.bat`.
+
+The campaign freezes the selected news bodies, selected regulatory bodies and
+title-only candidates without bodies under one client profile and prompt set.
+Title decisions go to an isolated campaign directory under
+`data/backfill/funnel/`, not to the live `data/title_gate/` handoff. They are
+bounded and resumable. Keeps cannot be promoted until every frozen title has a
+decision. Promotion is also bounded, so a fetch limit of 20 introduces at most 20
+new historical keeps to the durable body queue rather than queuing the whole
+archive and merely limiting HTTP requests.
+
+```text
+tools\\backfill_funnel.bat create initial-2026-09 --client jt-express
+tools\\backfill_funnel.bat status initial-2026-09
+tools\\backfill_funnel.bat title-gate initial-2026-09 --limit 100
+tools\\backfill_funnel.bat body-gate-existing initial-2026-09 --kind news --limit 100
+tools\\backfill_funnel.bat body-gate-existing initial-2026-09 --kind regulatory --limit 100
+tools\\backfill_funnel.bat fetch-title-keeps initial-2026-09 --limit 20
+tools\\backfill_funnel.bat shadow-body-gate-title-keeps initial-2026-09 --limit 20
+```
+
+Repeat the bounded commands until `status` reports no remaining work. Creating a
+campaign and checking status make no model or network calls. The other commands
+are deliberately explicit; a changed profile, prompt, model, reasoning setting or
+source configuration invalidates the frozen campaign instead of mixing versions.
+
+Body-gate verdicts do not mark the shared `raw_item`. They are customer-specific
+rows in `assessment`, keyed by raw item, client, prompt version and profile
+version. A later full assessor writes another customer-specific assessment row
+under its own prompt version, and the report reads those full-assessment rows.
+The body gate's `relevant` and `unsure` rows, plus successfully fetched title-gate
+keeps, define what may reach that expensive stage; irrelevant rows remain queryable
+for audit.
+
+`shadow-body-gate-title-keeps` is an evaluation command only. It applies the
+current news body-gate prompt to successfully fetched title keeps and appends the
+results to the campaign's `title-body-gate-shadow.jsonl`. It writes no
+`assessment` rows and does not change the direct-to-assessor route. Re-running it
+continues with keeps that do not yet have a shadow verdict.
+
+## Weekly assessment and report
+
+`src/report_agent/` is the stage after the gates. Four commands, and only the
+second calls a model:
+
+```text
+run.py export-window --client --since --until   frozen bundle (read-only)
+run.py assess        --bundle                   decisions + issue register
+run.py report        --bundle                   zh report, ledger, coverage
+run.py verify-report --bundle                   verification.json, exit 1 on error
+```
+
+The shape came out of a hand-made cycle for 2026-09-05..11 whose scaffolding is
+in `data/reports/experiment-2026-09-05_11/`; `report_plan.md` records what that
+demonstrated. The short version is that the artefact it left behind was an
+evidence-freezing harness plus a rendering harness with an analyst-shaped hole
+between them, and the hole is the only part that needs a model.
+
+### Relevance is not treatment
+
+The gates answer *is this a signal for this client*. The report needs a second
+and different answer — what happens to it this week:
+
+| Treatment | Meaning |
+|---|---|
+| `report` | carries its own finding |
+| `merge` | folded into another item's story |
+| `background_only` | context inside a finding, not reported alone |
+| `carry_forward` | an open issue with no qualifying development this week |
+| `insufficient_evidence` | reportable in principle; the stored material cannot carry it |
+| `omit_for_priority` | real and client-adjacent, not worth the week |
+
+`merge` and `carry_forward` are structurally impossible for a per-item scorer,
+which is the same conclusion §1.1 of `todo.md` reached from the cadence side.
+The bulk treatments beside these — `retain_gate_stop`, `archive_no_week_update`,
+`background_not_reported` — are written by rules. In the reference week 908 of
+1,004 rows were bulk, and paying a model to say `archive_no_week_update` two
+hundred times buys nothing.
+
+### The six steps
+
+Carry-forward and deep read and challenge are agentic: they decide what to read
+next from what they just read. Triage, cluster and write are fixed calls, the
+same pattern as the gates. State between steps is artefacts on disk, never a
+preserved conversation — a transcript is not traceable to a prompt version, is
+not re-runnable, cannot be verified as keyed rows, and lets one story's framing
+bleed into the next.
+
+The tool surface is five read-only calls over the frozen bundle: `get_item`,
+`get_body`, `search_titles`, `search_bodies`, `open_issues`. No network at any
+point in the stage.
+
+**Search reaches the items a gate stopped.** This is the one counter-intuitive
+part and it is deliberate. A continuing story often fails a per-item relevance
+test: a port-strike article that never mentions parcels is correctly stopped as
+non-parcel-specific, and is still the second instalment of an issue already
+open. The carry-forward step is bounded by the open issues rather than sweeping
+the rejects, so the gate's drops are searched *for a named thing*, not reopened
+wholesale.
+
+### What makes the output checkable
+
+- **Complete accounting.** Every identity in the export carries exactly one
+  ledger row. The renderer fails on a gap rather than rendering a partial
+  ledger; a report claiming eight findings without saying what happened to the
+  other 996 cannot be audited.
+- **Links resolve by id.** The writing step emits `[文字](item:24617)` and the
+  renderer substitutes the URL the export froze for that id. A URL the export
+  does not contain fails the build. Fabricating a source is therefore structurally
+  impossible rather than something a reviewer has to catch.
+- **Depth is measured.** `review_depth` comes from the assessor's logged tool
+  calls — `get_body` was called, so `full_stored_body`; nothing was, so
+  `title_only`. The hand-made cycle inferred depth from hardcoded id sets, which
+  made the ledger's most important column a claim.
+- **Constants come from the manifest.** The experiment's verifier asserted that
+  week's counts as literals, so its checks were true exactly once.
+
+### The issue register
+
+`issue-register.json` is the unit of state between weeks: dated status, the
+evidence behind it, and the evidence that would trigger the next update. The next
+cycle starts from that rather than from last week's prose. It is a file per cycle
+for now, found by scanning earlier bundles for the latest one that closed before
+this window opened; moving it into SQLite is a reader change in
+`src/report_agent/bundle.py` and nothing else.
+
+### Model
+
+`gpt-5.6-sol`, pinned in `config.json` with reasoning effort per step. Not the
+gates' model: the gates are a cheap screen in front of this, while this stage
+reads bodies, challenges its own first reading and writes the customer-facing
+Chinese. **It has no dated snapshot published**, which is the one place this
+project's pinning convention cannot be honoured, so every bundle's
+`assessment-manifest.json` records the model and the per-step prompt hashes to
+make an upstream change visible after the fact.
+
 ## Remaining design decisions
 
-- How fetch-on-match queues explicit title-only items regardless of `content_mode`.
 - Full assessment model and prompt, and how it reads the body gate's decisions.
+- How the full assessment finds the passage of a long parliamentary document that
+  matters to the client, where the document's summary does not say it.
 - Structured output required by weekly reports and immediate alerts.
 - When a profile-version change triggers reassessment of historical items.
-- Alert cadence and the meaning of the customer's identifier `01519`.
+- Alert cadence the customer is promised. `01519` is answered and needs nothing
+  built: it is J&T Global Express's Hong Kong stock code, and no German news
+  source uses it (`clients/jt-express/alert_taxonomy.json`).
+
+**Decided 2026-09-12: the full assessment runs weekly over a window of
+`raw_item.fetched_at`, not daily and never over `published_at`.** The assessor is
+the only stage that touches no network, so it alone can be re-run at will — the
+`assessment` key makes re-assessment additive, and `fetched_at` is on 100 % of
+stored rows where `published_at` misses 2.6 %. `assessment.created_at` is rejected
+as the window because a re-run would stamp it with the day it ran. The reasoning,
+the volumes and the accepted risk are in todo.md §1.1.

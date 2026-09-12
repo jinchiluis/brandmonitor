@@ -53,8 +53,10 @@ Take the publication date from the page itself: schema.org `datePublished`,
 `article:published_time` or a lone `<time datetime>` during body fetch, or
 `<news:publication_date>` from a news sitemap. Both survive a restamp; `lastmod`
 does not. Every stored row records which field supplied its date in
-`published_at_source` (`page`, `feed`, `news_sitemap`, `lastmod`, `frontpage`, or
-null); a report may print the first three and must never print `lastmod`. Visible
+`published_at_source` (`page`, `feed`, `news_sitemap`, `record`, `lastmod`,
+`frontpage`, or null); a report may print the first four and must never print
+`lastmod`. `record` is the date a structured record gives for its own event — a
+DIP procedure step, a European Parliament event. Visible
 text is never parsed for a date: the first visible date on a page was a future
 seminar on one sampled source and a listing entry on another.
 
@@ -80,6 +82,13 @@ that single batch carried 221 distinct `application_date` values reaching back t
 2024-02-26. Take the event date from `application_date` or `content_date`. Ask of
 any new structured source which of its dates is the event and which is the
 paperwork, because they are rarely the same field.
+
+DIP, the Bundestag's API, has both traps at once. `aktualisiert` is a re-indexing
+stamp — in one 14-day window 1,306 of 1,858 touched current-term records were
+written questions a median 340 days old — so it sets the collection window and
+nothing else. `datum` is a procedure's latest step, not its adoption: a Bundesrat
+resolution adopted 2025-07-11 carries 2026-07-16, the government's reply. A report
+names the step, not only the date.
 
 ## Hosts and secrets
 
@@ -158,6 +167,7 @@ input/                 source lists, platform lists, and blacklist, shared by al
 clients/<slug>/        client config and prompt inputs
 migrations/            ordered SQLite migrations
 src/                    application code and prompts
+src/report_agent/      weekly assessment and report stack
 vendor/newscrawler/    existing news discovery/fetch code
 vendor/govcrawler/     government fetch code, when added
 data/                  gitignored database, backups, cache, logs, PDFs, and reports
@@ -169,6 +179,55 @@ Prefer a flat `src/` until several files of the same kind justify a folder.
 `input/` holds collection inputs and `clients/<slug>/` holds analysis inputs, which
 is the repository-level form of the first design rule. A source list is not client
 config: several clients read the same one.
+
+## The weekly report stack
+
+`src/report_agent/` turns a week of stored material into a Chinese customer report.
+Four commands, and only the second calls a model:
+
+```text
+python run.py export-window --client jt-express --since 2026-09-05 --until 2026-09-11
+python run.py assess        --bundle data/reports/jt-express-2026-09-05_2026-09-11
+python run.py report        --bundle data/reports/jt-express-2026-09-05_2026-09-11
+python run.py verify-report --bundle data/reports/jt-express-2026-09-05_2026-09-11
+```
+
+`export-window` freezes a bundle under `data/reports/<client>-<since>_<until>/`
+through a `mode=ro` URI inside a rolled-back transaction, so it is safe while
+collection runs. The frozen half is written once and no later stage modifies it;
+`assess`, `report` and `verify-report` are re-runnable against the same bundle for
+as long as it exists. `assess` makes no network call except to the model, and no
+stage after `export-window` reads the database.
+
+Four properties hold the whole thing together, and breaking any of them is a
+regression rather than a style choice:
+
+- **Relevance is not treatment.** The gates decide whether an item is a signal;
+  the report decides what happens to it — `report`, `merge`, `background_only`,
+  `carry_forward`, `insufficient_evidence`, `omit_for_priority`. `merge` and
+  `carry_forward` are structurally impossible for a per-item scorer, which is why
+  the assessment is weekly and clustered rather than per item.
+- **Complete accounting.** Every identity in the export carries exactly one
+  ledger row. A report claiming eight findings without saying what happened to
+  the other 996 cannot be checked, so `report` fails on a gap rather than
+  rendering a partial ledger.
+- **Links resolve by id.** The writing step emits `[文字](item:24617)` and the
+  renderer substitutes the URL the export froze. An id outside the export fails
+  the build, which is what makes a fabricated source impossible rather than
+  something a reviewer has to notice.
+- **Depth is measured, not asserted.** `review_depth` in the ledger comes from
+  the assessor's logged tool calls: `get_body` was called, so that row reads
+  `full_stored_body`; nothing was, so it reads `title_only`.
+
+The unit of state between weeks is `issue-register.json`, not last week's prose:
+dated status, the evidence behind it, and the evidence that would trigger the next
+update. The next cycle's carry-forward step searches for exactly that, **including
+among the items a gate stopped** — a continuing story often fails a per-item
+relevance test, and recovering it is the reason stopped items stay in the bundle.
+
+The report stack is deliberately **not** in `run_daily.bat`. Collection is daily
+because it is irreversible; assessment reads only the database and is completely
+reversible, so it runs weekly and by hand for now (todo.md §1.1).
 
 ## Vendored code
 
@@ -189,6 +248,13 @@ Sites to crawl live in a JSON array read by
 `sitemap`, `feeds`, `frontpage`, and `brightdata` switch on discovery methods.
 `organization` names the site for CLI filters. Remaining keys are metadata the
 crawler ignores.
+
+An entry with `collector` is not crawled: it names the collector that stores its
+items (`dip` for `run.py collect-dip`, `ep_procedures` for `collect-ep`). It stays in
+the list because the selector and the body gates find a source's items through it.
+`"keyword_prefilter": false` makes every item of a source a candidate — for a small
+source like the EP procedures, where the keyword rules save nothing and would lose
+items whose titles carry none, such as "Clean corporate vehicles".
 
 `feed_urls` is an optional list of exact feed URLs. When set, it replaces both
 homepage autodiscovery and `COMMON_FEED_PATHS` for that source. Use it whenever a

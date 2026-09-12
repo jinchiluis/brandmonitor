@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Brand Monitor health check every 15 minutes
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+RandomizedDelaySec=30
+Unit=brandmonitor-health.service
+
+[Install]
+WantedBy=timers.target

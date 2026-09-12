@@ -186,6 +186,35 @@ def test_only_selected_bodies_without_a_decision_are_offered_newest_first(corpus
     assert [i.candidate.external_id for i in regulatory] == ["dsa"]
 
 
+def test_a_title_match_reaches_the_news_gate_without_body_keyword_confirmation(corpus):
+    corpus["add"]("news", "title-kept", "Temu expands delivery", PLAIN_BODY)
+
+    items, _ = pending_items(PROFILE, "news", corpus["db"], corpus["news"])
+
+    assert [item.candidate.external_id for item in items] == ["title-kept"]
+    assert items[0].candidate.matched_in == ("title",)
+    assert items[0].body == PLAIN_BODY
+
+
+def test_a_title_gate_route_skips_the_body_gate(corpus):
+    # It would pass the normal selector on its own; the client-specific route is
+    # what removes it from this cheap gate and hands it to the full assessor.
+    corpus["add"]("news", "routed", "Temu expands delivery", TEMU_BODY)
+    route = {"title_gate_routes": {PROFILE.slug: {
+        "client": PROFILE.slug, "reasons": ["keyword:parcel"],
+        "matched_in": ["title"], "label": "Earlier matching title"}}}
+    conn = sqlite3.connect(corpus["db"])
+    conn.execute(
+        "INSERT INTO body_fetch (source_slug, external_id, discovery_hash, hint_payload, status) "
+        "VALUES ('news.test', 'routed', 'hash', ?, 'ok')", (json.dumps(route),))
+    conn.commit()
+    conn.close()
+
+    items, _ = pending_items(PROFILE, "news", corpus["db"], corpus["news"])
+
+    assert items == []
+
+
 def test_gated_items_are_not_offered_again_and_a_restamp_is_not_new(corpus):
     corpus["add"]("news", "n1", "Temu", TEMU_BODY)
     items, _ = pending_items(PROFILE, "news", corpus["db"], corpus["news"])

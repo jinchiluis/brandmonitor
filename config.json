@@ -31,6 +31,23 @@
     "body_chars": 12000,
     "limit": 300
   },
+  "report_agent": {
+    "_comment": "The weekly assessment and report (src/report_agent/). Not the gates' model: the gates are a cheap screen in front of this, while this stage reads bodies, challenges its own first reading and writes the customer-facing Chinese, so it gets a capable model. gpt-5.6-sol has no dated snapshot published - the convention everywhere else in this file is a pinned date, and this is the one place it cannot be honoured, so a silent upstream change to 'sol' is a live risk and assessment-manifest.json records the model on every run to make it visible. Reasoning effort is per step: triage is a keep/omit call over titles, deep read and challenge are where the quality comes from. Tool-call budgets are rails, not throttles - a step that exhausts one is told to answer from what it read rather than cut off. max_stories bounds a pathological week; stories over the cap are recorded as unread, never silently dropped. Raised from 12 to 20 on 2026-09-12: a normal week clustered to 13, so 12 was a throttle rather than a rail. Cost for a full cycle is unmeasured (report_plan.md §8); the first full run over 2026-09-05..11 was 73 model calls and 80 tool calls for 381k input and 58k output tokens in 15 minutes, and tokens are counted per step in every bundle's assessment-manifest.json.",
+    "model": "gpt-5.6-sol",
+    "timeout_seconds": 600,
+    "triage_batch_size": 25,
+    "deep_read_tool_calls": 30,
+    "challenge_tool_calls": 20,
+    "max_stories": 20,
+    "steps": {
+      "carry_forward": {"reasoning_effort": "medium"},
+      "triage": {"reasoning_effort": "low"},
+      "cluster": {"reasoning_effort": "medium"},
+      "deep_read": {"reasoning_effort": "high"},
+      "challenge": {"reasoning_effort": "high"},
+      "write": {"reasoning_effort": "high"}
+    }
+  },
   "backup": {
     "_comment": "Daily-only while the project is in testing: the point right now is 'roll back to before yesterday's purge/repair went wrong', not 'reconstruct the corpus from six months ago' - there is no six-months-ago yet. 14 days covers the realistic detection lag already seen on this project (BVL and etailment date issues surfaced days after collection, not same-day). Add keep_weekly/keep_monthly back once real weekly reports are going out and past-state reconstruction actually matters - it's a config change, not a code change. offbox_dir is a plain directory the OneDrive client already syncs - no rclone remote, no OAuth token. Set it to null to keep backups on this box only. warn_total_mb warns and never deletes: retention already bounds the normal case, so crossing it means an assumption broke.",
     "dir": "data/backups",

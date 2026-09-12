@@ -57,6 +57,15 @@ BODY_GATE_WORKERS = _BODY_GATE.get("workers", 4)
 BODY_GATE_BODY_CHARS = _BODY_GATE.get("body_chars", 12000)
 BODY_GATE_LIMIT = _BODY_GATE.get("limit", 300)
 
+# -- report agent (the weekly assessment and report) --
+# Kept as the whole section rather than unpacked: the per-step reasoning efforts
+# are read by name in src/report_agent/assess.py, and flattening them here would
+# mean a new step needs an edit in two files.
+REPORT_AGENT = _CFG.get("report_agent", {})
+REPORT_AGENT_MODEL = REPORT_AGENT.get("model", "gpt-5.6-sol")
+REPORT_AGENT_TIMEOUT = REPORT_AGENT.get("timeout_seconds", 600)
+REPORT_AGENT_MAX_STORIES = REPORT_AGENT.get("max_stories", 12)
+
 # -- backups --
 # A relative dir is resolved against the repo root so a scheduled task's working
 # directory cannot silently scatter snapshots somewhere else.

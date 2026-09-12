@@ -179,6 +179,26 @@ def slug_for(entry: Dict[str, Any]) -> str:
     return host.removeprefix("www.")
 
 
+def crawled_entries(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Entries the vendored crawler and the body fetcher work on.
+
+    An entry naming a ``collector`` is stored by that collector's own command.
+    It stays in the source list so the selector and the body gates see its items,
+    but crawling its site would record a zero-yield source every day, and
+    bulk-fetching its stored URLs would read DIP's web app as an article.
+    """
+    return [entry for entry in entries if not entry.get("collector")]
+
+
+def collector_entry(name: str, sources_path: Optional[Path] = None) -> Dict[str, Any]:
+    """The regulatory source entry stored by the collector called ``name``."""
+    path = Path(sources_path) if sources_path else DEFAULT_REGULATORY_SOURCES
+    for entry in json.loads(path.read_text(encoding="utf-8")):
+        if entry.get("collector") == name:
+            return entry
+    raise ValueError(f'{path} has no entry with "collector": "{name}"')
+
+
 def _hash(hint: ArticleHint) -> str:
     basis = f"{normalize_url(hint.url)}|{hint.title or ''}|{hint.published_at or ''}"
     return hashlib.sha256(basis.encode("utf-8")).hexdigest()
@@ -344,7 +364,7 @@ def run_collection(sources_path: Optional[Path] = None, *, days: Optional[float]
     path = Path(sources_path) if sources_path else (
         DEFAULT_REGULATORY_SOURCES if kind == "regulatory" else DEFAULT_NEWS_SOURCES)
     sources.clear_cache()
-    entries = sources.load_sources(str(path))
+    entries = crawled_entries(sources.load_sources(str(path)))
     if not entries:
         raise ValueError(f"no sources in {path}")
     modes = {slug_for(entry): content_mode(entry) for entry in entries}

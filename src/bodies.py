@@ -1,7 +1,9 @@
 """Article bodies, immutable content versions, and a durable retry queue.
 
-Only sources explicitly configured with content_mode=full_text are fetched, and
-no client matching happens here.
+Sources explicitly configured with content_mode=full_text are fetched in bulk.
+Title-only sources enter only through explicit keeps in a client's title-gate
+JSONL; the queue retains that routing metadata so no later body keyword match is
+required. No matching happens in this module.
 
 Fetching is an escalation ladder, not a single request - see fetch_body. Each
 rung costs more than the one below it, so each runs only when the cheaper rung
@@ -35,9 +37,11 @@ from zoneinfo import ZoneInfo
 
 import requests
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 
 from src.config import (BODY_FETCH_BROWSER, BODY_FETCH_DELAY, BODY_FETCH_LIMIT,
-                        BODY_FETCH_MAX_ATTEMPTS, BODY_FETCH_TIMEOUT, PDF_MAX_PAGES)
+                        BODY_FETCH_MAX_ATTEMPTS, BODY_FETCH_TIMEOUT, PDF_MAX_PAGES,
+                        ROOT)
 from src.db import finish_run, record_source_result, session, start_run, utcnow
 from src.logger import get_logger
 from vendor.newscrawler.crawler import HTML_HEADERS, url_matches_dirs
@@ -113,16 +117,41 @@ def digest(value: Any) -> str:
 
 
 def queue_body(conn: sqlite3.Connection, slug: str, external_id: str,
-               payload: dict[str, Any], *, only_missing: bool = False) -> None:
+               payload: dict[str, Any], *, only_missing: bool = False,
+               title_gate_route: dict[str, Any] | None = None) -> None:
     """A changed discovery hint requests a recheck, never a content version."""
     hint = {key: payload.get(key) for key in
             ("url", "title", "published_at", "discovered_via")}
     fingerprint = digest(hint)
     current = conn.execute(
-        "SELECT discovery_hash FROM body_fetch WHERE source_slug=? AND external_id=?",
+        "SELECT discovery_hash, hint_payload FROM body_fetch "
+        "WHERE source_slug=? AND external_id=?",
         (slug, external_id),
     ).fetchone()
+    routes = {}
+    if current:
+        try:
+            routes = json.loads(current["hint_payload"]).get("title_gate_routes", {})
+        except (TypeError, ValueError):
+            routes = {}
+    if title_gate_route:
+        client = title_gate_route.get("client")
+        if not client:
+            raise ValueError("a title-gate route needs a client")
+        routes[client] = title_gate_route
+    if routes:
+        # Routing metadata is client-specific operational state, not shared source
+        # content and not part of the discovery fingerprint. After a successful
+        # fetch it is the title lane's durable handoff to the full assessor.
+        hint["title_gate_routes"] = routes
     if current and (only_missing or current["discovery_hash"] == fingerprint):
+        encoded = json.dumps(hint, ensure_ascii=False)
+        if encoded != current["hint_payload"]:
+            conn.execute(
+                "UPDATE body_fetch SET hint_payload=? "
+                "WHERE source_slug=? AND external_id=?",
+                (encoded, slug, external_id),
+            )
         return
     conn.execute(
         "INSERT INTO body_fetch (source_slug, external_id, discovery_hash, hint_payload) "
@@ -509,6 +538,10 @@ def _fetch_subscriber(url: str) -> BodyResult | None:
     an unsubscribed site a cheap skip instead of a browser launch that logs in
     with an empty password.
     """
+    # Body fetching is normally its own process, so an earlier LLM stage loading
+    # dotenv cannot populate this process. Load credentials only when an anonymous
+    # request has already declared a paywall; public articles never reach this rung.
+    load_dotenv(ROOT / ".env")
     try:
         from vendor.newscrawler.paywall.handler import (fetch_paywall_article,
                                                         get_paywall_cfg)
@@ -670,28 +703,79 @@ def store_body(conn: sqlite3.Connection, run_id: int, task: sqlite3.Row,
 
 def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_FETCH_LIMIT,
                    refresh: bool = False, retry_unavailable: bool = False,
-                   db_path: Path | None = None) -> dict[str, Any]:
-    """Fetch a bounded batch, including old hints and failures outside the crawl window."""
-    from src.collect import slug_for, url_is_excluded
+                   db_path: Path | None = None, title_gate_client: str | None = None,
+                   title_gate_log_root: Path | None = None) -> dict[str, Any]:
+    """Fetch a bounded batch, including old hints and retryable failures.
+
+    Normally every configured ``full_text`` item is eligible.  With
+    ``title_gate_client``, only explicit keeps from that client's retained JSONL
+    decisions are newly queued, regardless of ``content_mode``; existing queued
+    title-only failures remain eligible after the originating log is pruned.
+    """
+    from src.collect import crawled_entries, slug_for, url_is_excluded
     from vendor.newscrawler.source_loader import sources
 
     if limit < 1:
         raise ValueError("body fetch limit must be positive")
+    if title_gate_client and kind != "news":
+        raise ValueError("title-gate body fetching is only valid for news")
     sources.clear_cache()
-    entries = sources.load_sources(str(sources_path))
+    entries = crawled_entries(sources.load_sources(str(sources_path)))
     if not entries:
         raise ValueError(f"no sources in {sources_path}")
-    entries = [e for e in entries if content_mode(e) == "full_text"]
+    wanted_mode = "title_only" if title_gate_client else "full_text"
+    entries = [e for e in entries if content_mode(e) == wanted_mode]
     by_slug = {slug_for(e): e for e in entries}
     tasks = []
     eligible = {slug: set() for slug in by_slug}
     with session(db_path) as conn:
+        if title_gate_client:
+            from src.title_gate import logged_keeps
+
+            for decision in logged_keeps(title_gate_client, title_gate_log_root):
+                slug, external_id = decision["source"], decision["external_id"]
+                if slug not in by_slug:
+                    continue
+                row = conn.execute(
+                    "SELECT * FROM raw_item WHERE source_slug=? AND external_id=? "
+                    "AND source_kind='news' ORDER BY version DESC LIMIT 1",
+                    (slug, external_id),
+                ).fetchone()
+                if row is None:
+                    logger.warning("[bodies] title-gate keep has no raw item: %s %s",
+                                   slug, external_id)
+                    continue
+                route = {
+                    "client": title_gate_client,
+                    "at": decision.get("at"),
+                    "prompt_version": decision.get("prompt_version"),
+                    "profile_version": decision.get("profile_version"),
+                    "reasons": decision.get("reasons", []),
+                    "matched_in": decision.get("matched_in", ["title_gate"]),
+                    "label": decision.get("label"),
+                }
+                queue_body(conn, slug, external_id, json.loads(row["payload"]),
+                           only_missing=True, title_gate_route=route)
         for slug, entry in by_slug.items():
-            rows = conn.execute(
-                "SELECT r.* FROM raw_item r WHERE r.source_slug=? AND r.source_kind=? "
-                "AND NOT EXISTS (SELECT 1 FROM raw_item n WHERE n.source_slug=r.source_slug "
-                "AND n.external_id=r.external_id AND n.version>r.version)", (slug, kind),
-            ).fetchall()
+            if title_gate_client:
+                # A title-only body task can only have been created explicitly.
+                # Enumerating the durable queue also keeps retries alive after
+                # the short-lived JSONL decision that created it is pruned.
+                rows = conn.execute(
+                    "SELECT r.* FROM raw_item r JOIN body_fetch b "
+                    "ON b.source_slug=r.source_slug AND b.external_id=r.external_id "
+                    "WHERE r.source_slug=? AND r.source_kind=? "
+                    "AND NOT EXISTS (SELECT 1 FROM raw_item n "
+                    "WHERE n.source_slug=r.source_slug AND n.external_id=r.external_id "
+                    "AND n.version>r.version)", (slug, kind),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT r.* FROM raw_item r WHERE r.source_slug=? AND r.source_kind=? "
+                    "AND NOT EXISTS (SELECT 1 FROM raw_item n "
+                    "WHERE n.source_slug=r.source_slug AND n.external_id=r.external_id "
+                    "AND n.version>r.version)", (slug, kind),
+                ).fetchall()
             for row in rows:
                 payload = json.loads(row["payload"])
                 if url_is_excluded(row["url"], entry, row["title"]):
@@ -701,7 +785,8 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
                         row["url"], entry.get("allowed_dirs")):
                     continue
                 eligible[slug].add(row["external_id"])
-                queue_body(conn, slug, row["external_id"], payload, only_missing=True)
+                if not title_gate_client:
+                    queue_body(conn, slug, row["external_id"], payload, only_missing=True)
             for task in conn.execute("SELECT * FROM body_fetch WHERE source_slug=?", (slug,)):
                 if task["external_id"] not in eligible[slug]:
                     continue
@@ -723,7 +808,9 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
                      "stored": 0, "errors": []} for slug in by_slug}
     now = utcnow()
     with session(db_path) as conn:
-        run_id = start_run(conn, f"bodies:{kind}", now, now)
+        run_kind = (f"bodies:{kind}:title-gate:{title_gate_client}"
+                    if title_gate_client else f"bodies:{kind}")
+        run_id = start_run(conn, run_kind, now, now)
     summary["run_id"] = run_id
     host_seen: dict[str, float] = {}
     for task in tasks:

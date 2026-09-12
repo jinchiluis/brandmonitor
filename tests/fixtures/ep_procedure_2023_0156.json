@@ -1,0 +1,279 @@
+{
+ "_source": "EP Open Data API /procedures/2023-0156, fetched 2026-09-11; participation and titles trimmed",
+ "data": [
+  {
+   "id": "eli/dl/proc/2023-0156",
+   "type": "Process",
+   "consists_of": [
+    {
+     "id": "eli/dl/event/2023-0156-DEPOT-2024-02-28",
+     "type": "Activity",
+     "activity_date": "2024-02-28",
+     "activity_id": "2023-0156-DEPOT-2024-02-28",
+     "based_on_a_realization_of": [
+      "eli/dl/doc/A-9-2024-0065"
+     ],
+     "had_activity_type": "def/ep-activities/TABLING_PLENARY",
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG1"
+    },
+    {
+     "id": "eli/dl/event/MTG-PL-2024-03-13-PVCRE-ITM-8-15",
+     "type": "Activity",
+     "activity_date": "2024-03-13",
+     "activity_id": "MTG-PL-2024-03-13-PVCRE-ITM-8-15",
+     "had_activity_type": "def/ep-activities/PLENARY_VOTE",
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG1",
+     "recorded_in_a_realization_of": [
+      "eli/dl/doc/CRE-9-2024-03-13-ITM-008-15",
+      "eli/dl/doc/PV-9-2024-03-13-ITM-008-15"
+     ]
+    },
+    {
+     "id": "eli/dl/event/IMCO-PR-792031-DEPOT-2026-09-04",
+     "type": "Activity",
+     "activity_date": "2026-09-04",
+     "activity_id": "IMCO-PR-792031-DEPOT-2026-09-04",
+     "based_on_a_realization_of": [
+      "eli/dl/doc/IMCO-PR-792031"
+     ],
+     "had_activity_type": "def/ep-activities/COMMITTEE_TABLING_REPORT",
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG2"
+    },
+    {
+     "id": "eli/dl/event/IMCO-AM-756213-DEPOT-2023-11-16",
+     "type": "Activity",
+     "activity_date": "2023-11-16",
+     "activity_id": "IMCO-AM-756213-DEPOT-2023-11-16",
+     "based_on_a_realization_of": [
+      "eli/dl/doc/IMCO-AM-756213"
+     ],
+     "had_activity_type": "def/ep-activities/COMMITTEE_TABLING_AMENDMENT",
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG1"
+    },
+    {
+     "id": "eli/dl/event/2023-0156-MEET-TRI2-2025-10-15",
+     "type": "Activity",
+     "activity_date": "2025-10-15",
+     "activity_id": "2023-0156-MEET-TRI2-2025-10-15",
+     "had_activity_type": "def/ep-activities/INTERINSTITUTIONAL_NEGOTIATION",
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG1"
+    },
+    {
+     "id": "eli/dl/event/2023-0156-ANPRO-2023-10-19",
+     "type": "Activity",
+     "activity_date": "2023-10-19",
+     "activity_id": "2023-0156-ANPRO-2023-10-19",
+     "had_activity_type": "def/ep-activities/REFERRAL",
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG1"
+    },
+    {
+     "id": "eli/dl/event/2023-0156-MEET-TRI2-2025-11-20",
+     "type": "Activity",
+     "activity_date": "2025-11-20",
+     "activity_id": "2023-0156-MEET-TRI2-2025-11-20",
+     "had_activity_type": "def/ep-activities/INTERINSTITUTIONAL_NEGOTIATION",
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG1"
+    },
+    {
+     "id": "eli/dl/event/2023-0156-DEC-DCPL-2024-03-13",
+     "type": "Decision",
+     "activity_date": "2024-03-13",
+     "activity_id": "2023-0156-DEC-DCPL-2024-03-13",
+     "decided_on_a_realization_of": [
+      "eli/dl/doc/TA-9-2024-0151"
+     ],
+     "had_activity_type": "def/ep-activities/PLENARY_AMEND_PROPOSAL",
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG1"
+    },
+    {
+     "id": "eli/dl/event/2023-0156-DEC-ADCP-2024-02-22",
+     "type": "Decision",
+     "activity_date": "2024-02-22",
+     "activity_id": "2023-0156-DEC-ADCP-2024-02-22",
+     "had_activity_type": "def/ep-activities/COMMITTEE_ADOPTING_REPORT",
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG1"
+    },
+    {
+     "id": "eli/dl/event/2023-0156-DEC-ADCP-BUDG-2024-01-11",
+     "type": "Decision",
+     "activity_date": "2024-01-11",
+     "activity_id": "2023-0156-DEC-ADCP-BUDG-2024-01-11",
+     "decided_on_a_realization_of": [
+      "eli/dl/doc/BUDG-AD-753728"
+     ],
+     "had_activity_type": "def/ep-activities/COMMITTEE_ADOPTING_OPINION",
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG1"
+    },
+    {
+     "id": "eli/dl/event/2023-0156-DEC-ADCP-INTA-2024-01-24",
+     "type": "Decision",
+     "activity_date": "2024-01-24",
+     "activity_id": "2023-0156-DEC-ADCP-INTA-2024-01-24",
+     "decided_on_a_realization_of": [
+      "eli/dl/doc/INTA-AD-756044"
+     ],
+     "had_activity_type": "def/ep-activities/COMMITTEE_ADOPTING_OPINION",
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG1"
+    },
+    {
+     "id": "eli/dl/event/2023-0156-DEC-VOAGT-2026-04-16",
+     "type": "Decision",
+     "activity_date": "2026-04-16",
+     "activity_id": "2023-0156-DEC-VOAGT-2026-04-16",
+     "had_activity_type": "def/ep-activities/COMMITTEE_APPROVE_PROVISIONAL_AGREEMENT",
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG1"
+    },
+    {
+     "id": "eli/dl/event/2023-0156-MEET-TRI2-2025-12-10",
+     "type": "Activity",
+     "activity_date": "2025-12-10",
+     "activity_id": "2023-0156-MEET-TRI2-2025-12-10",
+     "had_activity_type": "def/ep-activities/INTERINSTITUTIONAL_NEGOTIATION",
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG1"
+    },
+    {
+     "id": "eli/dl/event/2023-0156-MEET-TRI2-2026-03-26",
+     "type": "Activity",
+     "activity_date": "2026-03-26",
+     "activity_id": "2023-0156-MEET-TRI2-2026-03-26",
+     "had_activity_type": "def/ep-activities/INTERINSTITUTIONAL_NEGOTIATION",
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG1"
+    },
+    {
+     "id": "eli/dl/event/MTG-PL-2024-03-13-VOT-ITM-941758",
+     "type": "Activity",
+     "activity_date": "2024-03-13",
+     "activity_id": "MTG-PL-2024-03-13-VOT-ITM-941758",
+     "based_on_a_realization_of": [
+      "eli/dl/doc/A-9-2024-0065"
+     ],
+     "had_activity_type": "def/ep-activities/PLENARY_VOTE_RESULTS",
+     "recorded_in_a_realization_of": [
+      "eli/dl/doc/PV-9-2024-03-13-VOT-ITM-015"
+     ]
+    },
+    {
+     "id": "eli/dl/event/2023-0156-MEET-TRI2-2025-07-08",
+     "type": "Activity",
+     "activity_date": "2025-07-08",
+     "activity_id": "2023-0156-MEET-TRI2-2025-07-08",
+     "had_activity_type": "def/ep-activities/INTERINSTITUTIONAL_NEGOTIATION",
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG1"
+    },
+    {
+     "id": "eli/dl/event/IMCO-PR-755046-DEPOT-2023-10-30",
+     "type": "Activity",
+     "activity_date": "2023-10-30",
+     "activity_id": "IMCO-PR-755046-DEPOT-2023-10-30",
+     "based_on_a_realization_of": [
+      "eli/dl/doc/IMCO-PR-755046"
+     ],
+     "had_activity_type": "def/ep-activities/COMMITTEE_TABLING_REPORT",
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG1"
+    },
+    {
+     "id": "eli/dl/event/2023-0156-DEC-ADCP-CONT-2024-01-23",
+     "type": "Decision",
+     "activity_date": "2024-01-23",
+     "activity_id": "2023-0156-DEC-ADCP-CONT-2024-01-23",
+     "decided_on_a_realization_of": [
+      "eli/dl/doc/CONT-AD-755970"
+     ],
+     "had_activity_type": "def/ep-activities/COMMITTEE_ADOPTING_OPINION",
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG1"
+    }
+   ],
+   "created_a_realization_of": [
+    "eli/dl/doc/TA-9-2024-0151",
+    "eli/dl/doc/BUDG-PA-753728",
+    "eli/dl/doc/C-10-2026-0219",
+    "eli/dl/doc/INTA-PA-756044",
+    "eli/dl/doc/IMCO-PR-792031",
+    "eli/dl/doc/A-9-2024-0065",
+    "eli/dl/doc/BUDG-AD-753728",
+    "eli/dl/doc/IMCO-PR-755046",
+    "eli/dl/doc/INTA-AD-756044",
+    "eli/dl/doc/SP-2024-350-TA-9-2024-0151",
+    "eli/dl/doc/CONT-AD-755970",
+    "eli/dl/doc/CONT-PA-755970"
+   ],
+   "current_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG2",
+   "had_participation": [
+    {
+     "id": "eli/dl/participation/2023-0156-NMCP-124988-IMCO-2023-09-05",
+     "type": "Participation",
+     "activity_date": "2023-09-05",
+     "had_participant_person": [
+      "person/124988"
+     ],
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG1",
+     "parliamentary_term": "org/ep-9",
+     "participation_in_name_of": "org/IMCO",
+     "participation_role": "def/ep-roles/RAPPORTEUR",
+     "politicalGroup": "org/PPE",
+     "precedenceOrder": 1401
+    },
+    {
+     "id": "eli/dl/participation/2023-0156-NMSR-197870-2025-07-08",
+     "type": "Participation",
+     "activity_date": "2025-07-08",
+     "had_participant_person": [
+      "person/197870"
+     ],
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG2",
+     "parliamentary_term": "org/ep-10",
+     "participation_role": "def/ep-roles/RAPPORTEUR_SHADOW",
+     "politicalGroup": "org/VERTS-ALE",
+     "precedenceOrder": 1406
+    }
+   ],
+   "process_id": "2023-0156",
+   "process_title": {
+    "en": "Establishing the Union Customs Code and the European Union Customs Authority, and repealing Regulation (EU) No 952/2013",
+    "de": "Einführung des Zollkodexes der Union und Einrichtung der Zollbehörde der Europäischen Union sowie Aufhebung der Verordnung (EU) Nr. 952/2013",
+    "fr": "Création du code des douanes de l'Union et de l'Autorité douanière de l'Union européenne et abrogation du règlement UE n° 952/2013"
+   },
+   "process_type": "def/ep-procedure-types/COD",
+   "was_scheduled_in": [
+    {
+     "id": "eli/dl/event/MTG-PL-2026-09-14-OJ-ITM-D-110",
+     "type": "ForeseenActivity",
+     "activity_date": "2026-09-14",
+     "activity_id": "MTG-PL-2026-09-14-OJ-ITM-D-110",
+     "documented_by_a_realization_of": [
+      "eli/dl/doc/OJQ-10-2026-09-14"
+     ],
+     "had_activity_type": "def/ep-activities/PLENARY_DEBATE",
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG2",
+     "notation_agendaPoint": "D-110"
+    },
+    {
+     "id": "eli/dl/event/MTG-PL-2026-09-16-OJ-ITM-V-110",
+     "type": "ForeseenActivity",
+     "activity_date": "2026-09-16",
+     "activity_id": "MTG-PL-2026-09-16-OJ-ITM-V-110",
+     "documented_by_a_realization_of": [
+      "eli/dl/doc/OJQ-10-2026-09-16"
+     ],
+     "had_activity_type": "def/ep-activities/PLENARY_VOTE",
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG2",
+     "notation_agendaPoint": "V-110"
+    },
+    {
+     "id": "eli/dl/event/MTG-PL-2024-03-13-OJ-ITM-V-18",
+     "type": "ForeseenActivity",
+     "activity_date": "2024-03-13",
+     "activity_id": "MTG-PL-2024-03-13-OJ-ITM-V-18",
+     "documented_by_a_realization_of": [
+      "eli/dl/doc/OJQ-9-2024-03-13"
+     ],
+     "had_activity_type": "def/ep-activities/PLENARY_VOTE",
+     "occured_at_stage": "http://publications.europa.eu/resource/authority/procedure-phase/RDG1",
+     "notation_agendaPoint": "V-18"
+    }
+   ],
+   "label": "2023/0156(COD)",
+   "identifierYear": "2023"
+  }
+ ]
+}

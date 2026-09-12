@@ -1,11 +1,14 @@
 @echo off
 rem brandmonitor daily collection.
 rem
-rem News, regulatory articles and Safety Gate, plus the title gate over the news
-rem items the day's crawl stored for the first time and the body gate over every
-rem selected body that has no decision yet. Fetch-on-match, the full assessment and
-rem the weekly report are not wired in yet and are deliberately absent rather than
-rem stubbed.
+rem News, regulatory articles, Safety Gate and parliamentary procedures (Bundestag,
+rem Bundesrat, European Parliament), plus title selection, fetch-on-match, and the
+rem body gate over every selected body that has no decision yet.
+rem
+rem The weekly assessment and report (run.py export-window / assess / report /
+rem verify-report) are deliberately absent from this script. Collection is daily
+rem because it is irreversible; the assessment reads only the database, so it is
+rem weekly and run by hand while the schema settles - see todo.md 1.1.
 rem
 rem Stages never chain on success: collection is source-specific and the two source
 rem lists are independent, so a news failure must not cancel regulatory collection.
@@ -53,9 +56,13 @@ set "OUT=%LOGDIR%\run_daily.txt"
 set "WORST=0"
 set "CODE_news=2"
 set "CODE_title_gate=2"
+set "CODE_title_bodies=2"
 set "CODE_regulatory=2"
 set "CODE_safety_gate=2"
+set "CODE_dip=2"
+set "CODE_ep_procedures=2"
 set "CODE_body_gate=2"
+set "CODE_dip_docs=2"
 set "CODE_backup=2"
 
 rem One SQLite writer at a time. A daily run must not collide with a manual
@@ -74,7 +81,7 @@ del "%TMPVAL%" "%TMPVAL%.err" 2>nul
     echo {
     echo   "finished_utc": "!FINISHED!Z",
     echo   "worst_exit": !WORST!,
-    echo   "stages": { "news": !CODE_news!, "title_gate": !CODE_title_gate!, "regulatory": !CODE_regulatory!, "safety_gate": !CODE_safety_gate!, "body_gate": !CODE_body_gate!, "backup": !CODE_backup! },
+    echo   "stages": { "news": !CODE_news!, "title_gate": !CODE_title_gate!, "title_bodies": !CODE_title_bodies!, "regulatory": !CODE_regulatory!, "safety_gate": !CODE_safety_gate!, "dip": !CODE_dip!, "ep_procedures": !CODE_ep_procedures!, "body_gate": !CODE_body_gate!, "dip_docs": !CODE_dip_docs!, "backup": !CODE_backup! },
     echo   "log": "data/log/%DAY%/run_daily.txt"
     echo }
 )
@@ -93,13 +100,25 @@ rem Not chained on news succeeding: a crawl that aborted half way still stored
 rem items worth gating, and when no crawl ran today the gate finds its run too old
 rem and does nothing rather than repeating yesterday.
 call :stage title_gate gate
+rem Independent from the gate's exit code: it also retries URLs queued by an
+rem earlier keep. New keeps come from the client's retained JSONL decision log;
+rem title-only sources are never bulk-fetched.
+call :stage title_bodies fetch-bodies --kind news --title-gate-client jt-express
 call :stage regulatory collect --kind regulatory
 call :stage safety_gate collect-safety-gate
-rem After both collections, so the day's news and regulatory bodies are stored.
-rem It reads every selected body without a decision, not only today's, so a body
-rem that arrived on a retry is gated whenever it arrives; config.json's limit caps
-rem each tier per run, so the first run after a backfill drains it over a few days.
+rem Parliamentary procedures are stored as regulatory items with a body composed
+rem from the record, so they reach the body gate below without a fetch.
+call :stage dip collect-dip
+call :stage ep_procedures collect-ep
+rem After the collections, so the day's full-text news and regulatory bodies are
+rem stored. Title-gate keeps skip this second cheap gate and later go directly to
+rem the full assessor. It reads every other selected body without a decision, not
+rem only today's; config.json's limit caps each tier per run.
 call :stage body_gate body-gate
+rem The documents behind the DIP procedures the gate judged relevant - the answer,
+rem the bill. DIP publishes a Drucksache's text days after its date, so a document
+rem without text waits in the queue for a later run rather than failing this one.
+call :stage dip_docs fetch-dip-docs --client jt-express
 rem Backup runs last so the snapshot carries the day's collection rather than
 rem yesterday's. It is safe inside the lock: SQLite's online backup API copies a
 rem consistent snapshot while the database is open, and this stage only reads.

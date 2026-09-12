@@ -1,6 +1,7 @@
 """Content lifecycle: enrichment, rechecks, retries, and public-page extraction."""
 
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -11,8 +12,8 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.bodies import (NO_ARTICLE_TEXT, PAYWALL_DECLARED, BodyResult,
-                        _extract_pdf, fetch_body, normalize_page_published_at,
-                        run_body_fetch)
+                        _extract_pdf, _fetch_subscriber, fetch_body,
+                        normalize_page_published_at, run_body_fetch)
 from src.collect import run_collection, store_hints
 from src.db import get_watermark, migrate, session, start_run
 from vendor.newscrawler.crawler import ArticleHint
@@ -149,6 +150,60 @@ def test_backfills_legacy_rows_but_never_fetches_title_only_sources(project, mon
     monkeypatch.setattr("src.bodies.fetch_body", lambda url: calls.append(url) or success())
     assert run(project)["stored"] == 1
     assert calls == ["https://trade.test/article"]
+
+
+def test_title_gate_log_fetches_only_kept_title_only_urls(project, monkeypatch, tmp_path):
+    discover(project, url="https://major.test/kept", full_text=False)
+    discover(project, url="https://major.test/dropped", full_text=False)
+    log_dir = tmp_path / "title_gate" / "client"
+    log_dir.mkdir(parents=True)
+    decisions = [
+        {"client": "client", "source": "major.test",
+         "external_id": "https://major.test/kept", "decision": "keep"},
+        {"client": "client", "source": "major.test",
+         "external_id": "https://major.test/dropped", "decision": "drop"},
+    ]
+    (log_dir / "2026-09-11.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in decisions) + "\n", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr("src.bodies.fetch_body",
+                        lambda url: calls.append(url) or success("Selected body"))
+
+    summary = run(project, title_gate_client="client",
+                  title_gate_log_root=tmp_path / "title_gate")
+
+    assert summary["attempted"] == 1 and summary["stored"] == 1
+    assert calls == ["https://major.test/kept"]
+    with session(project[0]) as conn:
+        queued = list(conn.execute(
+            "SELECT external_id, status, hint_payload FROM body_fetch ORDER BY external_id"))
+    assert [(row["external_id"], row["status"]) for row in queued] == [
+        ("https://major.test/kept", "ok")]
+    route = json.loads(queued[0]["hint_payload"])["title_gate_routes"]["client"]
+    assert route["client"] == "client"
+
+
+def test_title_gate_fetch_retries_its_queue_after_the_jsonl_is_gone(
+        project, monkeypatch, tmp_path):
+    discover(project, url="https://major.test/retry", full_text=False)
+    log_dir = tmp_path / "title_gate" / "client"
+    log_dir.mkdir(parents=True)
+    decision = {"client": "client", "source": "major.test",
+                "external_id": "https://major.test/retry", "decision": "keep"}
+    log = log_dir / "2026-09-11.jsonl"
+    log.write_text(json.dumps(decision) + "\n", encoding="utf-8")
+    monkeypatch.setattr("src.bodies.fetch_body",
+                        lambda url: BodyResult("failed", error="timeout"))
+    first = run(project, title_gate_client="client",
+                title_gate_log_root=tmp_path / "title_gate")
+    log.unlink()
+    monkeypatch.setattr("src.bodies.fetch_body", lambda url: success("Recovered body"))
+
+    second = run(project, title_gate_client="client",
+                 title_gate_log_root=tmp_path / "title_gate")
+
+    assert first["failed"] == 1
+    assert second["ok"] == 1 and second["stored"] == 1
 
 
 def test_backfill_respects_narrowed_sitemap_sections(project, monkeypatch):
@@ -403,11 +458,25 @@ def test_source_tiers_are_explicit():
     news = json.loads((root / "input/germany_medias.json").read_text(encoding="utf-8"))
     assert sum(e["content_mode"] == "full_text" for e in news) == 14
     assert sum(e["content_mode"] == "title_only" for e in news) == 10
+    assert {e["access"] for e in news} == {"free", "mixed"}
+    assert sum(e["access"] == "mixed" for e in news) == 10
+    logins = {e["organization"]: e["paywall_login"] for e in news
+              if "paywall_login" in e}
+    assert logins == {
+        "DER SPIEGEL": "spiegel.de",
+        "DIE ZEIT": "zeit.de",
+        "WELT": "welt.de",
+    }
+    configured = json.loads(
+        (root / "vendor/newscrawler/paywall/paywalls.json").read_text(encoding="utf-8"))
+    assert set(logins.values()) <= set(configured)
     dvz = next(e for e in news if e["organization"] == "DVZ")
     assert dvz["content_mode"] == "title_only"
     assert dvz["extra_sitemap_urls"] == ["https://www.dvz.de/news-sitemap.xml"]
     regulatory = json.loads((root / "input/regulatory_sources.json").read_text(encoding="utf-8"))
     assert all(e["content_mode"] == "full_text" for e in regulatory)
+    assert all(e["access"] == "free" and "paywall_login" not in e
+               for e in regulatory)
     presscorner = next(e for e in regulatory
                        if e["organization"] == "EU Commission Press Corner")
     assert presscorner["feed_urls"] == [
@@ -769,6 +838,41 @@ def test_paywall_login_is_skipped_without_credentials(monkeypatch):
     result = fetch_body("https://trade.test/article")
     assert result.status == "unavailable"
     assert result.error == PAYWALL_DECLARED, "error must stay clean when no login applies"
+
+
+def test_public_article_never_checks_subscriber_credentials(monkeypatch):
+    def unexpected(url):
+        pytest.fail("a public article must not reach the subscriber rung")
+
+    monkeypatch.setattr("src.bodies._fetch_subscriber", unexpected)
+    respond(monkeypatch, ARTICLE)
+    assert fetch_body("https://trade.test/article").status == "ok"
+
+
+def test_subscriber_rung_loads_dotenv_before_checking_credentials(monkeypatch):
+    import vendor.newscrawler.paywall.handler as handler
+
+    email_env, password_env = "TEST_SUBSCRIBER_EMAIL", "TEST_SUBSCRIBER_PASSWORD"
+    monkeypatch.delenv(email_env, raising=False)
+    monkeypatch.delenv(password_env, raising=False)
+    loaded = []
+
+    def fake_load(path):
+        loaded.append(Path(path))
+        os.environ[email_env] = "subscriber@example.test"
+        os.environ[password_env] = "secret"
+        return True
+
+    monkeypatch.setattr("src.bodies.load_dotenv", fake_load)
+    monkeypatch.setattr(handler, "get_paywall_cfg", lambda url: {
+        "email_env": email_env, "password_env": password_env,
+    })
+    monkeypatch.setattr(handler, "fetch_paywall_article", lambda url, cfg: ARTICLE)
+
+    result = _fetch_subscriber("https://trade.test/article")
+
+    assert result is not None and result.status == "ok"
+    assert len(loaded) == 1 and loaded[0].name == ".env"
 
 
 def test_subscriber_login_recovers_a_paywalled_article(monkeypatch):

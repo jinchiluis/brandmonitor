@@ -184,8 +184,8 @@
     }
   ],
   "open_questions_for_customer": [
-    "Does this list extend or replace the earlier document? It contains no customs, de-minimis, GPSR or DSA items; the profile keeps them until told otherwise.",
-    "What is '01519' in row 4 - an SMS sender or hotline prefix? If the concern is scam messages in J&T's name, that is not a news source.",
+    "Does this list extend or replace the earlier document? It contains no customs, de-minimis, GPSR or DSA items; the profile keeps them until told otherwise. -> answer: keep",
+    "What is '01519' in row 4 - an SMS sender or hotline prefix? If the concern is scam messages in J&T's name, that is not a news source. -> Answer: J&T Global Express’s Hong Kong stock code — usually written as 01519.HK. (useless for use)",
     "What cadence does 'Alert 推送' mean? Own-brand mentions are rare enough for a daily mail; collection is daily and reports weekly."
   ]
 }

@@ -48,6 +48,15 @@ real publisher pages under `tests/fixtures/dates/`; `capture.py` there re-captur
 them. A template change fails that test instead of silently demoting a source to
 `lastmod`.
 
+**htmldate is not used for stored dates, and should not be reached for.** It is
+already installed as a trafilatura dependency, and its fast mode does get several
+templates right, which makes it tempting. It reads text from any element whose
+class contains "date": it confidently dated every hub page in the 2026-09-11
+sample from the teaser dates on it, and took a class action's filing date as the
+publication date. Both failures produce a plausible wrong date rather than no
+date, which is the one outcome this pipeline cannot tolerate. It may be useful as
+a diagnostic column in `probe`, never as a stored value.
+
 Not every undated row is an extraction failure. Regulators (Bundeskartellamt,
 vzbv, BEUC, the Commission press corner, HDE) state no structured date and are
 dated by their feed; Bundesnetzagentur's feed carries no date either and its press
@@ -100,6 +109,9 @@ python run.py collect --kind regulatory --body-limit 20
 python run.py fetch-bodies --kind regulatory --limit 20
 python run.py fetch-bodies --kind news --limit 100
 
+# Fetch only title-only URLs kept by this client's title-gate JSONL decisions.
+python run.py fetch-bodies --kind news --title-gate-client jt-express
+
 # Recheck successful fetches, even when discovery metadata has not changed.
 python run.py fetch-bodies --kind news --refresh --limit 20
 
@@ -114,6 +126,15 @@ Both collection commands and `fetch-bodies` apply pending migrations automatical
 number attempted, not the number discovered or the total available archive.
 Repeat `fetch-bodies` to work through the reported backlog. Previously attempted
 URLs sort after untouched ones, with the oldest attempt first among retries.
+
+`--title-gate-client` changes eligibility from all configured `full_text` URLs to
+explicit keeps in `data/title_gate/<client>/*.jsonl`. Those keeps may enter the
+queue despite `content_mode=title_only`; no other URL from those sources does. Once
+queued, retry state is durable in `body_fetch`, so a failed URL remains retryable
+after the dated JSONL log is pruned. Its `hint_payload.title_gate_routes` retains
+the client and original selector reasons so the fetched body can go directly to
+that client's full assessor. The title gate already made the cheap relevance
+decision; the body is enrichment, not a reason to gate the item a second time.
 
 The backfill respects the current `allowed_dirs` for sitemap discoveries, including
 the already narrowed Verbraucherzentrale sections. Other discovery methods retain
@@ -140,8 +161,10 @@ their existing section semantics.
   never versions a row. Neither the date nor the fetch time is in the body hash.
 - `body_fetch` holds mutable per-URL fetch state, hint metadata, the count of
   consecutive unsuccessful attempts, attempt time, last run, and error. It is
-  separate from immutable raw versions. A failed refresh leaves the previously
-  stored body intact.
+  separate from immutable raw versions. For title-only keeps its hint also carries
+  the client route and original selector reasons; this is queue routing, not source
+  content or a relevance assessment. A failed refresh leaves the previously stored
+  body intact.
 - Changed discovery metadata queues a recheck, rather than creating another
   headline-only version. Identical hints do not refetch an already successful body.
   Unsignalled page changes require `--refresh`.
@@ -179,6 +202,33 @@ unavailable pages, and deferred work. CLI exit status is nonzero only when the
 current batch encounters retryable technical failures. Expected terminal
 `unavailable` outcomes remain visible without failing the run; deferred work is
 reported as backlog.
+
+## Parliamentary documents
+
+The documents behind DIP procedures are not bodies of their own items and do not
+go through `body_fetch`: a step references a Drucksache by DIP document id, and one
+collective Drucksache of written questions serves many procedures.
+`python run.py fetch-dip-docs --client <client>` queues every Drucksache the newest
+version of a procedure references once the client's regulatory body gate has
+judged the procedure relevant, then fetches what is due, newest first, up to
+`--limit` (50). The text is stored whole in `dip_document`, one row per document id
+and shared by every client; the cut the full assessment reads is made when it is
+read (`src/dip_documents.py`).
+
+| State | Meaning | Retry |
+|---|---|---|
+| `pending` | Queued, or DIP has no text for it yet | Next run |
+| `ok` | Text stored | Never. A Bundestag advance copy (*Vorabfassung*) is later replaced by the edited version; the difference is editorial |
+| `failed` | HTTP or network error | Next run |
+| `unavailable` | Without text or failing for 14 consecutive runs | `--retry-unavailable` |
+
+DIP publishes a Drucksache's text days after its date, so a missing text is the
+normal state of a fresh answer, not a failure, and it does not change the exit
+code. The queue owns retries: a document once queued is asked for until it has
+text or is given up, whatever happens to the decision that queued it. Runs are
+recorded as `dip_documents`. Exit 1 means every request in the batch failed, exit 2
+a rejected API key. `--show <procedure id>` prints one procedure's record and cut
+documents without fetching anything.
 
 ## Validation, 2026-09-09
 

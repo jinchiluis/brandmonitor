@@ -1,0 +1,498 @@
+{
+ "_source": "DIP API /vorgang/{id} and /vorgangsposition?f.vorgang=..., fetched 2026-09-11",
+ "vorgang": [
+  {
+   "id": "334627",
+   "abstract": "Originaltext der Frage(n):<br />\r\n<br />\r\nWie viele der in Deutschland ankommenden Sendungen von E-Commerce-Händlern aus dem Ausland werden nach Kenntnis der Bundesregierung durch deutsche Behörden tatsächlich überprüft, und wie verteilten sich deren Herkunftsländer (https://etailment.de/news/stories/zoll-eu-ueberfordert-nur-jedes-12.000ste-china-paket-wird-kontrolliert-25383:~:text=4%2C6%20Milliarden%20Pakete%20und%20kaum%20Kontrollen&text=Plattformen%20wie%20Temu%20oder%20Shein,pro%20eine%20Million%20freigegebener%20Produkte.)?",
+   "beratungsstand": "Beantwortet",
+   "vorgangstyp": "Schriftliche Frage",
+   "typ": "Vorgang",
+   "wahlperiode": 21,
+   "aktualisiert": "2026-07-01T09:01:31+02:00",
+   "deskriptor": [
+    {
+     "fundstelle": false,
+     "name": "Einfuhr",
+     "typ": "Sachbegriffe"
+    },
+    {
+     "fundstelle": false,
+     "name": "Elektronischer Handel",
+     "typ": "Sachbegriffe"
+    },
+    {
+     "fundstelle": true,
+     "name": "Zollabfertigung",
+     "typ": "Sachbegriffe"
+    }
+   ],
+   "titel": "Kontrollquote bei E-Commerce-Sendungen aus dem Ausland",
+   "datum": "2026-04-24"
+  },
+  {
+   "id": "337163",
+   "beratungsstand": "Beantwortet",
+   "vorgangstyp": "Kleine Anfrage",
+   "sachgebiet": [
+    "Staat und Verwaltung",
+    "Öffentliche Finanzen, Steuern und Abgaben"
+   ],
+   "typ": "Vorgang",
+   "wahlperiode": 21,
+   "initiative": [
+    "Fraktion BÜNDNIS 90/DIE GRÜNEN"
+   ],
+   "aktualisiert": "2026-08-07T14:34:13+02:00",
+   "deskriptor": [
+    {
+     "fundstelle": false,
+     "name": "Hamburg",
+     "typ": "Geograph. Begriffe"
+    },
+    {
+     "fundstelle": false,
+     "name": "Zollpolitik",
+     "typ": "Sachbegriffe"
+    },
+    {
+     "fundstelle": false,
+     "name": "Zollrecht",
+     "typ": "Sachbegriffe"
+    },
+    {
+     "fundstelle": false,
+     "name": "Zollverwaltung",
+     "typ": "Sachbegriffe"
+    }
+   ],
+   "titel": "Auswirkungen der EU-Zollreform auf den Zollstandort Hamburg und die Bündelung nationaler Zollkompetenzen",
+   "datum": "2026-07-27"
+  },
+  {
+   "id": "322138",
+   "abstract": "Verbesserung des Verbraucherschutzes beim Online-Versandhandel, Einführung einer Gebühr für Päckchen aus Drittstaaten, Aufhebung der Zollfreigrenze, &quot;Retouren-Steuer&quot; für nicht rechtskonforme Produkte, Gleichstellung mit dem stationären Handel, Präsentation mit pauschalem Warnhinweis, Prüfung von Haftungsregelungen",
+   "beratungsstand": "Angenommen",
+   "vorgangstyp": "Selbständiger Antrag von Ländern auf Entschließung",
+   "sachgebiet": [
+    "Europapolitik und Europäische Union",
+    "Recht"
+   ],
+   "typ": "Vorgang",
+   "wahlperiode": 21,
+   "initiative": [
+    "Baden-Württemberg",
+    "Mecklenburg-Vorpommern"
+   ],
+   "aktualisiert": "2026-07-24T10:18:47+02:00",
+   "deskriptor": [
+    {
+     "fundstelle": false,
+     "name": "Drittstaat",
+     "typ": "Sachbegriffe"
+    },
+    {
+     "fundstelle": false,
+     "name": "Einfuhrbeschränkung",
+     "typ": "Sachbegriffe"
+    },
+    {
+     "fundstelle": true,
+     "name": "Elektronischer Handel",
+     "typ": "Sachbegriffe"
+    },
+    {
+     "fundstelle": false,
+     "name": "Produktsicherheit",
+     "typ": "Sachbegriffe"
+    },
+    {
+     "fundstelle": false,
+     "name": "Verbraucherinformation",
+     "typ": "Sachbegriffe"
+    },
+    {
+     "fundstelle": false,
+     "name": "Verbraucherschutz",
+     "typ": "Sachbegriffe"
+    },
+    {
+     "fundstelle": false,
+     "name": "Versandhandel",
+     "typ": "Sachbegriffe"
+    }
+   ],
+   "titel": "Entschließung des Bundesrates \"Verbraucher beim Online-Einkauf schützen - Schnelle Maßnahmen im Zusammenhang mit Angeboten aus Drittstaaten auf Onlineplattformen\"",
+   "datum": "2026-07-16"
+  }
+ ],
+ "vorgangsposition": [
+  {
+   "id": "670877",
+   "vorgangsposition": "Länderantrag",
+   "zuordnung": "BR",
+   "gang": true,
+   "fortsetzung": false,
+   "nachtrag": false,
+   "vorgangstyp": "Selbständiger Antrag von Ländern auf Entschließung",
+   "titel": "Entschließung des Bundesrates \"Verbraucher beim Online-Einkauf schützen - Schnelle Maßnahmen im Zusammenhang mit Angeboten aus Drittstaaten auf Onlineplattformen\"",
+   "typ": "Vorgangsposition",
+   "aktivitaet_anzahl": 0,
+   "dokumentart": "Drucksache",
+   "aktualisiert": "2025-07-11T13:20:38+02:00",
+   "urheber": [
+    {
+     "einbringer": true,
+     "rolle": "U",
+     "bezeichnung": "BW",
+     "titel": "Baden-Württemberg"
+    },
+    {
+     "einbringer": false,
+     "rolle": "B",
+     "bezeichnung": "MV",
+     "titel": "Mecklenburg-Vorpommern"
+    }
+   ],
+   "ueberweisung": [
+    {
+     "ausschuss": "Rechtsausschuss",
+     "ausschuss_kuerzel": "R",
+     "federfuehrung": true
+    },
+    {
+     "ausschuss": "Ausschuss für Fragen der Europäischen Union",
+     "ausschuss_kuerzel": "EU",
+     "federfuehrung": false
+    },
+    {
+     "ausschuss": "Finanzausschuss",
+     "ausschuss_kuerzel": "Fz",
+     "federfuehrung": false
+    },
+    {
+     "ausschuss": "Wirtschaftsausschuss",
+     "ausschuss_kuerzel": "Wi",
+     "federfuehrung": false
+    }
+   ],
+   "fundstelle": {
+    "id": "279646",
+    "dokumentnummer": "228/25",
+    "datum": "2025-05-28",
+    "dokumentart": "Drucksache",
+    "drucksachetyp": "Antrag",
+    "herausgeber": "BR",
+    "urheber": [
+     "Baden-Württemberg",
+     "Mecklenburg-Vorpommern"
+    ],
+    "pdf_url": "https://dserver.bundestag.de/brd/2025/0228-25.pdf"
+   },
+   "datum": "2025-05-28",
+   "vorgang_id": "322138"
+  },
+  {
+   "id": "692170",
+   "vorgangsposition": "Schriftliche Frage/Schriftliche Antwort",
+   "zuordnung": "BT",
+   "gang": true,
+   "fortsetzung": false,
+   "nachtrag": false,
+   "vorgangstyp": "Schriftliche Frage",
+   "titel": "Kontrollquote bei E-Commerce-Sendungen aus dem Ausland",
+   "typ": "Vorgangsposition",
+   "aktivitaet_anzahl": 2,
+   "dokumentart": "Drucksache",
+   "aktualisiert": "2026-05-29T08:15:57+02:00",
+   "fundstelle": {
+    "id": "287151",
+    "dokumentnummer": "21/5580",
+    "datum": "2026-04-24",
+    "verteildatum": "2026-04-29",
+    "dokumentart": "Drucksache",
+    "drucksachetyp": "Schriftliche Fragen",
+    "herausgeber": "BT",
+    "urheber": [],
+    "pdf_url": "https://dserver.bundestag.de/btd/21/055/2105580.pdf",
+    "frage_nummer": "9"
+   },
+   "aktivitaet_anzeige": [
+    {
+     "aktivitaetsart": "Frage",
+     "titel": "Dr. Rainer Kraft, MdB, AfD",
+     "pdf_url": "https://dserver.bundestag.de/btd/21/055/2105580.pdf"
+    },
+    {
+     "aktivitaetsart": "Antwort",
+     "titel": "Michael Schrodi, Parl. Staatssekr., Bundesministerium der Finanzen",
+     "pdf_url": "https://dserver.bundestag.de/btd/21/055/2105580.pdf"
+    }
+   ],
+   "datum": "2026-04-24",
+   "vorgang_id": "334627"
+  },
+  {
+   "id": "696900",
+   "vorgangsposition": "Kleine Anfrage",
+   "zuordnung": "BT",
+   "gang": true,
+   "fortsetzung": false,
+   "nachtrag": false,
+   "vorgangstyp": "Kleine Anfrage",
+   "titel": "Auswirkungen der EU-Zollreform auf den Zollstandort Hamburg und die Bündelung nationaler Zollkompetenzen",
+   "typ": "Vorgangsposition",
+   "aktivitaet_anzahl": 8,
+   "dokumentart": "Drucksache",
+   "aktualisiert": "2026-08-07T14:34:13+02:00",
+   "urheber": [
+    {
+     "einbringer": false,
+     "bezeichnung": "B90/GR",
+     "titel": "Fraktion BÜNDNIS 90/DIE GRÜNEN"
+    }
+   ],
+   "fundstelle": {
+    "id": "289634",
+    "dokumentnummer": "21/7139",
+    "datum": "2026-07-14",
+    "verteildatum": "2026-07-15",
+    "dokumentart": "Drucksache",
+    "drucksachetyp": "Kleine Anfrage",
+    "herausgeber": "BT",
+    "urheber": [
+     "Fraktion BÜNDNIS 90/DIE GRÜNEN"
+    ],
+    "pdf_url": "https://dserver.bundestag.de/btd/21/071/2107139.pdf"
+   },
+   "aktivitaet_anzeige": [
+    {
+     "aktivitaetsart": "Kleine Anfrage",
+     "titel": "Katharina Beck, MdB, BÜNDNIS 90/DIE GRÜNEN",
+     "pdf_url": "https://dserver.bundestag.de/btd/21/071/2107139.pdf"
+    },
+    {
+     "aktivitaetsart": "Kleine Anfrage",
+     "titel": "Sascha Müller, MdB, BÜNDNIS 90/DIE GRÜNEN",
+     "pdf_url": "https://dserver.bundestag.de/btd/21/071/2107139.pdf"
+    }
+   ],
+   "datum": "2026-07-14",
+   "vorgang_id": "337163"
+  },
+  {
+   "id": "671459",
+   "vorgangsposition": "Ausschusszuweisung",
+   "zuordnung": "BR",
+   "gang": true,
+   "fortsetzung": false,
+   "nachtrag": false,
+   "vorgangstyp": "Selbständiger Antrag von Ländern auf Entschließung",
+   "titel": "Entschließung des Bundesrates \"Verbraucher beim Online-Einkauf schützen - Schnelle Maßnahmen im Zusammenhang mit Angeboten aus Drittstaaten auf Onlineplattformen\"",
+   "typ": "Vorgangsposition",
+   "aktivitaet_anzahl": 0,
+   "dokumentart": "Plenarprotokoll",
+   "aktualisiert": "2025-06-25T12:54:21+02:00",
+   "fundstelle": {
+    "id": "5716",
+    "dokumentnummer": "1055",
+    "datum": "2025-06-13",
+    "dokumentart": "Plenarprotokoll",
+    "herausgeber": "BR",
+    "urheber": [],
+    "pdf_url": "https://dserver.bundestag.de/brp/1055.pdf#P.164",
+    "anfangsseite": 164,
+    "endseite": 164,
+    "top": 3
+   },
+   "beschlussfassung": [
+    {
+     "beschlusstenor": "Ausschusszuweisung",
+     "dokumentnummer": "228/25",
+     "seite": "164"
+    }
+   ],
+   "datum": "2025-06-13",
+   "vorgang_id": "322138"
+  },
+  {
+   "id": "697705",
+   "vorgangsposition": "Antwort",
+   "zuordnung": "BT",
+   "gang": true,
+   "fortsetzung": false,
+   "nachtrag": false,
+   "vorgangstyp": "Kleine Anfrage",
+   "titel": "Auswirkungen der EU-Zollreform auf den Zollstandort Hamburg und die Bündelung nationaler Zollkompetenzen",
+   "typ": "Vorgangsposition",
+   "aktivitaet_anzahl": 0,
+   "dokumentart": "Drucksache",
+   "aktualisiert": "2026-08-03T08:34:03+02:00",
+   "urheber": [
+    {
+     "einbringer": false,
+     "bezeichnung": "BRg",
+     "titel": "Bundesregierung"
+    }
+   ],
+   "ressort": [
+    {
+     "federfuehrend": true,
+     "titel": "Bundesministerium der Finanzen"
+    }
+   ],
+   "fundstelle": {
+    "id": "289930",
+    "dokumentnummer": "21/7373",
+    "datum": "2026-07-27",
+    "verteildatum": "2026-08-03",
+    "dokumentart": "Drucksache",
+    "drucksachetyp": "Antwort",
+    "herausgeber": "BT",
+    "urheber": [
+     "Bundesregierung"
+    ],
+    "pdf_url": "https://dserver.bundestag.de/btd/21/073/2107373.pdf"
+   },
+   "datum": "2026-07-27",
+   "vorgang_id": "337163"
+  },
+  {
+   "id": "672288",
+   "vorgangsposition": "Empfehlungen der Ausschüsse",
+   "zuordnung": "BR",
+   "abstract": "R, Wi: Annahme in geänderter Fassung - EU, Fz: Annahme",
+   "gang": false,
+   "fortsetzung": false,
+   "nachtrag": false,
+   "vorgangstyp": "Selbständiger Antrag von Ländern auf Entschließung",
+   "titel": "Entschließung des Bundesrates \"Verbraucher beim Online-Einkauf schützen - Schnelle Maßnahmen im Zusammenhang mit Angeboten aus Drittstaaten auf Onlineplattformen\"",
+   "typ": "Vorgangsposition",
+   "aktivitaet_anzahl": 0,
+   "dokumentart": "Drucksache",
+   "aktualisiert": "2025-07-01T08:26:25+02:00",
+   "fundstelle": {
+    "id": "280172",
+    "dokumentnummer": "228/1/25",
+    "datum": "2025-06-30",
+    "dokumentart": "Drucksache",
+    "drucksachetyp": "Empfehlungen",
+    "herausgeber": "BR",
+    "urheber": [],
+    "pdf_url": "https://dserver.bundestag.de/brd/2025/0228-1-25.pdf"
+   },
+   "datum": "2025-06-30",
+   "vorgang_id": "322138"
+  },
+  {
+   "id": "673260",
+   "vorgangsposition": "BR-Sitzung",
+   "zuordnung": "BR",
+   "gang": true,
+   "fortsetzung": false,
+   "nachtrag": false,
+   "vorgangstyp": "Selbständiger Antrag von Ländern auf Entschließung",
+   "titel": "Entschließung des Bundesrates \"Verbraucher beim Online-Einkauf schützen - Schnelle Maßnahmen im Zusammenhang mit Angeboten aus Drittstaaten auf Onlineplattformen\"",
+   "typ": "Vorgangsposition",
+   "aktivitaet_anzahl": 2,
+   "dokumentart": "Plenarprotokoll",
+   "aktualisiert": "2025-08-28T15:00:45+02:00",
+   "fundstelle": {
+    "id": "5725",
+    "dokumentnummer": "1056",
+    "datum": "2025-07-11",
+    "dokumentart": "Plenarprotokoll",
+    "herausgeber": "BR",
+    "urheber": [],
+    "pdf_url": "https://dserver.bundestag.de/brp/1056.pdf#P.219",
+    "anfangsseite": 219,
+    "endseite": 219,
+    "top": 38
+   },
+   "beschlussfassung": [
+    {
+     "beschlusstenor": "Annahme in geänderter Fassung",
+     "dokumentnummer": "228/25",
+     "seite": "219"
+    }
+   ],
+   "aktivitaet_anzeige": [
+    {
+     "seite": "219",
+     "aktivitaetsart": "Rede (zu Protokoll gegeben)",
+     "titel": "Gitta Connemann, Parl. Staatssekr., Bundesministerium für Wirtschaft und Energie",
+     "pdf_url": "https://dserver.bundestag.de/brp/1056.pdf#P.219"
+    },
+    {
+     "seite": "219",
+     "aktivitaetsart": "Rede (zu Protokoll gegeben)",
+     "titel": "Peter Hauk, Stellv. MdBR (Minister für Ernährung, Ländlichen Raum und Verbraucherschutz), Baden-Württemberg",
+     "pdf_url": "https://dserver.bundestag.de/brp/1056.pdf#P.219"
+    }
+   ],
+   "datum": "2025-07-11",
+   "vorgang_id": "322138"
+  },
+  {
+   "id": "673324",
+   "vorgangsposition": "Beschlussdrucksache",
+   "zuordnung": "BR",
+   "gang": false,
+   "fortsetzung": false,
+   "nachtrag": false,
+   "vorgangstyp": "Selbständiger Antrag von Ländern auf Entschließung",
+   "titel": "Entschließung des Bundesrates \"Verbraucher beim Online-Einkauf schützen - Schnelle Maßnahmen im Zusammenhang mit Angeboten aus Drittstaaten auf Onlineplattformen\"",
+   "typ": "Vorgangsposition",
+   "aktivitaet_anzahl": 0,
+   "dokumentart": "Drucksache",
+   "aktualisiert": "2025-07-11T15:30:01+02:00",
+   "fundstelle": {
+    "id": "280424",
+    "dokumentnummer": "228/25(B)",
+    "datum": "2025-07-11",
+    "dokumentart": "Drucksache",
+    "drucksachetyp": "Beschluss",
+    "herausgeber": "BR",
+    "urheber": [],
+    "pdf_url": "https://dserver.bundestag.de/brd/2025/0228-25B.pdf"
+   },
+   "datum": "2025-07-11",
+   "vorgang_id": "322138"
+  },
+  {
+   "id": "697501",
+   "vorgangsposition": "Unterrichtung",
+   "zuordnung": "BR",
+   "abstract": "Stellungnahme der Bundesregierung",
+   "gang": false,
+   "fortsetzung": false,
+   "nachtrag": false,
+   "vorgangstyp": "Selbständiger Antrag von Ländern auf Entschließung",
+   "titel": "Entschließung des Bundesrates \"Verbraucher beim Online-Einkauf schützen - Schnelle Maßnahmen im Zusammenhang mit Angeboten aus Drittstaaten auf Onlineplattformen\"",
+   "typ": "Vorgangsposition",
+   "aktivitaet_anzahl": 0,
+   "dokumentart": "Drucksache",
+   "aktualisiert": "2026-07-24T10:19:36+02:00",
+   "urheber": [
+    {
+     "einbringer": false,
+     "bezeichnung": "BRg",
+     "titel": "Bundesregierung"
+    }
+   ],
+   "fundstelle": {
+    "id": "289865",
+    "dokumentnummer": "zu228/25(B)",
+    "datum": "2026-07-16",
+    "dokumentart": "Drucksache",
+    "drucksachetyp": "Unterrichtung",
+    "herausgeber": "BR",
+    "urheber": [
+     "Bundesregierung"
+    ],
+    "pdf_url": "https://dserver.bundestag.de/brd/2025/0228-25B(zu).pdf"
+   },
+   "datum": "2026-07-16",
+   "vorgang_id": "322138"
+  }
+ ]
+}

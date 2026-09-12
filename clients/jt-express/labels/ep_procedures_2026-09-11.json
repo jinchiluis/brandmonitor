@@ -1,0 +1,119 @@
+{
+  "_about": [
+    "What a hand review of the open EU legislative procedures expected for J&T",
+    "Express Germany, written on 2026-09-11 before the body gate saw any of them.",
+    "These 14 were first built as input/eu_procedures.json, a collection watch-list.",
+    "That made collection client-specific - another client could not reuse the",
+    "corpus, and cutting a quiet procedure here would have removed it for everyone -",
+    "so collection now takes every legislative procedure and this file is only an",
+    "expectation to check the gate against. It decides nothing.",
+    "Chosen by reading the titles of the 145 open procedures with activity since",
+    "mid-2024 and keyword-scanning the 72 dormant ones; the procedures dropped in",
+    "that pass are not listed here, so this set measures recall, not precision."
+  ],
+  "labelled": "2026-09-11",
+  "rules": {
+    "expected": "relevant = a weekly J&T report could carry it. unsure = a horizontal rule that reaches J&T as it reaches any company, so either verdict is acceptable. A miss is a core or moderate procedure the gate calls irrelevant.",
+    "tier": "core = the file is about J&T's parcels. moderate = it binds J&T's customers' sellers or its delivery fleet. marginal = plausible but thin; included because collection is cheap and cutting early is worse than measuring."
+  },
+  "procedures": [
+    {
+      "reference": "2023/0156(COD)",
+      "name": "EU customs reform: Union Customs Code, EU Customs Authority and data hub",
+      "tier": "core",
+      "expected": "relevant",
+      "why": "Ends the 150-euro duty exemption and makes online platforms the deemed importer of the parcels J&T carries."
+    },
+    {
+      "reference": "2023/0158(CNS)",
+      "name": "VAT for platforms facilitating distance sales of imported goods (IOSS, import VAT)",
+      "tier": "core",
+      "expected": "relevant",
+      "why": "The VAT half of the customs package: who declares and pays import VAT on low-value e-commerce parcels."
+    },
+    {
+      "reference": "2025/0395(COD)",
+      "name": "EPR authorised representatives: batteries and packaging",
+      "tier": "moderate",
+      "expected": "relevant",
+      "why": "Whether non-EU sellers shipping into the EU must appoint an EU representative for packaging and battery producer responsibility."
+    },
+    {
+      "reference": "2025/0396(COD)",
+      "name": "EPR authorised representatives: waste, WEEE and single-use plastics",
+      "tier": "moderate",
+      "expected": "relevant",
+      "why": "The same duty for electronics and single-use plastics, the other goods Temu and Shein sellers ship."
+    },
+    {
+      "reference": "2025/0134(COD)",
+      "name": "Digital product compliance, amending the market surveillance regulation 765/2008",
+      "tier": "moderate",
+      "expected": "relevant",
+      "why": "How imported goods show conformity and how market surveillance checks them."
+    },
+    {
+      "reference": "2025/0421(COD)",
+      "name": "Clean corporate vehicles",
+      "tier": "moderate",
+      "expected": "unsure",
+      "why": "Zero-emission shares for company fleets would reach delivery fleets, but bind any company alike."
+    },
+    {
+      "reference": "2025/0420(COD)",
+      "name": "CO2 standards for new light duty vehicles (vans)",
+      "tier": "moderate",
+      "expected": "unsure",
+      "why": "Supply and cost of last-mile delivery vans."
+    },
+    {
+      "reference": "2025/0590(COD)",
+      "name": "Single Market and Customs Programme 2028-2034",
+      "tier": "marginal",
+      "expected": "unsure",
+      "why": "Funding for customs IT and controls; carries nothing about e-commerce controls by itself."
+    },
+    {
+      "reference": "2025/0133(COD)",
+      "name": "Digital product compliance, the directives",
+      "tier": "marginal",
+      "expected": "unsure",
+      "why": "The directive half of 2025/0134(COD); mostly machinery, lifts and radio equipment."
+    },
+    {
+      "reference": "2025/0424(COD)",
+      "name": "Speed-limiter exemption for electric N2 trucks",
+      "tier": "marginal",
+      "expected": "unsure",
+      "why": "Medium electric delivery trucks of 3.5 to 12 tonnes."
+    },
+    {
+      "reference": "2023/0265(COD)",
+      "name": "Weights and dimensions of heavy road vehicles",
+      "tier": "marginal",
+      "expected": "unsure",
+      "why": "Line-haul trucks between hubs, usually subcontracted."
+    },
+    {
+      "reference": "2024/0301(COD)",
+      "name": "Electronic declaration of posted workers",
+      "tier": "marginal",
+      "expected": "unsure",
+      "why": "Paperwork for cross-border staff of subcontractors."
+    },
+    {
+      "reference": "2025/0380(COD)",
+      "name": "ETS2 market stability reserve (buildings and road transport)",
+      "tier": "marginal",
+      "expected": "unsure",
+      "why": "The carbon price on road fuel from ETS2, a delivery cost."
+    },
+    {
+      "reference": "2025/0360(COD)",
+      "name": "Digital Omnibus: GDPR and ePrivacy simplification",
+      "tier": "marginal",
+      "expected": "unsure",
+      "why": "Data protection is one of the contract's six regulatory domains, and a carrier holds recipient data; cross-sector."
+    }
+  ]
+}

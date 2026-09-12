@@ -1,0 +1,928 @@
+{
+ "_about": [
+  "Hand review of every EU Safety Gate alert in the agreed pilot view -",
+  "notified by Germany, Chinese country of origin - over the 12 weekly reports",
+  "stored on 2026-09-12 (2026-06-26 to 2026-09-11). todo.md section 2 asked for",
+  "15-20; the whole window is only 50, so all 50 are labelled and this measures",
+  "precision over the full period rather than a sample.",
+  "Labels are the four in todo.md section 2. They decide nothing by themselves:",
+  "this file is the evidence behind the routing decision recorded in",
+  "docs/selection_and_assessment.md, 'Safety Gate'.",
+  "29 of the 50 carry more than one measure, so 'measures' is a list and the lag is given for the earliest and the latest; an earlier draft of this file read only the first measure and undercounted marketplace removals as 13."
+ ],
+ "labelled": "2026-09-12",
+ "scope": {
+  "rule": "notifyingCountry = Germany AND countryOfOrigin = People's Republic of China",
+  "reports": 12,
+  "window": [
+   "2026-06-26",
+   "2026-09-11"
+  ],
+  "alerts_in_window_all_countries": 639,
+  "alerts_in_pilot_view": 50
+ },
+ "rules": {
+  "direct": "the alert names J&T Express, or otherwise shows J&T carried the item",
+  "customer exposure": "the onlineTrader field names a brand with role 'customer' in profile.json (Temu, Shein, AliExpress, TikTok Shop) - the item moved through a platform J&T delivers for",
+  "market trend": "a Chinese-origin consumer good that German authorities acted on, sold online but not through a key customer; evidence about the goods flow J&T carries, not about a named counterparty",
+  "irrelevant": "no e-commerce import channel at all, or a channel J&T's business does not touch"
+ },
+ "counts": {
+  "market trend": 27,
+  "customer exposure": 20,
+  "irrelevant": 3
+ },
+ "findings": [
+  "direct = 0, and not by chance: no carrier is named in any of the 639 stored alerts. Safety Gate records the product, the brand and the online trader; the carrier is not a field. This is the same structural zero as the DSA database, for the same reason - the duty falls on sellers and platforms.",
+  "customer exposure = 20 of 50 (1.7 per week). 15 of these 20 carry the measure 'Removal of this product listing by the online marketplace', i.e. the key customer itself acted. The split is AliExpress 11, Temu 5, Shein 4; TikTok Shop appears in none of the 50 and in 7 alerts notified elsewhere.",
+  "The pilot view is all 'Serious risk' (50 of 50), so severity does not rank anything.",
+  "Heavy product clustering: 10 of 50 are balloons (chemical), 5 bicycle helmets, 9 adaptors or extension leads, 3 sand-filled toys. The same product class recurs for weeks under different sellers.",
+  "Measure-to-publication lag, 47 of 50 alerts carrying an entry-into-force date: median 30 days measured from the earliest measure, 28 from the latest (min 4, max 191); at most 2 of 47 within 7 days. Safety Gate is a retrospective weekly bulletin, so nothing in it can support an immediate alert.",
+  "Widening past Germany would add 53 key-customer alerts notified elsewhere (France 29, Luxembourg 10, Ireland 5). Zero of the 53 repeat a product/brand pair already in the German set, so this is not deduplication - it is a different, larger set, and a separate scope question for J&T."
+ ],
+ "alerts": [
+  {
+   "case_number": "SR/01816/26",
+   "published": "2026-06-26",
+   "product": "Travel adaptor",
+   "brand": "POWICE",
+   "risk_type": "Electric shock",
+   "online_trader": "Amazon(ASIN B0D2QLFZPB ) /",
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Warning consumers of the risks",
+    "Removal of this product listing by the online marketplace"
+   ],
+   "measure_lag_days": {
+    "earliest": 25,
+    "latest": 25
+   }
+  },
+  {
+   "case_number": "SR/01817/26",
+   "published": "2026-06-26",
+   "product": "Puzzle mat",
+   "brand": "Relaxday",
+   "risk_type": "Choking",
+   "online_trader": "Amazon(B0DPJDDT5M) /",
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Recall of the product from end users",
+    "Withdrawal of the product from the market"
+   ],
+   "measure_lag_days": {
+    "earliest": 35,
+    "latest": 35
+   }
+  },
+  {
+   "case_number": "SR/01856/26",
+   "published": "2026-06-26",
+   "product": "Puzzle mat",
+   "brand": "MUSOLEI",
+   "risk_type": "Choking",
+   "online_trader": "Amazon(B0BF4B1T57 ) /",
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Stop of sales"
+   ],
+   "measure_lag_days": {
+    "earliest": 28,
+    "latest": 28
+   }
+  },
+  {
+   "case_number": "SR/01900/26",
+   "published": "2026-06-26",
+   "product": "Bicycle helmet",
+   "brand": "WildSide",
+   "risk_type": "Injuries",
+   "online_trader": "AliExpress() /",
+   "label": "customer exposure",
+   "why": "online trader is a J&T key customer",
+   "measures": [
+    "Removal of this product listing by the online marketplace"
+   ],
+   "measure_lag_days": {
+    "earliest": 8,
+    "latest": 8
+   }
+  },
+  {
+   "case_number": "SR/01908/26",
+   "published": "2026-07-03",
+   "product": "Bicycle helmet",
+   "brand": "PJT",
+   "risk_type": "Injuries",
+   "online_trader": "AliExpress() /",
+   "label": "customer exposure",
+   "why": "online trader is a J&T key customer",
+   "measures": [
+    "Removal of this product listing by the online marketplace"
+   ],
+   "measure_lag_days": {
+    "earliest": 22,
+    "latest": 22
+   }
+  },
+  {
+   "case_number": "SR/01911/26",
+   "published": "2026-07-03",
+   "product": "Particle filter mask",
+   "brand": "Medicina del Lavoro",
+   "risk_type": "Health risk / other",
+   "online_trader": "Amazon(B08NCD1B19) /",
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Withdrawal of the product from the market",
+    "Removal of this product listing by the online marketplace",
+    "Recall of the product from end users"
+   ],
+   "measure_lag_days": {
+    "earliest": 30,
+    "latest": 30
+   }
+  },
+  {
+   "case_number": "SR/01942/26",
+   "published": "2026-07-03",
+   "product": "Contact grill",
+   "brand": "ZWILLING",
+   "risk_type": "Electric shock",
+   "online_trader": "Other(DEMEYERE Webshop, DE BIJENKORF BV.(Webshop), AMAZON TURKEY among others. ) /",
+   "label": "irrelevant",
+   "why": "ZWILLING contact grill sold through the brand's own and department-store webshops; a German premium brand's supply chain, not a marketplace import into Germany",
+   "measures": [
+    "Recall of the product from end users"
+   ],
+   "measure_lag_days": {
+    "earliest": 46,
+    "latest": 46
+   }
+  },
+  {
+   "case_number": "SR/01943/26",
+   "published": "2026-07-03",
+   "product": "Puzzle play mat",
+   "brand": "ASENME",
+   "risk_type": "Choking",
+   "online_trader": "Amazon(B0D9HWSB1J ) /",
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Removal of this product listing by the online marketplace"
+   ],
+   "measure_lag_days": {
+    "earliest": 32,
+    "latest": 32
+   }
+  },
+  {
+   "case_number": "SR/01944/26",
+   "published": "2026-07-03",
+   "product": "Angle grinder conversion kit",
+   "brand": "Retoo",
+   "risk_type": "Cuts",
+   "online_trader": "Other(www.kaufland.de) /",
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Removal of this product listing by the online marketplace"
+   ],
+   "measure_lag_days": {
+    "earliest": 44,
+    "latest": 44
+   }
+  },
+  {
+   "case_number": "SR/01963/26",
+   "published": "2026-07-10",
+   "product": "Sand-filled toy",
+   "brand": "Trendhaus",
+   "risk_type": "Health risk / other",
+   "online_trader": null,
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Recall of the product from end users"
+   ],
+   "measure_lag_days": null
+  },
+  {
+   "case_number": "SR/01995/26",
+   "published": "2026-07-10",
+   "product": "Bicycle helmet",
+   "brand": "MoMi",
+   "risk_type": "Injuries",
+   "online_trader": "Amazon(ASIN B0C3LR1N89 ) /",
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Withdrawal of the product from the market"
+   ],
+   "measure_lag_days": {
+    "earliest": 40,
+    "latest": 40
+   }
+  },
+  {
+   "case_number": "SR/02003/26",
+   "published": "2026-07-10",
+   "product": "Bicycle helmet",
+   "brand": null,
+   "risk_type": "Injuries",
+   "online_trader": "Amazon(ASIN: B09XD5NB8W) /",
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Removal of this product listing by the online marketplace"
+   ],
+   "measure_lag_days": {
+    "earliest": 11,
+    "latest": 11
+   }
+  },
+  {
+   "case_number": "SR/02018/26",
+   "published": "2026-07-17",
+   "product": "Children's cutlery set",
+   "brand": "babylove",
+   "risk_type": "Choking",
+   "online_trader": "Other(www.dm.de) /",
+   "label": "irrelevant",
+   "why": "dm own-brand (babylove) cutlery sold through a drugstore chain; no online-import channel",
+   "measures": [
+    "Recall of the product from end users"
+   ],
+   "measure_lag_days": {
+    "earliest": 28,
+    "latest": 28
+   }
+  },
+  {
+   "case_number": "SR/02025/26",
+   "published": "2026-07-17",
+   "product": "Bicycle helmet",
+   "brand": "Seven",
+   "risk_type": "Injuries",
+   "online_trader": "Amazon(B01EG5TMEE) /",
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Making the marketing of the product subject to prior conditions",
+    "Removal of this product listing by the online marketplace"
+   ],
+   "measure_lag_days": {
+    "earliest": 18,
+    "latest": 18
+   }
+  },
+  {
+   "case_number": "SR/02055/26",
+   "published": "2026-07-24",
+   "product": "Vehicle part / Ball joint",
+   "brand": "NK",
+   "risk_type": "Injuries",
+   "online_trader": null,
+   "label": "irrelevant",
+   "why": "automotive aftermarket ball joint; outside e-commerce parcel flows entirely",
+   "measures": [
+    "Recall of the product from end users"
+   ],
+   "measure_lag_days": {
+    "earliest": 16,
+    "latest": 16
+   }
+  },
+  {
+   "case_number": "SR/02068/26",
+   "published": "2026-07-24",
+   "product": "Balloons",
+   "brand": null,
+   "risk_type": "Chemical",
+   "online_trader": "Other(Shein) /",
+   "label": "customer exposure",
+   "why": "online trader is a J&T key customer",
+   "measures": [
+    "Withdrawal of the product from the market",
+    "Removal of this product listing by the online marketplace"
+   ],
+   "measure_lag_days": {
+    "earliest": 113,
+    "latest": 81
+   }
+  },
+  {
+   "case_number": "SR/02070/26",
+   "published": "2026-07-24",
+   "product": "Balloons",
+   "brand": "YMSZ",
+   "risk_type": "Chemical",
+   "online_trader": "Amazon(ASIN: B0D4DHJ7CX) /",
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Removal of this product listing by the online marketplace",
+    "Destruction of the product",
+    "Recall of the product from end users",
+    "Stop of sales"
+   ],
+   "measure_lag_days": {
+    "earliest": 71,
+    "latest": 71
+   }
+  },
+  {
+   "case_number": "SR/02071/26",
+   "published": "2026-07-24",
+   "product": "Balloons",
+   "brand": null,
+   "risk_type": "Chemical",
+   "online_trader": "AliExpress(1005009307938451-12000048692422249) /",
+   "label": "customer exposure",
+   "why": "online trader is a J&T key customer",
+   "measures": [
+    "Removal of this product listing by the online marketplace"
+   ],
+   "measure_lag_days": {
+    "earliest": 107,
+    "latest": 107
+   }
+  },
+  {
+   "case_number": "SR/02075/26",
+   "published": "2026-07-24",
+   "product": "Extension lead",
+   "brand": "LIPWEL",
+   "risk_type": "Electric shock, Fire",
+   "online_trader": "Other(Temu: XU3531330) /",
+   "label": "customer exposure",
+   "why": "online trader is a J&T key customer",
+   "measures": [
+    "Recall of the product from end users",
+    "Withdrawal of the product from the market"
+   ],
+   "measure_lag_days": {
+    "earliest": 29,
+    "latest": 29
+   }
+  },
+  {
+   "case_number": "SR/02081/26",
+   "published": "2026-07-24",
+   "product": "Balloons",
+   "brand": null,
+   "risk_type": "Chemical",
+   "online_trader": "Other(Temu) /",
+   "label": "customer exposure",
+   "why": "online trader is a J&T key customer",
+   "measures": [
+    "Removal of this product listing by the online marketplace",
+    "Stop of sales"
+   ],
+   "measure_lag_days": {
+    "earliest": 124,
+    "latest": 4
+   }
+  },
+  {
+   "case_number": "SR/02108/26",
+   "published": "2026-07-31",
+   "product": "Sand-filled figurine toy",
+   "brand": "Trendhaus",
+   "risk_type": "Health risk / other",
+   "online_trader": null,
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Recall of the product from end users"
+   ],
+   "measure_lag_days": {
+    "earliest": 140,
+    "latest": 140
+   }
+  },
+  {
+   "case_number": "SR/02139/26",
+   "published": "2026-07-31",
+   "product": "Travel adaptor set",
+   "brand": "JSVER",
+   "risk_type": "Electric shock, Fire",
+   "online_trader": "Amazon() /",
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Withdrawal of the product from the market",
+    "Making the marketing of the product subject to prior conditions"
+   ],
+   "measure_lag_days": {
+    "earliest": 60,
+    "latest": 60
+   }
+  },
+  {
+   "case_number": "SR/02140/26",
+   "published": "2026-08-07",
+   "product": "Travel adaptor",
+   "brand": "RACEL",
+   "risk_type": "Electric shock",
+   "online_trader": "eBay() /",
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Withdrawal of the product from the market",
+    "Ban on the marketing of the product and any accompanying measures",
+    "Recall of the product from end users"
+   ],
+   "measure_lag_days": {
+    "earliest": 18,
+    "latest": 18
+   }
+  },
+  {
+   "case_number": "SR/02151/26",
+   "published": "2026-08-07",
+   "product": "Modelling clay set",
+   "brand": null,
+   "risk_type": "Chemical",
+   "online_trader": null,
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Recall of the product from end users",
+    "Ban on the marketing of the product and any accompanying measures",
+    "Stop of sales",
+    "Withdrawal of the product from the market"
+   ],
+   "measure_lag_days": {
+    "earliest": 93,
+    "latest": 18
+   }
+  },
+  {
+   "case_number": "SR/02161/26",
+   "published": "2026-08-07",
+   "product": "Adaptor",
+   "brand": "EAZY CASE",
+   "risk_type": "Electric shock",
+   "online_trader": "eBay() /",
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Recall of the product from end users",
+    "Withdrawal of the product from the market",
+    "Ban on the marketing of the product and any accompanying measures"
+   ],
+   "measure_lag_days": {
+    "earliest": 28,
+    "latest": 28
+   }
+  },
+  {
+   "case_number": "SR/02164/26",
+   "published": "2026-08-07",
+   "product": "Adaptor",
+   "brand": "revolt",
+   "risk_type": "Electric shock",
+   "online_trader": "eBay() /",
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Ban on the marketing of the product and any accompanying measures",
+    "Recall of the product from end users",
+    "Withdrawal of the product from the market"
+   ],
+   "measure_lag_days": {
+    "earliest": 28,
+    "latest": 28
+   }
+  },
+  {
+   "case_number": "SR/02167/26",
+   "published": "2026-08-07",
+   "product": "Adaptor",
+   "brand": "PHENOMDOM",
+   "risk_type": "Electric shock",
+   "online_trader": "Other(Shein) /",
+   "label": "customer exposure",
+   "why": "online trader is a J&T key customer",
+   "measures": [
+    "Withdrawal of the product from the market",
+    "Ban on the marketing of the product and any accompanying measures",
+    "Recall of the product from end users"
+   ],
+   "measure_lag_days": {
+    "earliest": 35,
+    "latest": 35
+   }
+  },
+  {
+   "case_number": "SR/02168/26",
+   "published": "2026-08-07",
+   "product": "Adaptor",
+   "brand": "Y&amp;H",
+   "risk_type": "Electric shock",
+   "online_trader": "Other(Shein (sr25100849455650507)) /",
+   "label": "customer exposure",
+   "why": "online trader is a J&T key customer",
+   "measures": [
+    "Ban on the marketing of the product and any accompanying measures",
+    "Recall of the product from end users",
+    "Withdrawal of the product from the market"
+   ],
+   "measure_lag_days": {
+    "earliest": 32,
+    "latest": 32
+   }
+  },
+  {
+   "case_number": "SR/02171/26",
+   "published": "2026-08-07",
+   "product": "Balloons",
+   "brand": null,
+   "risk_type": "Chemical",
+   "online_trader": "AliExpress() /",
+   "label": "customer exposure",
+   "why": "online trader is a J&T key customer",
+   "measures": [
+    "Removal of this product listing by the online marketplace",
+    "Withdrawal of the product from the market"
+   ],
+   "measure_lag_days": {
+    "earliest": 121,
+    "latest": 25
+   }
+  },
+  {
+   "case_number": "SR/02174/26",
+   "published": "2026-08-07",
+   "product": "Balloons",
+   "brand": "FobPatiy",
+   "risk_type": "Chemical",
+   "online_trader": "Other(Temu) /",
+   "label": "customer exposure",
+   "why": "online trader is a J&T key customer",
+   "measures": [
+    "Withdrawal of the product from the market",
+    "Removal of this product listing by the online marketplace"
+   ],
+   "measure_lag_days": {
+    "earliest": 131,
+    "latest": 128
+   }
+  },
+  {
+   "case_number": "SR/02184/26",
+   "published": "2026-08-07",
+   "product": "Extension lead",
+   "brand": null,
+   "risk_type": "Electric shock, Fire",
+   "online_trader": "AliExpress(1005010031855414) /",
+   "label": "customer exposure",
+   "why": "online trader is a J&T key customer",
+   "measures": [
+    "Withdrawal of the product from the market",
+    "Recall of the product from end users"
+   ],
+   "measure_lag_days": {
+    "earliest": 102,
+    "latest": 102
+   }
+  },
+  {
+   "case_number": "SR/02192/26",
+   "published": "2026-08-07",
+   "product": "Gardening gloves",
+   "brand": "Progarden",
+   "risk_type": "Chemical",
+   "online_trader": null,
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Stop of sales",
+    "Recall of the product from end users",
+    "Warning consumers of the risks"
+   ],
+   "measure_lag_days": null
+  },
+  {
+   "case_number": "SR/02197/26",
+   "published": "2026-08-14",
+   "product": "Balloons",
+   "brand": "FobPatiy",
+   "risk_type": "Chemical",
+   "online_trader": "Other(Temu) /",
+   "label": "customer exposure",
+   "why": "online trader is a J&T key customer",
+   "measures": [
+    "Removal of this product listing by the online marketplace",
+    "Withdrawal of the product from the market"
+   ],
+   "measure_lag_days": {
+    "earliest": 138,
+    "latest": 135
+   }
+  },
+  {
+   "case_number": "SR/02213/26",
+   "published": "2026-08-14",
+   "product": "Inflatable swim seat",
+   "brand": "Kiddie Float",
+   "risk_type": "Drowning, Injuries",
+   "online_trader": "AliExpress(1005010812708585, 12000053575031522) /",
+   "label": "customer exposure",
+   "why": "online trader is a J&T key customer",
+   "measures": [
+    "Removal of this product listing by the online marketplace"
+   ],
+   "measure_lag_days": {
+    "earliest": 28,
+    "latest": 28
+   }
+  },
+  {
+   "case_number": "SR/02216/26",
+   "published": "2026-08-14",
+   "product": "Balloons",
+   "brand": null,
+   "risk_type": "Chemical",
+   "online_trader": "Other(Shein) /",
+   "label": "customer exposure",
+   "why": "online trader is a J&T key customer",
+   "measures": [
+    "Beendigung der Listung des Produkts durch den Online-Marktplatz"
+   ],
+   "measure_lag_days": {
+    "earliest": 134,
+    "latest": 134
+   }
+  },
+  {
+   "case_number": "SR/02220/26",
+   "published": "2026-08-14",
+   "product": "Extension lead",
+   "brand": "LEHOTPIA",
+   "risk_type": "Electric shock, Fire",
+   "online_trader": "AliExpress(1005008523594573; 1005007379437850 ) /",
+   "label": "customer exposure",
+   "why": "online trader is a J&T key customer",
+   "measures": [
+    "Removal of this product listing by the online marketplace",
+    "Recall of the product from end users"
+   ],
+   "measure_lag_days": {
+    "earliest": 16,
+    "latest": 16
+   }
+  },
+  {
+   "case_number": "SR/02222/26",
+   "published": "2026-08-14",
+   "product": "Balloons",
+   "brand": null,
+   "risk_type": "Chemical",
+   "online_trader": "Other(Temu) /",
+   "label": "customer exposure",
+   "why": "online trader is a J&T key customer",
+   "measures": [
+    "Withdrawal of the product from the market",
+    "Recall of the product from end users",
+    "Destruction of the product"
+   ],
+   "measure_lag_days": {
+    "earliest": 135,
+    "latest": 135
+   }
+  },
+  {
+   "case_number": "SR/02255/26",
+   "published": "2026-08-14",
+   "product": "Electric grinder",
+   "brand": "Yearninglife",
+   "risk_type": "Cuts, Electric shock",
+   "online_trader": "eBay(eBay, Amazon) / Amazon(B0F66MMGLH) /",
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Withdrawal of the product from the market",
+    "Recall of the product from end users"
+   ],
+   "measure_lag_days": {
+    "earliest": 17,
+    "latest": 17
+   }
+  },
+  {
+   "case_number": "SR/02283/26",
+   "published": "2026-08-21",
+   "product": "Portable juicer",
+   "brand": null,
+   "risk_type": "Cuts",
+   "online_trader": null,
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Destruction of the product",
+    "Withdrawal of the product from the market",
+    "Recall of the product from end users"
+   ],
+   "measure_lag_days": {
+    "earliest": 25,
+    "latest": 25
+   }
+  },
+  {
+   "case_number": "SR/02290/26",
+   "published": "2026-08-21",
+   "product": "Sand-filled toy",
+   "brand": "HTI",
+   "risk_type": "Health risk / other",
+   "online_trader": null,
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Stop of sales",
+    "Recall of the product from end users"
+   ],
+   "measure_lag_days": {
+    "earliest": 32,
+    "latest": 32
+   }
+  },
+  {
+   "case_number": "SR/02291/26",
+   "published": "2026-08-21",
+   "product": "Sand-filled toy",
+   "brand": null,
+   "risk_type": "Health risk / other",
+   "online_trader": null,
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Recall of the product from end users",
+    "Stop of sales"
+   ],
+   "measure_lag_days": {
+    "earliest": 32,
+    "latest": 32
+   }
+  },
+  {
+   "case_number": "SR/02292/26",
+   "published": "2026-08-21",
+   "product": "Balloons",
+   "brand": "Butlers",
+   "risk_type": "Chemical",
+   "online_trader": null,
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Withdrawal of the product from the market",
+    "Destruction of the product"
+   ],
+   "measure_lag_days": {
+    "earliest": 16,
+    "latest": 16
+   }
+  },
+  {
+   "case_number": "SR/02327/26",
+   "published": "2026-08-21",
+   "product": "Inflatable swim seat",
+   "brand": "AZDYJL",
+   "risk_type": "Drowning",
+   "online_trader": "Amazon(B0GJKWJP94) /",
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Removal of this product listing by the online marketplace"
+   ],
+   "measure_lag_days": null
+  },
+  {
+   "case_number": "SR/02348/26",
+   "published": "2026-08-28",
+   "product": "Sun screen",
+   "brand": null,
+   "risk_type": "Health risk / other",
+   "online_trader": "AliExpress() /",
+   "label": "customer exposure",
+   "why": "online trader is a J&T key customer",
+   "measures": [
+    "Removal of this product listing by the online marketplace"
+   ],
+   "measure_lag_days": {
+    "earliest": 11,
+    "latest": 11
+   }
+  },
+  {
+   "case_number": "SR/02350/26",
+   "published": "2026-08-28",
+   "product": "Sun screen",
+   "brand": "OUHOE",
+   "risk_type": "Health risk / other",
+   "online_trader": "Amazon(B0F2TQXDJ ) / AliExpress(1005009820314024-12000050272933084) /",
+   "label": "customer exposure",
+   "why": "online trader is a J&T key customer",
+   "measures": [
+    "Removal of this product listing by the online marketplace"
+   ],
+   "measure_lag_days": {
+    "earliest": 11,
+    "latest": 11
+   }
+  },
+  {
+   "case_number": "SR/02357/26",
+   "published": "2026-08-28",
+   "product": "Sun protection cream",
+   "brand": "Maycheer",
+   "risk_type": "Health risk / other",
+   "online_trader": "AliExpress() /",
+   "label": "customer exposure",
+   "why": "online trader is a J&T key customer",
+   "measures": [
+    "Removal of this product listing by the online marketplace"
+   ],
+   "measure_lag_days": {
+    "earliest": 11,
+    "latest": 11
+   }
+  },
+  {
+   "case_number": "SR/02365/26",
+   "published": "2026-09-04",
+   "product": "Toy gun set",
+   "brand": null,
+   "risk_type": "Choking",
+   "online_trader": "Other(www.jeschke-kg.dewww.landahl.de) /",
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Recall of the product from end users"
+   ],
+   "measure_lag_days": {
+    "earliest": 21,
+    "latest": 21
+   }
+  },
+  {
+   "case_number": "SR/02368/26",
+   "published": "2026-09-04",
+   "product": "Stretching toy",
+   "brand": null,
+   "risk_type": "Health risk / other",
+   "online_trader": null,
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Stop of sales",
+    "Recall of the product from end users"
+   ],
+   "measure_lag_days": {
+    "earliest": 191,
+    "latest": 191
+   }
+  },
+  {
+   "case_number": "SR/02411/26",
+   "published": "2026-09-11",
+   "product": "Swim seat",
+   "brand": "SUMMER SEA / SAN LI TOYS",
+   "risk_type": "Drowning",
+   "online_trader": "AliExpress(1005012664739417-12000059035744106) /",
+   "label": "customer exposure",
+   "why": "online trader is a J&T key customer",
+   "measures": [
+    "Removal of this product listing by the online marketplace"
+   ],
+   "measure_lag_days": {
+    "earliest": 17,
+    "latest": 17
+   }
+  },
+  {
+   "case_number": "SR/02431/26",
+   "published": "2026-09-11",
+   "product": "Particle filter mask",
+   "brand": "CRD Light",
+   "risk_type": "Health risk / other",
+   "online_trader": "Amazon(Unknown) /",
+   "label": "market trend",
+   "why": "Chinese-origin good recalled in Germany, no key-customer marketplace named",
+   "measures": [
+    "Recall of the product from end users",
+    "Withdrawal of the product from the market"
+   ],
+   "measure_lag_days": {
+    "earliest": 4,
+    "latest": 4
+   }
+  }
+ ]
+}

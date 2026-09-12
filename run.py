@@ -7,10 +7,18 @@ Commands:
     collect   Run collection over a source list and store raw items.
     collect-dsa   Store DSA Transparency Database daily aggregates per platform.
     collect-safety-gate   Store EU Safety Gate product alerts from weekly XML.
+    collect-dip   Store Bundestag and Bundesrat procedures from the DIP API.
+    collect-ep    Store every EU legislative procedure and its progress.
+    fetch-dip-docs  Fetch the documents behind the DIP procedures the body gate kept.
     fetch-bodies  Enrich stored hints and retry failed public-page fetches.
     gate      Ask a cheap LLM which new title-only candidates are worth a body fetch.
     body-gate Ask a cheap LLM whether each selected body is a signal for the client.
+    export-window  Freeze one client-week of stored material into a report bundle.
+    assess    Assess a frozen bundle: carry-forward, triage, cluster, read, challenge.
+    report    Render the Chinese report, editorial ledger and source coverage.
+    verify-report  Check a rendered bundle's accounting, dates, links and citations.
     backup    Snapshot the database, compress, rotate, and copy off-box.
+    safety-gate-view  Print the client's Safety Gate view; writes nothing.
     status    Show the last runs and per-source outcomes.
 
 Run `python run.py <command> --help` for per-command options.
@@ -139,8 +147,12 @@ def cmd_fetch_bodies(args: argparse.Namespace) -> int:
     migrate()
     path = Path(args.sources) if args.sources else (
         DEFAULT_REGULATORY_SOURCES if args.kind == "regulatory" else DEFAULT_NEWS_SOURCES)
+    if args.title_gate_client and args.kind != "news":
+        print("--title-gate-client can only be used with --kind news")
+        return 2
     summary = run_body_fetch(path, kind=args.kind, limit=args.limit,
-                             refresh=args.refresh, retry_unavailable=args.retry_unavailable)
+                             refresh=args.refresh, retry_unavailable=args.retry_unavailable,
+                             title_gate_client=args.title_gate_client)
     print_body_summary(summary)
     print(f"Log: {log_path}")
     # A batch where every single fetch failed points at the transport or the
@@ -375,6 +387,107 @@ def cmd_collect_safety_gate(args: argparse.Namespace) -> int:
     return 1 if s["reports_failed"] and not s["reports_ok"] else 0
 
 
+def cmd_collect_dip(args: argparse.Namespace) -> int:
+    from src.db import migrate
+    from src.dip import DipKeyError, run_dip_collection
+    from src.logger import install_excepthook, set_pipeline_log, set_verbose
+
+    log_path = set_pipeline_log("collect_dip")
+    install_excepthook()
+    if args.verbose:
+        set_verbose(True)
+
+    migrate()
+    try:
+        s = run_dip_collection(days=args.days, lookback_days=args.lookback)
+    except DipKeyError as exc:
+        print(f"DIP collection could not run: {exc}")
+        return 2
+
+    print(f"\nrun {s['run_id']}  procedures changed since {s['start']}")
+    print(f"{s['listed']} listed: {s['excluded']} procedural types skipped, {s['stale']} "
+          f"re-indexed archive skipped (latest step too old for a first sight)")
+    print(f"{s['found']} procedures checked, {s['stored']} new versions stored")
+    for error in s["errors"][:5]:
+        print(f"    -> {error[:120]}")
+    print(f"watermark: {s.get('watermark_advanced') or 'not advanced'}")
+    print(f"Log: {log_path}")
+    return 1 if s["errors"] and not s["found"] else 0
+
+
+def cmd_collect_ep(args: argparse.Namespace) -> int:
+    from src.db import migrate
+    from src.ep_procedures import run_ep_collection
+    from src.logger import install_excepthook, set_pipeline_log, set_verbose
+
+    log_path = set_pipeline_log("collect_ep")
+    install_excepthook()
+    if args.verbose:
+        set_verbose(True)
+
+    migrate()
+    s = run_ep_collection(since_year=args.since_year, sweep=args.sweep)
+    print(f"\nrun {s['run_id']}  {s['listed']} procedures listed "
+          f"({', '.join(s['types'])} since {s['since_year']}), {s['due']} due"
+          f"{' - weekly sweep' if s['swept'] else ''}")
+    print(f"{s['fetched']} fetched, {s['stored']} new versions stored, {s['stale']} "
+          f"closed before first sight and skipped")
+    if s["changed"]:
+        shown = ", ".join(s["changed"][:12])
+        more = len(s["changed"]) - 12
+        print(f"changed: {shown}" + (f" and {more} more" if more > 0 else ""))
+    if s["final"]:
+        print(f"published as law, no longer polled: {', '.join(s['final'][:12])}")
+    if s["stopped"]:
+        print(f"stopped early: {s['stopped']}")
+    for error in s["errors"][:5]:
+        print(f"    -> {error[:120]}")
+    print(f"Log: {log_path}")
+    return 1 if s["errors"] and not s["fetched"] else 0
+
+
+def cmd_fetch_dip_docs(args: argparse.Namespace) -> int:
+    from src.db import migrate
+    from src.dip import DipKeyError
+    from src.dip_documents import DEFAULT_LIMIT, run_document_fetch, show_procedure
+    from src.logger import install_excepthook, set_pipeline_log
+    from src.profile import load_profile
+
+    log_path = set_pipeline_log(f"dip_docs_{args.client}")
+    install_excepthook()
+    migrate()
+    if args.show:
+        shown = show_procedure(args.show)
+        if shown is None:
+            print(f"no stored DIP procedure {args.show}")
+            return 2
+        print(shown)
+        return 0
+
+    profile = load_profile(args.client)
+    try:
+        s = run_document_fetch(profile.slug, limit=args.limit or DEFAULT_LIMIT,
+                               retry_unavailable=args.retry_unavailable)
+    except DipKeyError as exc:
+        print(f"DIP documents could not be fetched: {exc}")
+        return 2
+
+    reopened = f", {s['reopened']} reopened" if s["reopened"] else ""
+    print(f"\nrun {s['run_id']}  {s['kept']} DIP procedures relevant for {profile.slug}; "
+          f"{s['queued']} new documents queued{reopened}")
+    print(f"{s['attempted']} attempted: {s['ok']} stored, {s['no_text']} without text yet, "
+          f"{s['failed']} failed, {s['unavailable']} given up; {s['deferred']} deferred by limit")
+    for error in s["errors"][:5]:
+        print(f"    -> {error[:120]}")
+    r = s["remaining"]
+    print(f"Documents: {r['ok']} stored, {r['pending']} pending, {r['failed']} to retry, "
+          f"{r['unavailable']} given up")
+    print(f"Log: {log_path}")
+    # Missing text is DIP's publication lag, not a failure; only a batch where
+    # every request failed points at the transport.
+    return 1 if s["attempted"] and s["failed"] == s["attempted"] else 0
+
+
 def cmd_backup(args: argparse.Namespace) -> int:
     from src.backup import run_backup
     from src.logger import install_excepthook, set_pipeline_log
@@ -403,6 +516,164 @@ def cmd_backup(args: argparse.Namespace) -> int:
         print("WARNING: backup directory is over its configured size limit")
     print(f"Log: {log_path}")
     return 0
+
+
+def cmd_safety_gate_view(args: argparse.Namespace) -> int:
+    """Read-only. What the full assessor would be handed for this client."""
+    import collections
+    from src.safety_gate import select_client_alerts
+
+    # An unreadable profile or database aborts the command through main(), which
+    # is exit 2 - the same contract as the gate commands.
+    alerts = select_client_alerts(args.client)
+    if args.since:
+        alerts = [a for a in alerts if (a["published_at"] or "") >= args.since.isoformat()]
+    if args.key_customers:
+        alerts = [a for a in alerts if a["key_customers"]]
+    if not alerts:
+        print("no alerts in the client view - try: python run.py collect-safety-gate")
+        return 0
+
+    for alert in alerts:
+        if args.full:
+            print(f"\n{'=' * 78}\n{alert['body_text']}")
+            print(f"\nmatched: {', '.join(alert['reasons'])}")
+            print(f"raw_item {alert['raw_item_id']}  {alert['url'] or ''}")
+            continue
+        customers = "+".join(alert["key_customers"]) or "-"
+        payload = alert["payload"]
+        print(f"{alert['published_at'] or '?':<11}{alert['case_number']:<14}"
+              f"{customers:<14}{str(payload.get('product'))[:26]:<27}"
+              f"{str(payload.get('riskType'))[:24]}")
+
+    weeks = len({(a["payload"]["report"]["year"], a["payload"]["report"]["week"])
+                 for a in alerts})
+    exposed = [a for a in alerts if a["key_customers"]]
+    named = collections.Counter(name for a in alerts for name in a["key_customers"])
+    print(f"\n{len(alerts)} alerts over {weeks} weekly report(s), "
+          f"{len(alerts) / weeks:.1f} per week")
+    print(f"key-customer exposure: {len(exposed)} "
+          f"({', '.join(f'{n} {c}' for n, c in named.most_common()) or 'none'})")
+    # Safety Gate never names a carrier, so an own-brand hit would be a defect in
+    # the profile rather than a find; see docs/selection_and_assessment.md.
+    print("own-brand mentions: 0 by construction - no carrier is named in the record")
+    return 0
+
+
+def _resolve_bundle(args: argparse.Namespace):
+    """Accept a bundle path, or --client with --since/--until to name one."""
+    from src.report_agent.bundle import Bundle, default_bundle_dir
+
+    if args.bundle:
+        return Bundle(args.bundle)
+    if not (args.since and args.until):
+        raise SystemExit("give --bundle, or --client with --since and --until")
+    return Bundle(default_bundle_dir(args.client, args.since, args.until))
+
+
+def cmd_export_window(args: argparse.Namespace) -> int:
+    from src.logger import install_excepthook, set_pipeline_log
+    from src.report_agent.export import export_window
+
+    log_path = set_pipeline_log("export-window")
+    install_excepthook()
+
+    bundle = export_window(args.client, args.since, args.until, out_dir=args.out)
+    manifest = bundle.manifest
+    print(f"bundle   {bundle.path}")
+    print(f"window   {manifest['display_window']}")
+    print(f"candidates {manifest['evidence_items']}  stopped {manifest['stopped_asof_identities']}"
+          f"  post-cutoff {manifest['gated_identities_without_pre_cutoff_raw']}")
+    for row in manifest["counts"]:
+        print(f"    {row['kind']:<12}{row['route']:<24}{row['period']:<9}{row['n']:>5}")
+    print(f"accounted identities: {manifest['ledger_identities']}"
+          f" (+{manifest['unavailable_title_routes']} unreadable title routes)")
+    print(f"Log: {log_path}")
+    return 0 if manifest["evidence_items"] else 1
+
+
+def cmd_assess(args: argparse.Namespace) -> int:
+    from src.logger import install_excepthook, set_pipeline_log
+    from src.report_agent.assess import load_config, run_assessment
+
+    log_path = set_pipeline_log("assess")
+    install_excepthook()
+
+    bundle = _resolve_bundle(args)
+    config = load_config()
+    result = run_assessment(
+        bundle, model=args.model or config.get("model"), config=config,
+        timeout=config.get("timeout_seconds", 600),
+        max_stories=args.max_stories or config.get("max_stories"),
+        skip_write=args.no_write)
+
+    for step in result.steps:
+        detail = ", ".join(f"{k}={v}" for k, v in step.items()
+                           if k not in ("step", "prompt_version") and v is not None)
+        print(f"{step['step']:<15}{detail}")
+    errors = [p for p in result.problems if p["severity"] == "error"]
+    print(f"\nissues {len(result.register)} ({result.reportable} reportable), "
+          f"decisions {len(result.decisions)}")
+    print(f"challenge: {len(result.problems)} problem(s), {len(errors)} corrected as errors")
+    for problem in errors[:5]:
+        print(f"    [{problem['story_id']}] {problem['claim'][:80]}")
+    usage = bundle.maybe("assessment-manifest.json", {}).get("usage", {}).get("total", {})
+    if usage:
+        print(f"tokens in {usage['input_tokens']:,} out {usage['output_tokens']:,} "
+              f"over {usage['model_calls']} model calls and {usage['tool_calls']} tool calls")
+    print(f"Log: {log_path}")
+    return 0 if result.register else 1
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    from src.logger import install_excepthook, set_pipeline_log
+    from src.report_agent.render import render_bundle
+
+    log_path = set_pipeline_log("report")
+    install_excepthook()
+
+    bundle = _resolve_bundle(args)
+    result = render_bundle(bundle)
+    print(f"bundle   {bundle.path}")
+    for name in result.written:
+        print(f"    {name}")
+    print(f"report cites {len(result.cited_ids)} frozen identities")
+    if args.record:
+        from src.db import session, utcnow
+
+        with session() as conn:
+            conn.execute(
+                "INSERT INTO report (client_slug, kind, window_start, window_end, "
+                "created_at, path, note) VALUES (?, 'weekly', ?, ?, ?, ?, ?)",
+                (bundle.client_slug, bundle.manifest["window_start"],
+                 bundle.manifest["window_end_exclusive"], utcnow(),
+                 str(bundle.path / "weekly-report.zh.html"),
+                 f"profile {bundle.manifest['profile_version']}"))
+        print("recorded in the report table")
+    print(f"Log: {log_path}")
+    return 0
+
+
+def cmd_verify_report(args: argparse.Namespace) -> int:
+    from src.logger import install_excepthook, set_pipeline_log
+    from src.report_agent.verify import verify_bundle
+
+    log_path = set_pipeline_log("verify-report")
+    install_excepthook()
+
+    bundle = _resolve_bundle(args)
+    result = verify_bundle(bundle)
+    for name, passed in result.get("checks", {}).items():
+        print(f"    {'ok  ' if passed else 'FAIL'}  {name}")
+    print(f"\n{result['status']}: {result.get('identities', 0)} identities, "
+          f"{result.get('ledger_rows', 0)} ledger rows, "
+          f"{result.get('unique_report_source_links', 0)} distinct source links")
+    for warning in result["warnings"]:
+        print(f"warning: {warning}")
+    for error in result["errors"]:
+        print(f"ERROR: {error}")
+    print(f"Log: {log_path}")
+    return 1 if result["errors"] else 0
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -501,6 +772,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="also recheck successful bodies for content changes")
     bodies.add_argument("--retry-unavailable", action="store_true",
                         help="also retry paywalls, missing pages and unsupported media")
+    bodies.add_argument("--title-gate-client", default=None,
+                        help="fetch only title-only URLs kept in this client's JSONL decisions")
     bodies.set_defaults(func=cmd_fetch_bodies)
 
     gate = sub.add_parser(
@@ -599,6 +872,61 @@ def build_parser() -> argparse.ArgumentParser:
     safety_gate.add_argument("--verbose", action="store_true")
     safety_gate.set_defaults(func=cmd_collect_safety_gate)
 
+    dip = sub.add_parser(
+        "collect-dip",
+        help="collect Bundestag and Bundesrat procedures from DIP",
+        description="Store every Bundestag and Bundesrat procedure whose DIP record "
+                    "changed since the watermark - bills, resolutions, parliamentary "
+                    "questions and their answers - except the procedural types the "
+                    "source entry excludes. One item per procedure; a new step writes "
+                    "a new version. Uses the Bundestag's public API key unless "
+                    "DIP_API_KEY is set in .env.",
+    )
+    dip.add_argument("--days", type=float, default=None,
+                     help="window in days; default resumes from the watermark")
+    dip.add_argument("--lookback", type=positive_int, default=30,
+                     help="days to collect on a first run with no watermark (default: 30)")
+    dip.add_argument("--verbose", action="store_true")
+    dip.set_defaults(func=cmd_collect_dip)
+
+    ep = sub.add_parser(
+        "collect-ep",
+        help="collect European Parliament legislative procedures",
+        description="Fetch every legislative procedure the Parliament lists in scope - "
+                    "COD, CNS and APP since the source entry's since_year - and store it "
+                    "when its events, stage or scheduled activities changed. A procedure "
+                    "with recent or scheduled activity is polled every run, a dormant one "
+                    "weekly, and one published in the Official Journal never again. The "
+                    "API rate-limits without warning, so a run that keeps being refused "
+                    "stops and leaves the rest for the next one. No credential is required.",
+    )
+    ep.add_argument("--since-year", type=positive_int, default=None,
+                    help="earliest procedure year (default: the source entry's since_year)")
+    ep.add_argument("--sweep", action="store_true",
+                    help="poll dormant procedures too, whatever the weekly schedule says")
+    ep.add_argument("--verbose", action="store_true")
+    ep.set_defaults(func=cmd_collect_ep)
+
+    dip_docs = sub.add_parser(
+        "fetch-dip-docs",
+        help="fetch the documents behind DIP procedures the body gate kept",
+        description="For every DIP procedure the regulatory body gate judged relevant for "
+                    "the client, fetch the Drucksachen its steps reference - the answer, the "
+                    "bill, the committee report - and store their text. Plenary protocols "
+                    "and list entries are skipped. A document DIP has no text for yet stays "
+                    "pending and is asked for again on the next run.",
+    )
+    dip_docs.add_argument("--client", default="jt-express",
+                          help="client profile slug or path (default: jt-express)")
+    dip_docs.add_argument("--limit", type=positive_int, default=None,
+                          help="maximum documents per run, newest first (default: 50)")
+    dip_docs.add_argument("--retry-unavailable", action="store_true",
+                          help="also retry documents given up on")
+    dip_docs.add_argument("--show", metavar="PROCEDURE_ID", default=None,
+                          help="print what the full assessment would read for one procedure - "
+                               "its record and cut documents - and fetch nothing")
+    dip_docs.set_defaults(func=cmd_fetch_dip_docs)
+
     backup = sub.add_parser(
         "backup",
         help="snapshot the database, compress, rotate, and copy off-box",
@@ -613,6 +941,104 @@ def build_parser() -> argparse.ArgumentParser:
     backup.add_argument("--no-offbox", action="store_true",
                         help="write the local snapshot only")
     backup.set_defaults(func=cmd_backup)
+
+    sg_view = sub.add_parser(
+        "safety-gate-view",
+        help="print the client's Safety Gate view without calling a model",
+        description="Apply the client's geography and key-customer rules to the stored "
+                    "Safety Gate alerts and print what the full assessment would read. "
+                    "Read-only: it writes no assessment rows and makes no model or "
+                    "network calls. Relevance here is deterministic - two fields decide "
+                    "it - so these alerts skip the selector and the body gate.",
+    )
+    sg_view.add_argument("--client", default="jt-express",
+                         help="client profile slug or path (default: jt-express)")
+    sg_view.add_argument("--since", type=iso_date, default=None,
+                         help="only alerts published on or after this date")
+    sg_view.add_argument("--key-customers", action="store_true",
+                         help="only alerts whose online trader is a client customer")
+    sg_view.add_argument("--full", action="store_true",
+                         help="print each composed body instead of one line per alert")
+    sg_view.set_defaults(func=cmd_safety_gate_view)
+
+    export = sub.add_parser(
+        "export-window",
+        help="freeze one client-week of stored material into a report bundle",
+        description="Read-only export of everything a weekly report may use: the "
+                    "candidates, the items each gate stopped, the full gate census, "
+                    "per-source coverage, and a manifest with the window, the counts, "
+                    "the stated policy and a hash of every input that shaped the "
+                    "selection. Opens the database through a mode=ro URI inside a "
+                    "rolled-back transaction, so it is safe while collection runs and "
+                    "cannot alter what it reports on. Writes no database rows.",
+    )
+    export.add_argument("--client", default="jt-express",
+                        help="client profile slug (default: jt-express)")
+    export.add_argument("--since", type=iso_date, required=True,
+                        help="first day of the window, local time (YYYY-MM-DD)")
+    export.add_argument("--until", type=iso_date, required=True,
+                        help="last day of the window, inclusive (YYYY-MM-DD)")
+    export.add_argument("--out", type=Path, default=None,
+                        help="bundle directory (default: data/reports/<client>-<since>_<until>)")
+    export.set_defaults(func=cmd_export_window)
+
+    def bundle_args(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument("--bundle", type=Path, default=None,
+                            help="bundle directory from export-window")
+        parser.add_argument("--client", default="jt-express",
+                            help="with --since/--until, names the bundle instead")
+        parser.add_argument("--since", type=iso_date, default=None)
+        parser.add_argument("--until", type=iso_date, default=None)
+
+    assess = sub.add_parser(
+        "assess",
+        help="assess a frozen bundle: carry-forward, triage, cluster, read, challenge, write",
+        description="The only stage that calls a model. Six steps over a frozen "
+                    "bundle, with state on disk rather than in a preserved "
+                    "conversation: last cycle's open issues are searched for (in the "
+                    "gate's rejects too), candidates are triaged and clustered into "
+                    "stories, each story is read with tools, challenged adversarially, "
+                    "and the Chinese report is drafted from the resulting issue "
+                    "register. Writes decisions.json, issue-register.json, "
+                    "report-draft.json and the tool-call log into the bundle; touches "
+                    "no database row and makes no source network call.",
+    )
+    bundle_args(assess)
+    assess.add_argument("--model", default=None,
+                        help="override the model pinned in config.json")
+    assess.add_argument("--max-stories", type=positive_int, default=None,
+                        help="cap on deep reads for this run")
+    assess.add_argument("--no-write", action="store_true",
+                        help="stop after the register; skip drafting the report")
+    assess.set_defaults(func=cmd_assess)
+
+    report = sub.add_parser(
+        "report",
+        help="render the Chinese report, ledger and coverage from an assessed bundle",
+        description="Deterministic. Joins the assessor's decisions against the frozen "
+                    "export and renders four local pages. Every source link in the "
+                    "report resolves through the frozen evidence by id, so a URL the "
+                    "export does not contain fails the build rather than reaching a "
+                    "customer. Re-runnable on the same bundle.",
+    )
+    bundle_args(report)
+    report.add_argument("--record", action="store_true",
+                        help="also file a row in the report table")
+    report.set_defaults(func=cmd_report)
+
+    verify = sub.add_parser(
+        "verify-report",
+        help="check a rendered bundle's accounting, dates, links and citations",
+        description="Deterministic checks that know nothing about the model, with "
+                    "every constant read from the manifest: one decision per identity "
+                    "and no gaps, nothing fetched after the cutoff, the census "
+                    "reconciling, no lastmod date presented as a publication date, "
+                    "every report URL present in the frozen evidence, and no broken "
+                    "local link, replacement character or unrendered markdown. Writes "
+                    "verification.json and bundle-hashes.json; exits 1 on any error.",
+    )
+    bundle_args(verify)
+    verify.set_defaults(func=cmd_verify_report)
 
     status = sub.add_parser("status", help="show recent runs and per-source outcomes")
     status.add_argument("--limit", type=int, default=3, help="runs to show (default: 3)")
