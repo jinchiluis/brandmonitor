@@ -7,9 +7,11 @@ from health.check import (
     HealthStatus,
     MarkerError,
     Probe,
+    QualityProbe,
     evaluate,
     notification_action,
     parse_marker,
+    parse_quality_snapshot,
 )
 
 
@@ -17,15 +19,34 @@ UTC = timezone.utc
 NOW = datetime(2026, 9, 12, 12, 0, tzinfo=UTC)
 
 
-def marker_payload(*, finished: datetime, worst: int = 0, news: int = 0) -> str:
+def marker_payload(*, finished: datetime, worst: int = 0, news: int = 0,
+                   cycle_date: str | None = None) -> str:
+    payload = {
+        "finished_utc": finished.isoformat().replace("+00:00", "Z"),
+        "worst_exit": worst,
+        "stages": {"news": news, "backup": 0},
+        "log": "data/log/2026-09-12/run_daily.txt",
+    }
+    if cycle_date:
+        payload["cycle_date"] = cycle_date
     return json.dumps(
-        {
-            "finished_utc": finished.isoformat().replace("+00:00", "Z"),
-            "worst_exit": worst,
-            "stages": {"news": news, "backup": 0},
-            "log": "data/log/2026-09-12/run_daily.txt",
-        }
+        payload
     )
+
+
+def quality_payload(*, generated: datetime, status: str = "healthy",
+                    cycle_date: str = "2026-09-12",
+                    incidents: list[dict] | None = None,
+                    incident_key: str | None = None) -> str:
+    return json.dumps({
+        "schema_version": 1,
+        "kind": "coverage_health",
+        "generated_utc": generated.isoformat().replace("+00:00", "Z"),
+        "cycle_date": cycle_date,
+        "status": status,
+        "incident_key": incident_key,
+        "incidents": incidents or [],
+    })
 
 
 def test_fresh_success_is_healthy():
@@ -110,3 +131,64 @@ def test_notifications_are_latched_and_recover_once():
     assert notification_action(alert, {"notified_kind": "stale"}) is None
     assert notification_action(healthy, {"notified_kind": "stale"}) == "recovery"
     assert notification_action(healthy, {}) is None
+
+
+def test_quality_warning_turns_a_green_run_into_an_alert():
+    marker = Probe(parse_marker(marker_payload(
+        finished=NOW - timedelta(minutes=3), cycle_date="2026-09-12"
+    )))
+    quality = QualityProbe(parse_quality_snapshot(quality_payload(
+        generated=NOW - timedelta(minutes=4),
+        status="warning",
+        incident_key="source-a",
+        incidents=[{
+            "source": "a.de",
+            "check": "zero_streak",
+            "severity": "warning",
+            "message": "zero twice",
+        }],
+    )))
+
+    status = evaluate(
+        marker,
+        quality_probe=quality,
+        checked_at=NOW,
+        stale_after=timedelta(hours=26),
+    )
+
+    assert status.kind == "quality_warning" and status.alert
+    assert status.incident_key == "source-a"
+    assert "a.de" in status.details[1]
+
+
+def test_new_quality_file_before_new_marker_is_a_non_alerting_transition():
+    marker = Probe(parse_marker(marker_payload(
+        finished=NOW - timedelta(hours=20), cycle_date="2026-09-11"
+    )))
+    quality = QualityProbe(parse_quality_snapshot(quality_payload(
+        generated=NOW - timedelta(minutes=1), cycle_date="2026-09-12"
+    )))
+
+    status = evaluate(
+        marker,
+        quality_probe=quality,
+        checked_at=NOW,
+        stale_after=timedelta(hours=26),
+    )
+
+    assert status.kind == "quality_transition" and not status.alert
+
+
+def test_changed_quality_incident_set_sends_an_updated_alert():
+    first = HealthStatus("quality_warning", "warning", (), True, "a")
+    changed = HealthStatus("quality_warning", "warning", (), True, "a-and-b")
+
+    assert notification_action(first, {"notified_kind": "quality_warning",
+                                       "notified_key": "a"}) is None
+    assert notification_action(changed, {"notified_kind": "quality_warning",
+                                         "notified_key": "a"}) == "alert"
+
+
+def test_warning_quality_requires_an_incident():
+    with pytest.raises(MarkerError, match="needs at least one incident"):
+        parse_quality_snapshot(quality_payload(generated=NOW, status="warning"))

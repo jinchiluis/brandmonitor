@@ -34,6 +34,7 @@ from typing import Any
 DEFAULT_SSH_HOST = "100.80.13.120"
 DEFAULT_SSH_USER = "dell laptop"
 DEFAULT_MARKER_PATH = r"C:\apps\brandmonitor\data\last_run.json"
+DEFAULT_QUALITY_PATH = r"C:\apps\brandmonitor\data\health\latest.json"
 DEFAULT_ENV_FILE = Path("/root/cost_dashboard/.env")
 DEFAULT_STATE_FILE = Path("/var/lib/brandmonitor-health/state.json")
 DEFAULT_SENDER = "jinchilu@googlemail.com"
@@ -55,6 +56,7 @@ class Marker:
     worst_exit: int
     stages: dict[str, int]
     log: str
+    cycle_date: str | None = None
 
     def for_state(self) -> dict[str, Any]:
         return {
@@ -62,6 +64,7 @@ class Marker:
             "worst_exit": self.worst_exit,
             "stages": self.stages,
             "log": self.log,
+            "cycle_date": self.cycle_date,
         }
 
 
@@ -73,11 +76,37 @@ class Probe:
 
 
 @dataclass(frozen=True)
+class QualitySnapshot:
+    generated_utc: datetime
+    cycle_date: str
+    status: str
+    incidents: tuple[dict[str, str], ...]
+    incident_key: str | None
+
+    def for_state(self) -> dict[str, Any]:
+        return {
+            "generated_utc": format_utc(self.generated_utc),
+            "cycle_date": self.cycle_date,
+            "status": self.status,
+            "incidents": list(self.incidents),
+            "incident_key": self.incident_key,
+        }
+
+
+@dataclass(frozen=True)
+class QualityProbe:
+    snapshot: QualitySnapshot | None
+    error: str | None = None
+    invalid_snapshot: bool = False
+
+
+@dataclass(frozen=True)
 class HealthStatus:
     kind: str
     title: str
     details: tuple[str, ...]
     alert: bool
+    incident_key: str | None = None
 
 
 def now_utc() -> datetime:
@@ -131,11 +160,77 @@ def parse_marker(payload: str) -> Marker:
     log = raw.get("log", "")
     if not isinstance(log, str):
         raise MarkerError("log must be a string")
+    cycle_date = raw.get("cycle_date")
+    if cycle_date is not None:
+        if not isinstance(cycle_date, str):
+            raise MarkerError("cycle_date must be a YYYY-MM-DD string")
+        try:
+            datetime.strptime(cycle_date, "%Y-%m-%d")
+        except ValueError as exc:
+            raise MarkerError("cycle_date must be a YYYY-MM-DD string") from exc
     return Marker(
         finished_utc=parse_utc(raw.get("finished_utc"), field="finished_utc"),
         worst_exit=worst,
         stages=stages,
         log=log,
+        cycle_date=cycle_date,
+    )
+
+
+def parse_quality_snapshot(payload: str) -> QualitySnapshot:
+    try:
+        raw = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise MarkerError(f"quality snapshot is not valid JSON: {exc.msg}") from exc
+    if not isinstance(raw, dict) or raw.get("schema_version") != 1:
+        raise MarkerError("quality snapshot must be a schema_version 1 object")
+    if raw.get("kind") != "coverage_health":
+        raise MarkerError("quality snapshot kind must be coverage_health")
+    cycle_date = raw.get("cycle_date")
+    if not isinstance(cycle_date, str):
+        raise MarkerError("quality cycle_date must be a YYYY-MM-DD string")
+    try:
+        datetime.strptime(cycle_date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise MarkerError("quality cycle_date must be a YYYY-MM-DD string") from exc
+    status = raw.get("status")
+    if status not in {"learning", "healthy", "warning", "critical"}:
+        raise MarkerError("quality status must be learning, healthy, warning, or critical")
+    incidents_raw = raw.get("incidents")
+    if not isinstance(incidents_raw, list):
+        raise MarkerError("quality incidents must be a list")
+    incidents: list[dict[str, str]] = []
+    for item in incidents_raw:
+        if not isinstance(item, dict):
+            raise MarkerError("every quality incident must be an object")
+        source, check, severity, message = (
+            item.get("source"), item.get("check"), item.get("severity"), item.get("message")
+        )
+        if not all(isinstance(value, str) and value for value in (source, check, message)):
+            raise MarkerError("quality incidents need source, check, and message strings")
+        if severity not in {"warning", "critical"}:
+            raise MarkerError("quality incident severity must be warning or critical")
+        incidents.append({
+            "source": source,
+            "check": check,
+            "severity": severity,
+            "message": message,
+        })
+    if status in {"warning", "critical"} and not incidents:
+        raise MarkerError(f"quality status {status} needs at least one incident")
+    if status in {"healthy", "learning"} and incidents:
+        raise MarkerError(f"quality status {status} cannot carry incidents")
+    incident_key = raw.get("incident_key")
+    if incident_key is not None and (
+        not isinstance(incident_key, str) or not incident_key.strip()
+    ):
+        raise MarkerError("quality incident_key must be a non-empty string or null")
+    return QualitySnapshot(
+        generated_utc=parse_utc(raw.get("generated_utc"), field="quality generated_utc"),
+        cycle_date=cycle_date,
+        status=status,
+        incidents=tuple(incidents),
+        incident_key=incident_key,
     )
 
 
@@ -185,6 +280,51 @@ def fetch_marker_over_ssh(
     raise AssertionError("unreachable")
 
 
+def fetch_quality_over_ssh(
+    *, host: str, user: str, quality_path: str, timeout_seconds: int
+) -> QualityProbe:
+    escaped_path = quality_path.replace("'", "''")
+    powershell = f"Get-Content -Raw -LiteralPath '{escaped_path}'"
+    command = [
+        "ssh",
+        "-o", "BatchMode=yes",
+        "-o", f"ConnectTimeout={timeout_seconds}",
+        "-o", "ConnectionAttempts=1",
+        "-o", "ServerAliveInterval=5",
+        "-o", "ServerAliveCountMax=1",
+        "-l", user,
+        host,
+        "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", powershell,
+    ]
+    for attempt in range(2):
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds + 8,
+                check=False,
+            )
+        except FileNotFoundError:
+            return QualityProbe(None, "the ssh executable is not installed")
+        except subprocess.TimeoutExpired:
+            return QualityProbe(
+                None, f"SSH did not finish within {timeout_seconds + 8} seconds"
+            )
+        if completed.returncode != 0:
+            message = completed.stderr.strip().splitlines()
+            reason = message[-1] if message else f"ssh exited {completed.returncode}"
+            return QualityProbe(None, reason[:500])
+        try:
+            return QualityProbe(parse_quality_snapshot(completed.stdout))
+        except MarkerError as exc:
+            if attempt == 0:
+                time.sleep(1)
+                continue
+            return QualityProbe(None, str(exc), invalid_snapshot=True)
+    raise AssertionError("unreachable")
+
+
 def fetch_local_marker(path: Path) -> Probe:
     try:
         return Probe(parse_marker(path.read_text(encoding="utf-8")))
@@ -194,12 +334,23 @@ def fetch_local_marker(path: Path) -> Probe:
         return Probe(None, str(exc), invalid_marker=True)
 
 
+def fetch_local_quality(path: Path) -> QualityProbe:
+    try:
+        return QualityProbe(parse_quality_snapshot(path.read_text(encoding="utf-8")))
+    except OSError as exc:
+        return QualityProbe(None, f"could not read {path}: {exc}")
+    except MarkerError as exc:
+        return QualityProbe(None, str(exc), invalid_snapshot=True)
+
+
 def evaluate(
     probe: Probe,
     *,
     checked_at: datetime,
     stale_after: timedelta,
     cached_finished_utc: str | None = None,
+    quality_probe: QualityProbe | None = None,
+    cached_quality_generated_utc: str | None = None,
 ) -> HealthStatus:
     if probe.marker is None:
         if probe.invalid_marker:
@@ -270,12 +421,143 @@ def evaluate(
             ),
             True,
         )
+    if quality_probe is not None:
+        return evaluate_quality(
+            quality_probe,
+            marker=marker,
+            checked_at=checked_at,
+            stale_after=stale_after,
+            cached_generated_utc=cached_quality_generated_utc,
+        )
     return HealthStatus(
         "healthy",
         "Daily pipeline is healthy",
         (
             f"Last completed run: {format_utc(marker.finished_utc)} ({human_age(age)} ago)",
             "All recorded stages exited 0.",
+        ),
+        False,
+    )
+
+
+def evaluate_quality(
+    probe: QualityProbe,
+    *,
+    marker: Marker,
+    checked_at: datetime,
+    stale_after: timedelta,
+    cached_generated_utc: str | None = None,
+) -> HealthStatus:
+    snapshot = probe.snapshot
+    if snapshot is None:
+        if probe.invalid_snapshot:
+            return HealthStatus(
+                "invalid_quality_snapshot",
+                "Coverage-health snapshot is malformed",
+                (probe.error or "snapshot did not satisfy its JSON contract",),
+                True,
+            )
+        cached: datetime | None = None
+        if cached_generated_utc:
+            try:
+                cached = parse_utc(
+                    cached_generated_utc, field="cached quality generated_utc"
+                )
+            except MarkerError:
+                cached = None
+        if cached is not None and checked_at - cached <= stale_after:
+            return HealthStatus(
+                "quality_unreachable_grace",
+                "Coverage-health snapshot temporarily unreachable",
+                (
+                    probe.error or "unknown probe error",
+                    f"Last observed quality snapshot is only "
+                    f"{human_age(checked_at - cached)} old; no alert yet.",
+                ),
+                False,
+            )
+        return HealthStatus(
+            "quality_unreachable",
+            "Coverage-health snapshot is unreachable",
+            (probe.error or "unknown probe error",),
+            True,
+        )
+
+    age = checked_at - snapshot.generated_utc
+    if age < timedelta(minutes=-5):
+        return HealthStatus(
+            "invalid_quality_snapshot",
+            "Coverage-health timestamp is in the future",
+            (f"generated_utc={format_utc(snapshot.generated_utc)}",),
+            True,
+        )
+    if age > stale_after:
+        return HealthStatus(
+            "quality_stale",
+            "Coverage-health snapshot is stale",
+            (
+                f"Last generated: {format_utc(snapshot.generated_utc)} "
+                f"({human_age(age)} ago)",
+            ),
+            True,
+        )
+    if marker.cycle_date and snapshot.cycle_date != marker.cycle_date:
+        # analyze.py publishes before run_daily.bat replaces the marker. A VPS
+        # read in those few seconds may see today's quality with yesterday's
+        # marker; that direction is a harmless in-progress transition.
+        if snapshot.cycle_date > marker.cycle_date:
+            return HealthStatus(
+                "quality_transition",
+                "Daily health files are being updated",
+                (
+                    f"Run marker cycle {marker.cycle_date}; coverage cycle "
+                    f"{snapshot.cycle_date}. No alert during forward transition.",
+                ),
+                False,
+            )
+        return HealthStatus(
+            "quality_cycle_mismatch",
+            "Coverage-health snapshot does not match the daily run",
+            (
+                f"Run marker cycle {marker.cycle_date}; coverage cycle "
+                f"{snapshot.cycle_date}.",
+            ),
+            True,
+        )
+    if snapshot.status in {"warning", "critical"}:
+        details = [
+            f"Coverage analysis generated {format_utc(snapshot.generated_utc)}."
+        ]
+        for incident in snapshot.incidents[:8]:
+            details.append(
+                f"{incident['severity']} {incident['source']} "
+                f"[{incident['check']}]: {incident['message']}"
+            )
+        if len(snapshot.incidents) > 8:
+            details.append(f"...and {len(snapshot.incidents) - 8} more incident(s).")
+        return HealthStatus(
+            f"quality_{snapshot.status}",
+            f"Coverage health is {snapshot.status}",
+            tuple(details),
+            True,
+            snapshot.incident_key or f"quality_{snapshot.status}",
+        )
+    if snapshot.status == "learning":
+        return HealthStatus(
+            "healthy",
+            "Daily pipeline is healthy; coverage baselines are learning",
+            (
+                f"Last completed run: {format_utc(marker.finished_utc)}.",
+                f"Coverage snapshot: {format_utc(snapshot.generated_utc)}.",
+            ),
+            False,
+        )
+    return HealthStatus(
+        "healthy",
+        "Daily pipeline and coverage are healthy",
+        (
+            f"Last completed run: {format_utc(marker.finished_utc)}.",
+            f"Coverage snapshot: {format_utc(snapshot.generated_utc)}.",
         ),
         False,
     )
@@ -324,8 +606,10 @@ def save_state(path: Path, state: dict[str, Any]) -> None:
 
 def notification_action(status: HealthStatus, state: dict[str, Any]) -> str | None:
     notified_kind = state.get("notified_kind")
+    notified_key = state.get("notified_key") or notified_kind
     if status.alert:
-        return "alert" if notified_kind != status.kind else None
+        current_key = status.incident_key or status.kind
+        return "alert" if notified_key != current_key else None
     if status.kind == "healthy" and notified_kind:
         return "recovery"
     return None
@@ -393,9 +677,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ssh-host", default=DEFAULT_SSH_HOST)
     parser.add_argument("--ssh-user", default=DEFAULT_SSH_USER)
     parser.add_argument("--marker-path", default=DEFAULT_MARKER_PATH)
+    parser.add_argument("--quality-path", default=DEFAULT_QUALITY_PATH)
     parser.add_argument(
         "--marker-file", type=Path,
         help="read a local marker instead of SSH (for development/testing)",
+    )
+    parser.add_argument(
+        "--quality-file", type=Path,
+        help="read a local coverage snapshot instead of SSH (with --marker-file)",
     )
     parser.add_argument("--ssh-timeout", type=int, default=10)
     parser.add_argument("--stale-hours", type=float, default=26.0)
@@ -447,15 +736,31 @@ def run(args: argparse.Namespace) -> int:
             timeout_seconds=args.ssh_timeout,
         )
     )
+    if args.marker_file:
+        quality_path = args.quality_file or args.marker_file.parent / "health" / "latest.json"
+        quality_probe = fetch_local_quality(quality_path)
+    else:
+        quality_probe = fetch_quality_over_ssh(
+            host=args.ssh_host,
+            user=args.ssh_user,
+            quality_path=args.quality_path,
+            timeout_seconds=args.ssh_timeout,
+        )
     cached_marker = state.get("last_marker")
     cached_finished = (
         cached_marker.get("finished_utc") if isinstance(cached_marker, dict) else None
+    )
+    cached_quality = state.get("last_quality")
+    cached_quality_generated = (
+        cached_quality.get("generated_utc") if isinstance(cached_quality, dict) else None
     )
     status = evaluate(
         probe,
         checked_at=checked_at,
         stale_after=timedelta(hours=args.stale_hours),
         cached_finished_utc=cached_finished,
+        quality_probe=quality_probe,
+        cached_quality_generated_utc=cached_quality_generated,
     )
     print(f"{format_utc(checked_at)} {status.kind}: {status.title}")
     for detail in status.details:
@@ -496,11 +801,16 @@ def run(args: argparse.Namespace) -> int:
     if probe.marker is not None:
         state["last_marker"] = probe.marker.for_state()
         state["last_reachable_utc"] = format_utc(checked_at)
+    if quality_probe.snapshot is not None:
+        state["last_quality"] = quality_probe.snapshot.for_state()
+        state["last_quality_reachable_utc"] = format_utc(checked_at)
     if action == "alert" and sent:
         state["notified_kind"] = status.kind
+        state["notified_key"] = status.incident_key or status.kind
         state["alert_sent_utc"] = format_utc(checked_at)
     elif action == "recovery" and sent:
         state.pop("notified_kind", None)
+        state.pop("notified_key", None)
         state["recovery_sent_utc"] = format_utc(checked_at)
     save_state(args.state_file, state)
     return 0

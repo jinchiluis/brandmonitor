@@ -64,6 +64,8 @@ set "CODE_ep_procedures=2"
 set "CODE_body_gate=2"
 set "CODE_dip_docs=2"
 set "CODE_backup=2"
+set "CODE_canary=2"
+set "CODE_quality_health=2"
 
 rem One SQLite writer at a time. A daily run must not collide with a manual
 rem backfill; the handle on the lock file is held for as long as the block runs.
@@ -81,7 +83,8 @@ del "%TMPVAL%" "%TMPVAL%.err" 2>nul
     echo {
     echo   "finished_utc": "!FINISHED!Z",
     echo   "worst_exit": !WORST!,
-    echo   "stages": { "news": !CODE_news!, "title_gate": !CODE_title_gate!, "title_bodies": !CODE_title_bodies!, "regulatory": !CODE_regulatory!, "safety_gate": !CODE_safety_gate!, "dip": !CODE_dip!, "ep_procedures": !CODE_ep_procedures!, "body_gate": !CODE_body_gate!, "dip_docs": !CODE_dip_docs!, "backup": !CODE_backup! },
+    echo   "cycle_date": "%DAY%",
+    echo   "stages": { "news": !CODE_news!, "title_gate": !CODE_title_gate!, "title_bodies": !CODE_title_bodies!, "regulatory": !CODE_regulatory!, "safety_gate": !CODE_safety_gate!, "dip": !CODE_dip!, "ep_procedures": !CODE_ep_procedures!, "body_gate": !CODE_body_gate!, "dip_docs": !CODE_dip_docs!, "backup": !CODE_backup!, "canary": !CODE_canary!, "quality_health": !CODE_quality_health! },
     echo   "log": "data/log/%DAY%/run_daily.txt"
     echo }
 )
@@ -119,10 +122,12 @@ rem The documents behind the DIP procedures the gate judged relevant - the answe
 rem the bill. DIP publishes a Drucksache's text days after its date, so a document
 rem without text waits in the queue for a later run rather than failing this one.
 call :stage dip_docs fetch-dip-docs --client jt-express
-rem Backup runs last so the snapshot carries the day's collection rather than
-rem yesterday's. It is safe inside the lock: SQLite's online backup API copies a
-rem consistent snapshot while the database is open, and this stage only reads.
+rem Backup is the last stage that handles the corpus, so the snapshot carries the
+rem day's collection rather than yesterday's. The two observers after it read the
+rem final database without modifying it and publish their own atomic JSON files.
 call :stage backup backup
+call :observer canary health\canary.py --cycle-date "%DAY%"
+call :observer quality_health health\analyze.py --cycle-date "%DAY%"
 exit /b 0
 
 
@@ -131,6 +136,20 @@ rem %1 stage name, %2.. arguments for run.py
 echo.>> "%OUT%"
 echo -------- %1 -------->> "%OUT%"
 "%PY%" run.py %2 %3 %4 %5 %6 %7 %8 %9 >> "%OUT%" 2>&1
+set "CODE=!ERRORLEVEL!"
+set "CODE_%1=!CODE!"
+echo [%1] exit=!CODE!>> "%OUT%"
+echo [brandmonitor] %1 exit=!CODE!
+if !CODE! GTR !WORST! set "WORST=!CODE!"
+exit /b 0
+
+
+:observer
+rem %1 stage name, %2 script path, %3.. arguments. A finding is written inside
+rem the quality JSON and exits zero; nonzero means the observer itself broke.
+echo.>> "%OUT%"
+echo -------- %1 -------->> "%OUT%"
+"%PY%" "%~2" %3 %4 %5 %6 %7 %8 %9 >> "%OUT%" 2>&1
 set "CODE=!ERRORLEVEL!"
 set "CODE_%1=!CODE!"
 echo [%1] exit=!CODE!>> "%OUT%"

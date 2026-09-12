@@ -322,32 +322,6 @@ count, lag from the busiest day — belongs here rather than in a one-off query.
   (dip.bundestag.de/über-dip/hilfe/api) and set `DIP_API_KEY` in `.env` before
   then; a rejected key makes `collect-dip` exit 2.
 
-### VPS check on the scheduled laptop run
-
-Live since 2026-09-12. `health/check.py` runs every 15 minutes on the VPS under
-`brandmonitor-health.timer`, reads `data/last_run.json` over Tailscale SSH, and
-alerts on a marker older than 26 hours or any non-zero stage. Staleness is the
-primary alarm because the worst failure — the run did not happen, the laptop slept,
-lost network, or the task stopped firing — produces no process and therefore no exit
-code at all, and missed news collection is unrecoverable. It stays pull-based; the
-VPS must not run a second scheduled collection pipeline.
-
-What remains is the half no single-run marker can express:
-
-- **Trends across runs**, where the real signal lives:
-  - a source at `zero` for K consecutive runs — dead, but never "failed" on any one
-    day;
-  - a source that failed on this run *and* the previous one, not one blip;
-  - an `unavailable` rate that jumps for one source — 5 % to 90 % means the
-    extractor broke, the VerkehrsRundschau signature that went unnoticed for as
-    long as the old exit semantics returned 1 every day;
-  - `deferred by limit` recurring, meaning the body queue is falling behind rather
-    than failing.
-- Implement as `run.py health` over `run` and `run_source`, run on the laptop and
-  folded into the marker, so the VPS keeps needing no database access and no schema
-  knowledge. This is now the gap between "a run failed" — which is watched — and "a
-  source died quietly", which is not.
-
 ## Execution order
 
 1. Sketch the report, then lock the assessment schema (§1.2).
@@ -355,9 +329,11 @@ What remains is the half no single-run marker can express:
 3. Render the Chinese report and validate one repeatable pilot window twice.
 4. Body and source quality sampling (§3) — in parallel; none of it blocks the
    assessor.
-5. `run.py health` trend analysis (§5). Scheduling and the freshness alarm are live,
-   so this is what still stands between an unattended run and a quiet source death.
-6. Audit subscriptions before purchasing or integrating another account (§3).
+5. Audit subscriptions before purchasing or integrating another account (§3).
 
 My own comments (not written by claude):
+- brightdata fallback in case of blocked crawl/scrape? e-commerce failed fetch is a candidate. part of backup plan we can use in production actually
+  (I have already ISP IP with deposit)
 - for alerts i wanna try wechat over WeCom work.weixin.qq.com --- but if i have enough tokens and with chrome mcp
+- apply backup plan
+- a new report must be sent per email / Wechat

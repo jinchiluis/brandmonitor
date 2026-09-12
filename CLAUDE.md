@@ -155,14 +155,18 @@ calendar day. `w32time` is enabled and synchronising — a host that stamps ever
 never the data.
 
 The VPS half is live too: `health/check.py` runs every 15 minutes under
-`brandmonitor-health.timer`, reads `data/last_run.json` from the laptop over
-Tailscale SSH, and emails when the marker is older than 26 hours or any stage exited
-non-zero. It never opens the database — see [health/README.md](health/README.md).
+`brandmonitor-health.timer`, reads `data/last_run.json` and
+`data/health/latest.json` from the laptop over Tailscale SSH, and emails when the
+marker is older than 26 hours, any stage exited non-zero, or the coverage observer
+reports a warning/critical condition. It never opens the database — see
+[health/README.md](health/README.md).
 
-`run_daily.bat` ends with a `backup` stage, so the snapshot always carries the day's
-collection instead of yesterday's. Backups are `python run.py backup`: an online
-SQLite snapshot (safe while the pipeline holds the database open), VACUUMed, gzipped,
-rotated into daily/weekly/monthly tiers, then copied to
+`run_daily.bat` makes `backup` the last stage that touches the corpus, so the
+snapshot always carries the day's collection instead of yesterday's. Two read-only
+health observers run after it while the lock remains held, publishing JSON outside
+SQLite. Backups are `python run.py backup`: an online SQLite snapshot (safe while
+the pipeline holds the database open), VACUUMed, gzipped, rotated into
+daily/weekly/monthly tiers, then copied to
 `~/OneDrive/brandmonitor-backups` — a plain directory the OneDrive client already
 syncs, so there is no `rclone` remote and no OAuth token on this host. Retention and
 paths live in `config.json`. The backup command is useful on its own during testing;

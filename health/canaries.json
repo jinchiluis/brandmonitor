@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "timeout_seconds": 20,
+  "max_response_bytes": 12582912,
+  "checks": [
+    {
+      "id": "etailment-news-sitemap",
+      "source_slug": "etailment.de",
+      "kind": "sitemap",
+      "url": "https://www.etailment.de/news-sitemap.xml",
+      "include_path_prefixes": ["/magazin/"],
+      "minimum_entries": 5,
+      "entry_count_severity": "warning",
+      "reconcile_recent": 10,
+      "minimum_database_coverage": 0.8,
+      "failure_severity": "critical",
+      "coverage_severity": "warning"
+    },
+    {
+      "id": "onlinehaendler-news-sitemap",
+      "source_slug": "ohn.haendlerbund.de",
+      "kind": "sitemap",
+      "url": "https://ohn.haendlerbund.de/sitemap.xml",
+      "follow_sitemap_index": "highest_page",
+      "exclude_path_prefixes": ["/webinare"],
+      "minimum_entries": 50,
+      "entry_count_severity": "warning",
+      "reconcile_recent": 10,
+      "minimum_database_coverage": 0.8,
+      "failure_severity": "critical",
+      "coverage_severity": "warning"
+    },
+    {
+      "id": "logistik-heute-feed",
+      "source_slug": "logistik-heute.de",
+      "kind": "feed",
+      "url": "https://logistik-heute.de/rss.xml",
+      "include_path_prefixes": ["/news/"],
+      "minimum_entries": 10,
+      "entry_count_severity": "warning",
+      "reconcile_recent": 10,
+      "minimum_database_coverage": 0.8,
+      "failure_severity": "critical",
+      "coverage_severity": "warning"
+    },
+    {
+      "id": "dvz-news-sitemap",
+      "source_slug": "dvz.de",
+      "kind": "sitemap",
+      "url": "https://www.dvz.de/news-sitemap.xml",
+      "follow_sitemap_index": "first",
+      "exclude_path_prefixes": [
+        "/veranstaltungen",
+        "/sonderseiten",
+        "/abo",
+        "/mediadaten",
+        "/advertorials",
+        "/landingpages"
+      ],
+      "minimum_entries": 0,
+      "reconcile_recent": 10,
+      "minimum_database_coverage": 0.7,
+      "failure_severity": "critical",
+      "coverage_severity": "warning"
+    }
+  ]
+}
