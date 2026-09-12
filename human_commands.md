@@ -1,3 +1,5 @@
+.\deploy.bat
+
 ssh -l "dell laptop" 100.80.13.120 "cd /d C:\apps\brandmonitor && run_daily.bat"
 
 ssh -l "dell laptop" 100.80.13.120

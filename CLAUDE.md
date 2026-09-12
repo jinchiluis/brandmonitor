@@ -116,6 +116,16 @@ The live `.env` belongs on the laptop and is never committed. The VPS needs only
 token required for its scheduled heartbeat/backup role. Activating disaster recovery
 and copying any additional credentials are manual operations.
 
+### Deployment
+
+Deployment is pull-only and never happens inside a scheduled production run. After
+committing and pushing `main`, run `.\deploy.bat` from the development checkout. It
+verifies that local `HEAD` is the pushed `origin/main` commit, then runs
+`git pull --ff-only` first on the production laptop and then on the health-check VPS.
+It does not run the crawler, touch the database, restart services, or copy secrets.
+An uncommitted local working tree is allowed but explicitly reported because those
+changes cannot be part of the pushed deployment.
+
 ### Scheduled work
 
 **Live since 2026-09-12.** `run_daily.bat` runs on the primary laptop under Task
