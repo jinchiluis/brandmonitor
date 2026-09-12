@@ -310,10 +310,11 @@ count, lag from the busiest day — belongs here rather than in a one-off query.
 
 ## 5. Scheduling and operations
 
-- Schedule collection daily on the Windows laptop. News sitemaps retain titles for
-  roughly 48 hours; missed runs permanently reduce title coverage.
 - Verify laptop-to-VPS backups. A fresh heartbeat says the pipeline ran, not that
   the database is recoverable; check those separately.
+- Send one `health/check.py --test-email` from the VPS. The checker is live and its
+  healthy path is proven, but no alert has ever been delivered, so the SMTP leg is
+  the one link a real incident would discover.
 - Add only the paywall credentials justified by the subscription audit, and the LLM
   keys chosen for assessment.
 - Record runtime and variable cost for the complete pilot cycle.
@@ -323,23 +324,17 @@ count, lag from the busiest day — belongs here rather than in a one-off query.
 
 ### VPS check on the scheduled laptop run
 
-`run_daily.bat` writes `data/last_run.json` after every completed run: finish time,
-per-stage exit codes, and the worst code. The VPS reads that marker and decides
-whether a human should look. It stays pull-based; the VPS must not run a second
-scheduled collection pipeline.
+Live since 2026-09-12. `health/check.py` runs every 15 minutes on the VPS under
+`brandmonitor-health.timer`, reads `data/last_run.json` over Tailscale SSH, and
+alerts on a marker older than 26 hours or any non-zero stage. Staleness is the
+primary alarm because the worst failure — the run did not happen, the laptop slept,
+lost network, or the task stopped firing — produces no process and therefore no exit
+code at all, and missed news collection is unrecoverable. It stays pull-based; the
+VPS must not run a second scheduled collection pipeline.
 
-Freshness is the primary alarm, not the exit code. The worst failure — the run did
-not happen, because the laptop slept, lost network, or the task stopped firing —
-produces no process and therefore no exit code at all, and missed news collection
-is unrecoverable.
+What remains is the half no single-run marker can express:
 
-- **Alarm on staleness first.** No marker newer than about 26 hours is an alarm on
-  its own, whatever the last marker said.
-- **Then on exit 2** from any stage: the command aborted. Exit 1 (every source in
-  that stage failed) is worth a look the same day. Exit 0 with individual sources
-  down is not an alarm; that is what the run summary and `run_source` are for.
-- **Then on trends across runs**, where the real signal lives and which no
-  single-run exit code can express:
+- **Trends across runs**, where the real signal lives:
   - a source at `zero` for K consecutive runs — dead, but never "failed" on any one
     day;
   - a source that failed on this run *and* the previous one, not one blip;
@@ -349,9 +344,9 @@ is unrecoverable.
   - `deferred by limit` recurring, meaning the body queue is falling behind rather
     than failing.
 - Implement as `run.py health` over `run` and `run_source`, run on the laptop and
-  folded into the marker. The VPS then needs no database access, no schema
-  knowledge and no Python. It already holds admin SSH (`contabo-server` key), so it
-  can pull the marker over the existing channel.
+  folded into the marker, so the VPS keeps needing no database access and no schema
+  knowledge. This is now the gap between "a run failed" — which is watched — and "a
+  source died quietly", which is not.
 
 ## Execution order
 
@@ -360,11 +355,9 @@ is unrecoverable.
 3. Render the Chinese report and validate one repeatable pilot window twice.
 4. Body and source quality sampling (§3) — in parallel; none of it blocks the
    assessor.
-5. `run.py health` and daily scheduling (§5), before the pilot runs unattended.
+5. `run.py health` trend analysis (§5). Scheduling and the freshness alarm are live,
+   so this is what still stands between an unattended run and a quiet source death.
 6. Audit subscriptions before purchasing or integrating another account (§3).
 
 My own comments (not written by claude):
-- brightdata fallback in case of blocked crawl/scrape?
-  (I have already ISP IP with deposit)
-- Basic news sites like Spiegel, Zeit etc... almost contain no signal at all. That means IF they show stuff.. its probably important (and have big coverage) and should be weighted a bit more (belongs into llm assessment)
-- for alerts i wanna try wechat over ServerChan, thats a cool feature especially for chinese clients
+- for alerts i wanna try wechat over WeCom work.weixin.qq.com --- but if i have enough tokens and with chrome mcp

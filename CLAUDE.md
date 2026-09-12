@@ -118,16 +118,15 @@ and copying any additional credentials are manual operations.
 
 ### Scheduled work
 
-**Nothing is scheduled yet, deliberately.** The project is still in the testing
-phase and `run_daily.bat` is run by hand. No Task Scheduler entry exists; do not add
-one as a side effect of other work.
+**Live since 2026-09-12.** `run_daily.bat` runs on the primary laptop under Task
+Scheduler as `brandmonitor-daily`, daily at 06:00 Europe/Berlin. Collection is
+unattended; the weekly report stack is still run by hand.
 
-When the pipeline does go live on the primary laptop, register it under the
-logged-on user rather than SYSTEM — SYSTEM sees neither the `.venv` nor the user's
-OneDrive folder. The settings that matter are laptop-specific and are not the
-defaults: `StartWhenAvailable` catches up a run missed while the machine was off,
-and Task Scheduler otherwise refuses to start on battery and stops a running task
-when the machine unplugs.
+It is registered under the logged-on user rather than SYSTEM — SYSTEM sees neither
+the `.venv` nor the user's OneDrive folder. The settings that matter are
+laptop-specific and are not the defaults: `StartWhenAvailable` catches up a run
+missed while the machine was off, and Task Scheduler otherwise refuses to start on
+battery and stops a running task when the machine unplugs.
 
 ```powershell
 $a = New-ScheduledTaskAction -Execute "C:\apps\brandmonitor\run_daily.bat" `
@@ -143,6 +142,22 @@ Register-ScheduledTask -TaskName "brandmonitor-daily" -Action $a -Settings $s `
 An `Interactive` principal runs only while that user is logged on, which is why the
 remote access above is part of the operating arrangement rather than a convenience.
 Running whether-logged-on-or-not requires storing a password.
+
+**06:00 means Europe/Berlin, and the host has to agree.** The laptop ran on China
+Standard Time until 2026-09-12, which would have fired the trigger at midnight CEST
+and named `data/log/<date>/` directories by a date rolling over at 18:00 Berlin; the
+timezone was corrected to W. Europe. Publication measured across 21,421 dated items
+peaks 11:00–16:00 CEST, with 13.2 % of a day published by 06:00 and 91.5 % by 19:00,
+so a 06:00 boundary cuts the day in its trough and each run carries one complete
+calendar day. `w32time` is enabled and synchronising — a host that stamps every
+`fetched_at` must not free-run. Stored timestamps are UTC throughout (`utcnow` in
+`src/db.py`), so a timezone error moves the schedule and the log directory names,
+never the data.
+
+The VPS half is live too: `health/check.py` runs every 15 minutes under
+`brandmonitor-health.timer`, reads `data/last_run.json` from the laptop over
+Tailscale SSH, and emails when the marker is older than 26 hours or any stage exited
+non-zero. It never opens the database — see [health/README.md](health/README.md).
 
 `run_daily.bat` ends with a `backup` stage, so the snapshot always carries the day's
 collection instead of yesterday's. Backups are `python run.py backup`: an online
