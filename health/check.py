@@ -29,6 +29,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 
 DEFAULT_SSH_HOST = "100.80.13.120"
@@ -40,6 +41,7 @@ DEFAULT_STATE_FILE = Path("/var/lib/brandmonitor-health/state.json")
 DEFAULT_SENDER = "jinchilu@googlemail.com"
 DEFAULT_RECIPIENT = "jinchilu@hotmail.com"
 UTC = timezone.utc
+BERLIN = ZoneInfo("Europe/Berlin")
 
 
 class HealthCheckError(RuntimeError):
@@ -115,6 +117,15 @@ def now_utc() -> datetime:
 
 def format_utc(value: datetime) -> str:
     return value.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def format_local(value: datetime) -> str:
+    """Human-facing rendering in Europe/Berlin, for email and console text only.
+
+    Stored/state timestamps stay on format_utc — this is presentation-only so
+    the state file's parse_utc round-trip contract is untouched.
+    """
+    return value.astimezone(BERLIN).strftime("%Y-%m-%d %H:%M %Z")
 
 
 def parse_utc(value: Any, *, field: str) -> datetime:
@@ -393,7 +404,7 @@ def evaluate(
         return HealthStatus(
             "invalid_marker",
             "Run marker timestamp is in the future",
-            (f"finished_utc={format_utc(marker.finished_utc)}",),
+            (f"finished_utc={format_local(marker.finished_utc)}",),
             True,
         )
     if age > stale_after:
@@ -401,7 +412,7 @@ def evaluate(
             "stale",
             "Daily run marker is stale",
             (
-                f"Last completed run: {format_utc(marker.finished_utc)} ({human_age(age)} ago)",
+                f"Last completed run: {format_local(marker.finished_utc)} ({human_age(age)} ago)",
                 f"Last recorded worst exit: {marker.worst_exit}",
                 f"Laptop log: {marker.log or '(not recorded)'}",
             ),
@@ -415,7 +426,7 @@ def evaluate(
             "run_failed",
             f"Daily run completed with exit {marker.worst_exit}",
             (
-                f"Completed: {format_utc(marker.finished_utc)}",
+                f"Completed: {format_local(marker.finished_utc)}",
                 f"Non-zero stages: {failed}",
                 f"Laptop log: {marker.log or '(not recorded)'}",
             ),
@@ -433,7 +444,7 @@ def evaluate(
         "healthy",
         "Daily pipeline is healthy",
         (
-            f"Last completed run: {format_utc(marker.finished_utc)} ({human_age(age)} ago)",
+            f"Last completed run: {format_local(marker.finished_utc)} ({human_age(age)} ago)",
             "All recorded stages exited 0.",
         ),
         False,
@@ -488,7 +499,7 @@ def evaluate_quality(
         return HealthStatus(
             "invalid_quality_snapshot",
             "Coverage-health timestamp is in the future",
-            (f"generated_utc={format_utc(snapshot.generated_utc)}",),
+            (f"generated_utc={format_local(snapshot.generated_utc)}",),
             True,
         )
     if age > stale_after:
@@ -496,7 +507,7 @@ def evaluate_quality(
             "quality_stale",
             "Coverage-health snapshot is stale",
             (
-                f"Last generated: {format_utc(snapshot.generated_utc)} "
+                f"Last generated: {format_local(snapshot.generated_utc)} "
                 f"({human_age(age)} ago)",
             ),
             True,
@@ -526,7 +537,7 @@ def evaluate_quality(
         )
     if snapshot.status in {"warning", "critical"}:
         details = [
-            f"Coverage analysis generated {format_utc(snapshot.generated_utc)}."
+            f"Coverage analysis generated {format_local(snapshot.generated_utc)}."
         ]
         for incident in snapshot.incidents[:8]:
             details.append(
@@ -547,8 +558,8 @@ def evaluate_quality(
             "healthy",
             "Daily pipeline is healthy; coverage baselines are learning",
             (
-                f"Last completed run: {format_utc(marker.finished_utc)}.",
-                f"Coverage snapshot: {format_utc(snapshot.generated_utc)}.",
+                f"Last completed run: {format_local(marker.finished_utc)}.",
+                f"Coverage snapshot: {format_local(snapshot.generated_utc)}.",
             ),
             False,
         )
@@ -556,8 +567,8 @@ def evaluate_quality(
         "healthy",
         "Daily pipeline and coverage are healthy",
         (
-            f"Last completed run: {format_utc(marker.finished_utc)}.",
-            f"Coverage snapshot: {format_utc(snapshot.generated_utc)}.",
+            f"Last completed run: {format_local(marker.finished_utc)}.",
+            f"Coverage snapshot: {format_local(snapshot.generated_utc)}.",
         ),
         False,
     )
@@ -719,7 +730,7 @@ def run(args: argparse.Namespace) -> int:
             paragraphs=[
                 "The Brand Monitor VPS health checker can send email.",
                 f"VPS host: {socket.gethostname()}",
-                f"Sent: {format_utc(now_utc())}",
+                f"Sent: {format_local(now_utc())}",
             ],
         )
         return 0 if ok else 2
@@ -771,24 +782,30 @@ def run(args: argparse.Namespace) -> int:
         print(f"Dry run: notification={action or 'none'}; state unchanged")
         return 0
 
+    prior_incident_key = state.get("notified_key") or state.get("notified_kind")
+    prior_details = list(state.get("details") or [])
+
     sent = False
     if action:
         sender, recipient, password = smtp_settings(args)
         if action == "alert":
             subject = f"[brandmonitor] ALERT: {status.title}"
-            opening = "Brand Monitor needs attention."
+            paragraphs = ["Brand Monitor needs attention.", *status.details]
         else:
             subject = "[brandmonitor] RECOVERED: daily pipeline is healthy"
-            opening = "Brand Monitor has recovered from the previous health incident."
+            paragraphs = ["Brand Monitor has recovered from the previous health incident."]
+            if prior_incident_key:
+                paragraphs.append(f"Resolved incident: {prior_incident_key}")
+            paragraphs.extend(prior_details)
+            paragraphs.extend(status.details)
         sent = send_email(
             sender=sender,
             recipient=recipient,
             password=password,
             subject=subject,
             paragraphs=[
-                opening,
-                *status.details,
-                f"Checked by VPS {socket.gethostname()} at {format_utc(checked_at)}.",
+                *paragraphs,
+                f"Checked by VPS {socket.gethostname()} at {format_local(checked_at)}.",
             ],
         )
         if not sent:
