@@ -2,6 +2,7 @@
 
 import gzip
 import sqlite3
+import tarfile
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -199,3 +200,88 @@ class TestRunBackup:
         with pytest.raises(FileNotFoundError):
             run_backup(db_path=tmp_path / "gone.sqlite3",
                        backup_dir=tmp_path / "b", offbox_dir="")
+
+
+def make_state(data: Path) -> None:
+    register = data / "reports" / "jt-express-2026-09-05_2026-09-11" / "issue-register.json"
+    register.parent.mkdir(parents=True)
+    register.write_text('{"issues": []}', encoding="utf-8")
+    gate = data / "title_gate" / "jt-express" / "2026-09-13.jsonl"
+    gate.parent.mkdir(parents=True)
+    gate.write_text('{"id": 1, "keep": true}\n', encoding="utf-8")
+    (data / "log").mkdir()
+    (data / "log" / "run.log").write_text("regenerated, not state")
+
+
+class TestStateArchive:
+    def test_state_directories_are_archived_and_mirrored(self, tmp_path):
+        data = tmp_path / "data"
+        db = make_db(data / "brandmonitor.sqlite3")
+        make_state(data)
+
+        s = run_backup(db_path=db, backup_dir=tmp_path / "b",
+                       offbox_dir=tmp_path / "off", day=date(2026, 9, 13))
+
+        assert s.state.name == "brandmonitor-state-20260913.tar.gz"
+        assert s.state_dirs == ["reports", "title_gate"]
+        assert s.state_offbox.read_bytes() == s.state.read_bytes()
+        with tarfile.open(s.state) as tar:
+            names = tar.getnames()
+        assert "reports/jt-express-2026-09-05_2026-09-11/issue-register.json" in names
+        assert "title_gate/jt-express/2026-09-13.jsonl" in names
+        assert not any(n.startswith("log") for n in names)
+
+    def test_archive_restores_by_extracting_into_data(self, tmp_path):
+        data = tmp_path / "data"
+        db = make_db(data / "brandmonitor.sqlite3")
+        make_state(data)
+        s = run_backup(db_path=db, backup_dir=tmp_path / "b", offbox_dir="",
+                       day=date(2026, 9, 13))
+
+        restored = tmp_path / "restored"
+        with tarfile.open(s.state) as tar:
+            tar.extractall(restored, filter="data")
+        assert (restored / "title_gate" / "jt-express" / "2026-09-13.jsonl").read_text(
+            encoding="utf-8") == '{"id": 1, "keep": true}\n'
+
+    def test_no_state_directories_means_no_archive(self, tmp_path):
+        """A fresh checkout has no reports yet; that is not a failure."""
+        db = make_db(tmp_path / "brandmonitor.sqlite3")
+        s = run_backup(db_path=db, backup_dir=tmp_path / "b", offbox_dir="",
+                       day=date(2026, 9, 13))
+        assert s.state is None and s.state_error is None
+        assert list((tmp_path / "b").glob("*.tar.gz")) == []
+
+    def test_state_rotation_is_separate_from_snapshot_rotation(self, tmp_path):
+        data = tmp_path / "data"
+        db = make_db(data / "brandmonitor.sqlite3")
+        make_state(data)
+        local = tmp_path / "b"
+        local.mkdir()
+        (local / "brandmonitor-state-20250101.tar.gz").write_bytes(b"stale")
+        (local / "brandmonitor-20250101.db.gz").write_bytes(b"stale")
+
+        s = run_backup(db_path=db, backup_dir=local, offbox_dir="",
+                       day=date(2026, 9, 13), keep_daily=1, keep_weekly=0,
+                       keep_monthly=0)
+
+        assert sorted(s.pruned_local) == ["brandmonitor-20250101.db.gz",
+                                          "brandmonitor-state-20250101.tar.gz"]
+        assert sorted(p.name for p in local.iterdir()) == [
+            "brandmonitor-20260913.db.gz", "brandmonitor-state-20260913.tar.gz"]
+
+    def test_a_state_failure_does_not_cost_the_snapshot(self, tmp_path, monkeypatch):
+        data = tmp_path / "data"
+        db = make_db(data / "brandmonitor.sqlite3")
+        make_state(data)
+
+        def locked(*args, **kwargs):
+            raise PermissionError("file in use by a report run")
+        monkeypatch.setattr(tarfile.TarFile, "add", locked)
+
+        s = run_backup(db_path=db, backup_dir=tmp_path / "b",
+                       offbox_dir=tmp_path / "off", day=date(2026, 9, 13))
+
+        assert s.snapshot.exists() and s.offbox.exists()
+        assert s.state is None and "PermissionError" in s.state_error
+        assert list((tmp_path / "b").glob("*.tar.gz*")) == []

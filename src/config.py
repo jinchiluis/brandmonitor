@@ -86,6 +86,9 @@ BACKUP_KEEP_DAILY = _BACKUP.get("keep_daily", 14)
 BACKUP_KEEP_WEEKLY = _BACKUP.get("keep_weekly", 8)
 BACKUP_KEEP_MONTHLY = _BACKUP.get("keep_monthly", 12)
 BACKUP_WARN_TOTAL_MB = _BACKUP.get("warn_total_mb", 1024)
+# Directories archived beside each snapshot, relative to the database's directory
+# (data/), not the repo root - see src/backup.py.
+BACKUP_STATE_DIRS = _BACKUP.get("state_dirs", ["reports", "title_gate"])
 
 # -- verbose --
 CRAWLER_VERBOSE = _CFG.get("verbose", {}).get("crawler", False)

@@ -227,6 +227,12 @@ The fix is small: add the report bundles and the title-gate logs to the daily
 off-box push. They are text, they compress, and the whole of `data/reports/` is
 smaller than one database snapshot.
 
+**Resolved 2026-09-13.** `run.py backup` now writes
+`brandmonitor-state-<date>.tar.gz` (both directories) beside each snapshot, with the
+same rotation and the same OneDrive copy. Measured on the laptop: 33.8 MB of
+`reports/` and `title_gate/` compress to 8.0 MB in 1.6 s, so about 110 MB for 14
+dailies.
+
 ### 2.3 Operational
 
 **Nothing watches the VPS once the VPS is the pipeline.** The health checker is
@@ -357,10 +363,17 @@ reboot. If the contention in §2.3 shows up in practice, wrap it:
 
 ### Step 7 — restore the report state
 
-If `data/reports/` was being backed up (§2.2), pull it from OneDrive alongside the
-database. If it was not, the first weekly report after the incident starts with an
-empty issue register — say so in the report rather than presenting a fresh
-baseline as continuity.
+Pull the same date's state archive (§2.2) and extract it into `data/`:
+
+```bash
+rclone copy onedrive:brandmonitor-backups/brandmonitor-state-<YYYYMMDD>.tar.gz /tmp/
+tar -xzf /tmp/brandmonitor-state-<YYYYMMDD>.tar.gz -C /var/www/brandmonitor/data
+```
+
+Use the date that matches the restored database. If no state archive exists for
+it, the first weekly report after the incident starts with an empty issue
+register — say so in the report rather than presenting a fresh baseline as
+continuity.
 
 ---
 
@@ -667,16 +680,18 @@ before the laptop stops working.
 - [x] Retire `Jin_3060`'s snapshots from the shared folder (§1.1).
 - [x] Retire `Jin_3060`'s database so it cannot drift further (§1.3) — it is now
       a development checkout. Its validation artifacts stay.
-- [ ] Confirm the same byte-size check passes unattended on the 2026-09-13 run —
-      today's was made by hand after an incident, which proves the path, not the
-      routine.
+- [x] Confirm the same byte-size check passes unattended on the 2026-09-13 run —
+      `brandmonitor-20260913.db.gz`, 12,805,152 B, written 06:09 and listed from
+      the VPS the same day.
 - [ ] Move to a host-specific cloud folder, `brandmonitor-backups-laptop/`.
 - [ ] Decide `Jin_3060`'s status (§1.3) — development checkout or second
       pipeline. If the former, remove its database so it cannot drift further.
 - [ ] Add `OPENAI_API_KEY` and `DSA_KEY` to `/var/www/brandmonitor/.env`.
 - [ ] `git pull` the VPS checkout to current `main` and build the venv, so a
       three-week-stale skeleton is not discovered during an incident.
-- [ ] Extend the off-box push to `data/reports/` and `data/title_gate/` (§2.2).
+- [x] Extend the off-box push to `data/reports/` and `data/title_gate/` (§2.2) —
+      the state archive, 2026-09-13. First off-box copy is the next 06:00 run after
+      the laptop pulls.
 - [ ] Write `run_daily.sh` and run it once on the VPS against a restored snapshot
       in a throwaway directory. This is the real test of this whole document.
 - [ ] Keep an encrypted copy of the laptop `.env` somewhere that is not the

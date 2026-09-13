@@ -349,6 +349,4 @@ count, lag from the busiest day — belongs here rather than in a one-off query.
 5. Audit subscriptions before purchasing or integrating another account (§3).
 
 My own comments (not written by claude):
-- brightdata fallback in case of blocked crawl/scrape? e-commerce failed fetch is a candidate. part of backup plan we can use in production actually
-  (I have already ISP IP with deposit)
-- apply backup plan
+

@@ -237,10 +237,17 @@ syncs, so there is no `rclone` remote and no OAuth token on this host. Retention
 paths live in `config.json`. The backup command is useful on its own during testing;
 it does not need a scheduler.
 
+Each backup also writes `brandmonitor-state-<date>.tar.gz` beside the snapshot:
+`data/reports/` and `data/title_gate/` (`backup.state_dirs`), which the database does
+not hold — the issue registers, the frozen bundles and the title-gate keeps. It
+rotates and goes off-box with the snapshot; a failure there never costs the
+snapshot. Logs, health JSON and run markers are regenerated and stay out.
+
 Restoring: stop whatever holds the database open, decompress the `.gz` over
 `data/brandmonitor.sqlite3`, and **delete the `-wal` and `-shm` sidecars** — the
 database runs in WAL mode, and stale sidecars beside a restored file get replayed on
-next open, silently undoing part of the restore.
+next open, silently undoing part of the restore. Then extract the same date's state
+archive into `data/` (`tar -xzf brandmonitor-state-<date>.tar.gz -C data`).
 
 ## Planned repository shape
 

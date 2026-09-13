@@ -542,6 +542,15 @@ def cmd_backup(args: argparse.Namespace) -> int:
         print(f"off-box  FAILED: {s.offbox_error}")
     else:
         print("off-box  not configured")
+    if s.state:
+        print(f"state    {s.state} ({s.state_bytes / 1048576:.2f} MB: "
+              f"{', '.join(s.state_dirs)})")
+        if s.state_offbox:
+            print(f"off-box  {s.state_offbox}")
+    elif s.state_error:
+        print(f"state    FAILED: {s.state_error}")
+    else:
+        print("state    nothing to archive")
     print(f"retained {s.kept} snapshots, {s.total_bytes / 1048576:.0f} MB total")
     if s.pruned_local:
         print(f"pruned   {len(s.pruned_local)}: {', '.join(s.pruned_local)}")
