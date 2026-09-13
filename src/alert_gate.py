@@ -29,6 +29,7 @@ import os
 import re
 import smtplib
 import ssl
+import urllib.request
 from dataclasses import dataclass, field, replace
 from datetime import date
 from email.message import EmailMessage
@@ -38,6 +39,7 @@ from typing import Callable, Sequence
 
 from src.config import BODY_GATE_BODY_CHARS, BODY_GATE_MODEL, BODY_GATE_REASONING, ROOT
 from src.db import DB_PATH, advance_watermark, connect, get_watermark, session, utcnow
+from src.logger import get_logger
 from src.profile import ClientProfile, Rule, compile_term
 from src.selector import normalized
 from src.title_gate import Caller, GateConfigError, openai_caller as _openai_caller
@@ -48,6 +50,11 @@ KIND = "news"
 WATERMARK_PREFIX = "analysis"
 TAXONOMY_NAME = "alert_taxonomy.json"
 MAX_ATTEMPTS = 2
+PUSH_CAP = 5
+PUSH_TITLE_BYTES = 250
+PUSH_SUMMARY_BYTES = 1500
+
+logger = get_logger(__name__)
 
 REPLY_FORMAT = {
     "type": "json_schema",
@@ -121,6 +128,7 @@ class AlertGateResult:
     pending: list[PendingAlert] = field(default_factory=list)
     emailed: int = 0
     email_message_id: str | None = None
+    pushed: int = 0
     dry_run: bool = False
 
     @property
@@ -129,6 +137,7 @@ class AlertGateResult:
 
 
 Sender = Callable[[Sequence[PendingAlert]], str]
+Notifier = Callable[[Sequence[PendingAlert]], int]
 
 
 def taxonomy_path(profile: ClientProfile) -> Path:
@@ -487,6 +496,77 @@ def smtp_sender() -> Sender:
     return send
 
 
+def clip_utf8(text: str, max_bytes: int) -> str:
+    """Cut text to at most max_bytes of UTF-8 on a character boundary, marking the cut."""
+    text = text.strip()
+    if len(text.encode("utf-8")) <= max_bytes:
+        return text
+    cut = text.encode("utf-8")[:max_bytes - len("…".encode("utf-8"))]
+    return cut.decode("utf-8", errors="ignore").rstrip() + "…"
+
+
+def build_pushes(alerts: Sequence[PendingAlert]) -> list[dict]:
+    """One push per alert with an "Open article" button, capped at PUSH_CAP.
+
+    ntfy.sh turns a message over 4,096 bytes into an attachment; Chinese is three
+    bytes a character, so the summary is clipped well below that rather than
+    trusting the prompt's 2-4 sentences.
+    """
+    pushes = [{
+        "title": clip_utf8(alert.title, PUSH_TITLE_BYTES),
+        "message": f"{clip_utf8(alert.summary_zh, PUSH_SUMMARY_BYTES)}\n\n{alert.source_slug}",
+        # A button rather than "click": tapping the notification only opens it.
+        "actions": [{"action": "view", "label": "Open article", "url": alert.url}],
+        "priority": 3,
+        "tags": ["newspaper"],
+    } for alert in alerts[:PUSH_CAP]]
+    if len(alerts) > PUSH_CAP:
+        pushes.append({
+            "title": f"+{len(alerts) - PUSH_CAP} more potential alerts",
+            "message": f"{len(alerts)} alerts in this run; the email has all of them.",
+            "priority": 4,
+            "tags": ["rotating_light"],
+        })
+    return pushes
+
+
+def ntfy_notifier() -> Notifier | None:
+    """Push each emailed alert to ntfy, or None without NTFY_TOPIC.
+
+    On public ntfy.sh the topic name is the only access control, and the server
+    keeps messages for about twelve hours. Email stays the record; a failed push
+    is logged and never marks, retries, or blocks anything.
+    """
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    topic = os.getenv("NTFY_TOPIC", "").strip()
+    if not topic:
+        return None
+    server = (os.getenv("NTFY_SERVER", "").strip() or "https://ntfy.sh").rstrip("/")
+    token = os.getenv("NTFY_TOKEN", "").strip()
+
+    def notify(alerts: Sequence[PendingAlert]) -> int:
+        sent = 0
+        for push in build_pushes(alerts):
+            body = json.dumps({"topic": topic, **push}, ensure_ascii=False).encode("utf-8")
+            request = urllib.request.Request(
+                server, data=body, method="POST",
+                headers={"Content-Type": "application/json"})
+            if token:
+                request.add_header("Authorization", f"Bearer {token}")
+            try:
+                with urllib.request.urlopen(request, timeout=15) as response:
+                    response.read()
+            except (OSError, ValueError) as exc:  # ValueError: malformed NTFY_SERVER
+                logger.warning("alert push failed: %s", exc)
+                continue
+            sent += 1
+        return sent
+
+    return notify
+
+
 def _mark_sent(db_path: Path, alerts: Sequence[PendingAlert], message_id: str) -> None:
     ids = [identifier for alert in alerts for identifier in alert.decision_ids]
     if not ids:
@@ -512,6 +592,7 @@ def _initial_since(db_path: Path, end: str, scope: str) -> str:
 
 def run_alert_gate(profile: ClientProfile, *, db_path: Path = DB_PATH,
                    caller: Caller | None = None, sender: Sender | None = None,
+                   notifier: Notifier | None = None,
                    taxonomy_file: Path | None = None, now: str | None = None,
                    dry_run: bool = False, model: str = BODY_GATE_MODEL) -> AlertGateResult:
     taxonomy = load_taxonomy(taxonomy_file or taxonomy_path(profile))
@@ -562,4 +643,9 @@ def run_alert_gate(profile: ClientProfile, *, db_path: Path = DB_PATH,
         _mark_sent(db_path, result.pending, message_id)
         result.emailed = len(result.pending)
         result.email_message_id = message_id
+        # Only the real SMTP path pushes by default, so an injected test sender
+        # never reaches the network through the environment's NTFY_TOPIC.
+        notify = notifier or (ntfy_notifier() if sender is None else None)
+        if notify is not None:
+            result.pushed = notify(result.pending)
     return result

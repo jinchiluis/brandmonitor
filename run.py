@@ -338,7 +338,8 @@ def cmd_alert_gate(args: argparse.Namespace) -> int:
     else:
         print(f"checked {len(result.decisions)}; {result.positives} potential alerts")
         if result.emailed:
-            print(f"emailed one digest containing {result.emailed} alert(s)")
+            print(f"emailed one digest containing {result.emailed} alert(s); "
+                  f"{result.pushed} push notification(s) sent")
         else:
             print("no email needed")
     print(f"Log: {log_path}")

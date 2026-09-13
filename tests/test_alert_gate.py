@@ -9,7 +9,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.alert_gate import (  # noqa: E402
-    AlertDeliveryError, build_email, eligible_news_items, parse_reply, run_alert_gate,
+    PUSH_CAP, PUSH_SUMMARY_BYTES, AlertDeliveryError, PendingAlert, build_email,
+    build_pushes, clip_utf8, eligible_news_items, parse_reply, run_alert_gate,
 )
 from src.db import migrate, session  # noqa: E402
 from src.profile import load_profile  # noqa: E402
@@ -238,3 +239,82 @@ def test_email_contains_every_alert_in_one_message():
     assert "2 potential alerts" in message["Subject"]
     assert "第一条摘要。" in plain and "https://two.de/a" in plain
 
+
+
+def test_each_emailed_alert_is_pushed_after_the_email(corpus):
+    with session(corpus) as conn:
+        add_item(conn, 1, "Temu fine", "Temu faces a regulatory fine.")
+        add_body_gate(conn, 1, 1)
+        add_item(conn, 2, "Temu strike", "A strike may affect Temu deliveries.")
+        add_body_gate(conn, 2, None)
+    pushed = []
+
+    def notifier(alerts):
+        pushed.extend(alerts)
+        return len(alerts)
+
+    result = run_alert_gate(
+        PROFILE, db_path=corpus, caller=FakeCaller(positive(), positive()),
+        sender=FakeSender(), notifier=notifier, now=NOW)
+
+    assert len(pushed) == result.pushed == 2
+    assert {alert.title for alert in pushed} == {"Temu fine", "Temu strike"}
+
+
+def test_failed_push_leaves_alerts_marked_sent(corpus):
+    with session(corpus) as conn:
+        add_item(conn, 1, "Temu fine", "Temu faces a regulatory fine.")
+        add_body_gate(conn, 1, 1)
+
+    result = run_alert_gate(
+        PROFILE, db_path=corpus, caller=FakeCaller(positive()),
+        sender=FakeSender(), notifier=lambda alerts: 0, now=NOW)
+
+    assert result.emailed == 1 and result.pushed == 0
+    with session(corpus) as conn:
+        assert conn.execute("SELECT sent_at FROM alert_decision").fetchone()["sent_at"]
+
+
+def test_no_push_without_an_email(corpus):
+    with session(corpus) as conn:
+        add_item(conn, 1, "Temu fine", "Temu faces a regulatory fine.")
+        add_body_gate(conn, 1, 1)
+    pushed = []
+
+    with pytest.raises(AlertDeliveryError):
+        run_alert_gate(
+            PROFILE, db_path=corpus, caller=FakeCaller(positive()),
+            sender=FakeSender(AlertDeliveryError("mail down")),
+            notifier=lambda alerts: pushed.extend(alerts) or 0, now=NOW)
+    assert pushed == []
+
+
+def pending(number, summary="极兔据报道面临罚款。"):
+    return PendingAlert((number,), "dvz", f"x{number}", f"https://example.de/{number}",
+                        f"Title {number}", summary)
+
+
+def test_push_carries_summary_and_opens_the_article():
+    [push] = build_pushes([pending(1)])
+
+    assert push["title"] == "Title 1"
+    assert push["message"] == "极兔据报道面临罚款。\n\ndvz"
+    assert "click" not in push
+    assert push["actions"] == [
+        {"action": "view", "label": "Open article", "url": "https://example.de/1"}]
+
+
+def test_long_chinese_summary_is_clipped_on_a_character_boundary():
+    clipped = clip_utf8("极" * 2000, PUSH_SUMMARY_BYTES)
+
+    assert len(clipped.encode("utf-8")) <= PUSH_SUMMARY_BYTES
+    assert clipped.endswith("…") and set(clipped[:-1]) == {"极"}
+    [push] = build_pushes([pending(1, "极" * 2000)])
+    assert len(json.dumps(push, ensure_ascii=False).encode("utf-8")) < 4096
+
+
+def test_pushes_are_capped_with_one_overflow_notice():
+    pushes = build_pushes([pending(n) for n in range(1, PUSH_CAP + 4)])
+
+    assert len(pushes) == PUSH_CAP + 1
+    assert pushes[-1]["title"] == "+3 more potential alerts" and "actions" not in pushes[-1]
