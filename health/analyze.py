@@ -20,7 +20,6 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
-from zoneinfo import ZoneInfo
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -35,11 +34,11 @@ DEFAULT_CANARY_CONFIG = ROOT / "health" / "canaries.json"
 DEFAULT_CANARY = ROOT / "data" / "health" / "canaries" / "latest.json"
 DEFAULT_OUTPUT = ROOT / "data" / "health"
 UTC = timezone.utc
-BERLIN = ZoneInfo("Europe/Berlin")
-RULES_VERSION = "coverage-health-v1"
+RULES_VERSION = "coverage-health-v2"
 SEVERITY_RANK = {"healthy": 0, "learning": 0, "warning": 1, "critical": 2}
-BASELINE_RUNS = 7
-BASELINE_MAX_RUNS = 28
+BASELINE_DAYS = 7
+BASELINE_MAX_DAYS = 28
+PERIOD = timedelta(hours=24)
 COMPARABLE_WINDOW = timedelta(hours=36)
 
 
@@ -93,21 +92,41 @@ def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
     ).fetchone() is not None
 
 
-def _window_is_comparable(start: str | None, end: str | None) -> bool:
-    beginning, finish = _parse_time(start), _parse_time(end)
-    return bool(beginning and finish and timedelta(0) <= finish - beginning <= COMPARABLE_WINDOW)
+def _daily_periods(rows: list[dict[str, Any]], anchor: datetime | None) -> list[dict[str, Any]]:
+    """Sum one source's runs into 24-hour periods ending at ``anchor``, oldest first.
 
-
-def _latest_per_berlin_day(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Collapse manual reruns so one busy test day cannot train a daily baseline."""
-    daily: dict[str, dict[str, Any]] = {}
+    A run belongs to the period its window ends in. Collection windows chain from
+    the per-source watermark, so the runs in one period cover its day however many
+    there were: the single 06:00 run, or that run plus the daytime light runs.
+    ``items_stored`` is summed rather than ``items_found`` because a front page
+    lists the same links on every run - Süddeutsche finds ~259 each time and
+    stores 20-57 - so a summed "found" would scale with the run count.
+    """
+    if anchor is None:
+        return []
+    buckets: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
-        started = _parse_time(row.get("started_at"))
-        if started is None:
+        end = _parse_time(row["window_end"])
+        if end is None or end > anchor:
             continue
-        day = started.astimezone(BERLIN).date().isoformat()
-        daily[day] = row  # rows arrive by run id, so the last observation wins
-    return [daily[day] for day in sorted(daily)]
+        buckets[int((anchor - end) // PERIOD)].append(row)
+
+    periods = []
+    for offset in sorted(buckets, reverse=True):
+        members = buckets[offset]
+        starts = [_parse_time(row["window_start"]) for row in members]
+        ends = [_parse_time(row["window_end"]) for row in members]
+        failed = any(row["status"] == "failed" for row in members)
+        stored = sum(row["items_stored"] or 0 for row in members)
+        span_ok = all(starts) and timedelta(0) <= max(ends) - min(starts) <= COMPARABLE_WINDOW
+        periods.append({
+            "offset": offset,
+            "status": "failed" if failed else ("ok" if stored else "zero"),
+            "stored": stored,
+            "runs": len(members),
+            "comparable": not failed and span_ok,
+        })
+    return periods
 
 
 def _incident(source: str, check: str, severity: str, message: str) -> dict[str, str]:
@@ -170,9 +189,10 @@ def _source_metrics(
             slug = _slug(entry["url"])
             history = by_key.get((kind, slug), [])
             current = by_run.get((latest_run["id"], slug)) if latest_run else None
-            daily_history = _latest_per_berlin_day(history)
-            recent = daily_history[-7:]
-            statuses = [row["status"] for row in recent]
+            periods = _daily_periods(
+                history, _parse_time(latest_run["window_end"]) if latest_run else None)
+            current_day = periods[-1] if periods and periods[-1]["offset"] == 0 else None
+            statuses = [period["status"] for period in periods[-7:]]
             zero_streak = 0
             failure_streak = 0
             for status in reversed(statuses):
@@ -186,13 +206,10 @@ def _source_metrics(
                 else:
                     break
 
-            comparable = [
-                row for row in daily_history
-                if row["status"] in {"ok", "zero"}
-                and _window_is_comparable(row["window_start"], row["window_end"])
-            ][-BASELINE_MAX_RUNS:]
-            previous = [row["items_found"] for row in comparable if not current or row["run_id"] != current["run_id"]]
-            baseline_ready = len(previous) >= BASELINE_RUNS
+            comparable = [period for period in periods if period["comparable"]]
+            previous = [period["stored"] for period in comparable
+                        if period["offset"] != 0][-BASELINE_MAX_DAYS:]
+            baseline_ready = len(previous) >= BASELINE_DAYS
             baseline = float(statistics.median(previous)) if baseline_ready else None
             if not baseline_ready:
                 learning += 1
@@ -230,16 +247,16 @@ def _source_metrics(
                     if zero_streak >= 2:
                         incidents.append(_incident(
                             slug, "zero_streak", severity,
-                            f"source returned zero for {zero_streak} consecutive runs; "
-                            f"prior comparable-run median was {baseline:g}",
+                            f"source stored no new items for {zero_streak} consecutive days; "
+                            f"prior comparable-day median was {baseline:g}",
                         ))
                     elif baseline >= 4 and len(comparable) >= 2:
                         threshold = max(1.0, baseline * 0.25)
-                        latest_two = [row["items_found"] for row in comparable[-2:]]
+                        latest_two = [period["stored"] for period in comparable[-2:]]
                         if len(latest_two) == 2 and all(value <= threshold for value in latest_two):
                             incidents.append(_incident(
                                 slug, "yield_drop", severity,
-                                f"last two comparable runs found {latest_two}; prior median was {baseline:g}",
+                                f"last two comparable days stored {latest_two}; prior median was {baseline:g}",
                             ))
 
             metrics.append({
@@ -250,11 +267,13 @@ def _source_metrics(
                 "latest_status": current["status"] if current else "missing",
                 "latest_found": current["items_found"] if current else None,
                 "latest_stored": current["items_stored"] if current else None,
+                "current_day_stored": current_day["stored"] if current_day else None,
+                "current_day_runs": current_day["runs"] if current_day else 0,
                 "recent_statuses": statuses,
                 "zero_streak": zero_streak,
                 "failure_streak": failure_streak,
-                "comparable_baseline_runs": len(previous),
-                "baseline_median_found": baseline,
+                "comparable_baseline_days": len(previous),
+                "baseline_median_stored": baseline,
                 "baseline_state": "ready" if baseline_ready else "learning",
             })
     return metrics, incidents, learning

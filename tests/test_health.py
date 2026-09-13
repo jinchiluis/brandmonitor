@@ -83,6 +83,57 @@ def test_fresh_nonzero_stage_alerts():
     assert "news=1" in status.details[1]
 
 
+def _daily_and_intraday(*, intraday_finished: datetime, intraday_worst: int):
+    daily = Probe(parse_marker(marker_payload(finished=NOW - timedelta(hours=6))))
+    intraday = Probe(parse_marker(marker_payload(
+        finished=intraday_finished, worst=intraday_worst, news=intraday_worst)))
+    return daily, intraday
+
+
+def test_intraday_failure_after_the_daily_run_alerts():
+    daily, intraday = _daily_and_intraday(
+        intraday_finished=NOW - timedelta(hours=2), intraday_worst=2)
+
+    status = evaluate(daily, checked_at=NOW, stale_after=timedelta(hours=26),
+                      intraday_probe=intraday)
+
+    assert status.kind == "intraday_failed"
+    assert status.alert
+    assert "news=2" in status.details[1]
+
+
+def test_daily_run_supersedes_an_earlier_intraday_failure():
+    daily, intraday = _daily_and_intraday(
+        intraday_finished=NOW - timedelta(hours=14), intraday_worst=2)
+
+    status = evaluate(daily, checked_at=NOW, stale_after=timedelta(hours=26),
+                      intraday_probe=intraday)
+
+    assert status.kind == "healthy"
+
+
+def test_absent_intraday_marker_is_not_an_incident():
+    daily = Probe(parse_marker(marker_payload(finished=NOW - timedelta(hours=2))))
+    missing = Probe(None, "Cannot find path last_intraday_run.json")
+
+    status = evaluate(daily, checked_at=NOW, stale_after=timedelta(hours=26),
+                      intraday_probe=missing)
+
+    assert status.kind == "healthy"
+
+
+def test_daily_failure_outranks_intraday_failure():
+    daily = Probe(parse_marker(
+        marker_payload(finished=NOW - timedelta(hours=6), worst=1, news=1)))
+    intraday = Probe(parse_marker(
+        marker_payload(finished=NOW - timedelta(hours=1), worst=2, news=2)))
+
+    status = evaluate(daily, checked_at=NOW, stale_after=timedelta(hours=26),
+                      intraday_probe=intraday)
+
+    assert status.kind == "run_failed"
+
+
 def test_unreachable_uses_fresh_cached_marker_as_grace():
     status = evaluate(
         Probe(None, "connection timed out"),

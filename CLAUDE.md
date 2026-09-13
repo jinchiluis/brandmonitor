@@ -98,16 +98,21 @@ names the step, not only the date.
 | Windows laptop | Tailscale `100.80.13.120` (`ssh -l "dell laptop"`) | `c:\apps\brandmonitor` | primary database and scheduled pipeline |
 | Contabo VPS | Tailscale `100.120.172.43`, public `144.91.109.185` (`root`) | `/var/www/brandmonitor` | heartbeat, backups, and manual disaster recovery |
 
-The owner explicitly authorizes Claude to SSH into both hosts for read-only
-inspection — `git log`/`status`, service and timer status, journal logs, config
-files, `--dry-run` and `--test-push`/`--test-email` checks. Changing either host
-(pulling, editing `/etc` files, restarting services, touching the database)
-still needs confirmation in the conversation.
+The owner explicitly authorizes Claude to SSH into both hosts — inspection
+(`git log`/`status`, service and timer status, journal logs, config files,
+`--dry-run`, `--test-push`/`--test-email`) and the operational changes a task
+calls for (editing host config such as `/etc/brandmonitor-health.env`, pulling,
+restarting services). Deleting or overwriting data, backups, or the database
+still needs confirmation.
 
 The laptop is reachable remotely without being on the same LAN or network:
-Tailscale SSH (`ssh -l "dell laptop" 100.80.13.120`) and Chrome Remote Desktop are
-both set up under the `stroymaker` Google account, so scheduled collection can keep
-running — and be checked on — while away from the machine.
+Windows OpenSSH over Tailscale (`ssh -l "dell laptop" 100.80.13.120`) and Chrome
+Remote Desktop are both set up under the `stroymaker` Google account, so scheduled
+collection can keep running — and be checked on — while away from the machine.
+Tailscale key expiry is disabled on the laptop and the VPS, sleep is off on AC and
+battery, auto logon is on, and Windows Update active hours are 05:00–23:00. The
+setup, its reasons and an audit script are in the Obsidian note
+`REMOTE-ACCESS-PLAYBOOK.md`.
 
 The VPS must not run scheduled collection or analysis. Two independently scheduled
 hosts would duplicate spend and create divergent databases.
@@ -162,6 +167,43 @@ Register-ScheduledTask -TaskName "brandmonitor-daily" -Action $a -Settings $s `
 An `Interactive` principal runs only while that user is logged on, which is why the
 remote access above is part of the operating arrangement rather than a convenience.
 Running whether-logged-on-or-not requires storing a password.
+
+**Intraday news pass (optional).** `run_intraday.bat` repeats only the news path —
+collection, title gate, body fetch, news body gate, alert gate — every two hours
+from 08:00 to 22:00, so a potential alert reaches the reviewer the same day rather
+than after the next 06:00 run. 23:00–05:00 stays free for Windows updates and
+restarts. The 06:00 daily run remains the complete record and the only one that
+collects regulatory sources, backs up and runs the health observers; collection
+windows chain from each source's watermark, so it simply continues where the last
+intraday pass stopped. The two share `data/run.lock`: a slot that finds the lock
+held exits 3 and writes no marker. Its own marker is `data/last_intraday_run.json`,
+which `health/check.py` alerts on only when it failed after the latest daily run.
+
+No run re-covers another run's window, and every stage but one resumes on its own:
+collection and the alert gate from watermarks, body fetch and body gate from their
+queues. The title gate judges only the latest news run, so a gate that exited 2 or
+crashed leaves that run unjudged for good. Transient API errors are not this case —
+those batches are kept whole. Fix the cause, then run
+`tools\repair_title_gate.bat` (no arguments lists recent news runs) with the
+affected run ids: it re-gates them under the run lock, fetches the kept bodies and
+runs the alert gate. This is deliberately manual; the failure is rare and its cause
+needs a person anyway.
+
+```powershell
+$a = New-ScheduledTaskAction -Execute "C:\apps\brandmonitor\run_intraday.bat" `
+       -WorkingDirectory "C:\apps\brandmonitor"
+$s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+       -ExecutionTimeLimit (New-TimeSpan -Minutes 90) -MultipleInstances IgnoreNew
+$t = New-ScheduledTaskTrigger -Daily -At 8am
+$t.Repetition = (New-ScheduledTaskTrigger -Once -At 8am `
+       -RepetitionInterval (New-TimeSpan -Hours 2) `
+       -RepetitionDuration (New-TimeSpan -Hours 14 -Minutes 30)).Repetition
+Register-ScheduledTask -TaskName "brandmonitor-intraday" -Action $a -Settings $s -Trigger $t
+```
+
+It deliberately omits `StartWhenAvailable`: a missed slot is covered by the next
+one, and catching one up after a night-time restart would run inside the update
+window.
 
 **06:00 means Europe/Berlin, and the host has to agree.** The laptop ran on China
 Standard Time until 2026-09-12, which would have fired the trigger at midnight CEST

@@ -352,4 +352,3 @@ My own comments (not written by claude):
 - brightdata fallback in case of blocked crawl/scrape? e-commerce failed fetch is a candidate. part of backup plan we can use in production actually
   (I have already ISP IP with deposit)
 - apply backup plan
-- a new report must be sent per email / Wechat

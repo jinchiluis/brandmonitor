@@ -37,6 +37,7 @@ from zoneinfo import ZoneInfo
 DEFAULT_SSH_HOST = "100.80.13.120"
 DEFAULT_SSH_USER = "dell laptop"
 DEFAULT_MARKER_PATH = r"C:\apps\brandmonitor\data\last_run.json"
+DEFAULT_INTRADAY_MARKER_PATH = r"C:\apps\brandmonitor\data\last_intraday_run.json"
 DEFAULT_QUALITY_PATH = r"C:\apps\brandmonitor\data\health\latest.json"
 DEFAULT_ENV_FILE = Path("/root/cost_dashboard/.env")
 DEFAULT_PUSH_ENV_FILE = Path("/etc/brandmonitor-health.env")
@@ -366,6 +367,7 @@ def evaluate(
     cached_finished_utc: str | None = None,
     quality_probe: QualityProbe | None = None,
     cached_quality_generated_utc: str | None = None,
+    intraday_probe: Probe | None = None,
 ) -> HealthStatus:
     if probe.marker is None:
         if probe.invalid_marker:
@@ -436,6 +438,9 @@ def evaluate(
             ),
             True,
         )
+    intraday = evaluate_intraday(intraday_probe, daily=marker)
+    if intraday is not None:
+        return intraday
     if quality_probe is not None:
         return evaluate_quality(
             quality_probe,
@@ -452,6 +457,45 @@ def evaluate(
             "All recorded stages exited 0.",
         ),
         False,
+    )
+
+
+def evaluate_intraday(probe: Probe | None, *, daily: Marker) -> HealthStatus | None:
+    """An alert for the optional intraday news pass, or None when it has nothing to say.
+
+    The task is optional, so an absent marker is not an incident, and it has no
+    staleness rule of its own: the daily marker's 26 hours still bound the
+    pipeline. A failure counts only while it is newer than the daily run, so a
+    disabled task falls silent after the next daily run. That ends the alert, not
+    the damage: the daily run does not re-cover the intraday windows. Collection,
+    body fetch, body gate and alert gate resume from their own queues and
+    watermarks, but a title gate that exited 2 needs tools/repair_title_gate.bat;
+    the alert, sent within one timer interval, is what tells the operator.
+    """
+    if probe is None:
+        return None
+    if probe.marker is None:
+        if probe.invalid_marker:
+            return HealthStatus(
+                "invalid_intraday_marker",
+                "Intraday run marker is malformed",
+                (probe.error or "marker did not satisfy its JSON contract",),
+                True,
+            )
+        return None
+    marker = probe.marker
+    if marker.finished_utc <= daily.finished_utc or not marker.worst_exit:
+        return None
+    failed = ", ".join(f"{name}={code}" for name, code in marker.stages.items() if code)
+    return HealthStatus(
+        "intraday_failed",
+        f"Intraday news run completed with exit {marker.worst_exit}",
+        (
+            f"Completed: {format_local(marker.finished_utc)}",
+            f"Non-zero stages: {failed}",
+            f"Laptop log: {marker.log or '(not recorded)'}",
+        ),
+        True,
     )
 
 
@@ -788,9 +832,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ssh-user", default=DEFAULT_SSH_USER)
     parser.add_argument("--marker-path", default=DEFAULT_MARKER_PATH)
     parser.add_argument("--quality-path", default=DEFAULT_QUALITY_PATH)
+    parser.add_argument("--intraday-marker-path", default=DEFAULT_INTRADAY_MARKER_PATH)
     parser.add_argument(
         "--marker-file", type=Path,
         help="read a local marker instead of SSH (for development/testing)",
+    )
+    parser.add_argument(
+        "--intraday-marker-file", type=Path,
+        help="read a local intraday marker instead of SSH (with --marker-file)",
     )
     parser.add_argument(
         "--quality-file", type=Path,
@@ -872,11 +921,20 @@ def run(args: argparse.Namespace) -> int:
     if args.marker_file:
         quality_path = args.quality_file or args.marker_file.parent / "health" / "latest.json"
         quality_probe = fetch_local_quality(quality_path)
+        intraday_probe = fetch_local_marker(
+            args.intraday_marker_file or args.marker_file.parent / "last_intraday_run.json"
+        )
     else:
         quality_probe = fetch_quality_over_ssh(
             host=args.ssh_host,
             user=args.ssh_user,
             quality_path=args.quality_path,
+            timeout_seconds=args.ssh_timeout,
+        )
+        intraday_probe = fetch_marker_over_ssh(
+            host=args.ssh_host,
+            user=args.ssh_user,
+            marker_path=args.intraday_marker_path,
             timeout_seconds=args.ssh_timeout,
         )
     cached_marker = state.get("last_marker")
@@ -894,6 +952,7 @@ def run(args: argparse.Namespace) -> int:
         cached_finished_utc=cached_finished,
         quality_probe=quality_probe,
         cached_quality_generated_utc=cached_quality_generated,
+        intraday_probe=intraday_probe,
     )
     print(f"{format_utc(checked_at)} {status.kind}: {status.title}")
     for detail in status.details:

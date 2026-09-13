@@ -33,13 +33,17 @@ def _inputs(tmp_path, *, critical=True):
     return news, regulatory, canary_config
 
 
-def _add_news_run(db, day, found, status="ok"):
+def _add_news_run(db, day, stored, status="ok"):
     start = datetime(2026, 9, 1, 4, tzinfo=UTC) + timedelta(days=day)
-    end = start + timedelta(days=1)
+    return _add_window_run(db, start, start + timedelta(days=1), stored, status=status)
+
+
+def _add_window_run(db, start, end, stored, status="ok", found=None):
     with session(db) as conn:
         run_id = start_run(conn, "news", start.isoformat(), end.isoformat())
         record_source_result(
-            conn, run_id, "news.test", status, items_found=found,
+            conn, run_id, "news.test", status,
+            items_found=stored if found is None else found, items_stored=stored,
             error="blocked" if status == "failed" else None,
         )
         if status != "failed":
@@ -114,8 +118,63 @@ def test_two_zeros_against_established_baseline_are_critical_for_canary_source(t
     assert result["status"] == "critical"
     incident = next(item for item in result["incidents"] if item["check"] == "zero_streak")
     assert incident["source"] == "news.test"
-    assert "prior comparable-run median was 20" in incident["message"]
+    assert "prior comparable-day median was 20" in incident["message"]
     assert result["incident_key"]
+
+
+def _analyze(tmp_path, db, run_id):
+    news, regulatory, canary_config = _inputs(tmp_path)
+    return analyze(
+        db_path=db,
+        news_sources=news,
+        regulatory_sources=regulatory,
+        canary_config=canary_config,
+        canary_file=_canary(tmp_path / "canary.json", run_id),
+        output_dir=tmp_path / "health",
+        cycle_date="2026-09-13",
+        generated_at=datetime(2026, 9, 13, 5, 1, tzinfo=UTC),
+    )
+
+
+def test_light_runs_sum_into_one_day_rather_than_reading_as_a_drop(tmp_path):
+    db = tmp_path / "db.sqlite3"
+    migrate(db)
+    for day in range(8):
+        _add_news_run(db, day, 24)
+    # Day 8: eight two-hour light runs, then the overnight 06:00 run closes the day.
+    cursor = datetime(2026, 9, 9, 4, tzinfo=UTC)
+    for _ in range(8):
+        _add_window_run(db, cursor, cursor + timedelta(hours=2), 2)
+        cursor += timedelta(hours=2)
+    run_id = _add_window_run(db, cursor, datetime(2026, 9, 10, 4, tzinfo=UTC), 8)
+
+    result = _analyze(tmp_path, db, run_id)
+
+    source = result["sources"][0]
+    assert source["current_day_runs"] == 9
+    assert source["current_day_stored"] == 24
+    assert source["latest_stored"] == 8
+    assert source["baseline_median_stored"] == 24
+    assert result["incidents"] == []
+
+
+def test_baseline_counts_stored_items_not_repeated_front_page_links(tmp_path):
+    db = tmp_path / "db.sqlite3"
+    migrate(db)
+    # A front page lists the same 259 links every run; only a few are new.
+    for day in range(7):
+        _add_window_run(db, datetime(2026, 9, 1, 4, tzinfo=UTC) + timedelta(days=day),
+                        datetime(2026, 9, 2, 4, tzinfo=UTC) + timedelta(days=day),
+                        40, found=259)
+    for day in (7, 8):
+        run_id = _add_window_run(
+            db, datetime(2026, 9, 1, 4, tzinfo=UTC) + timedelta(days=day),
+            datetime(2026, 9, 2, 4, tzinfo=UTC) + timedelta(days=day), 3, found=259)
+
+    result = _analyze(tmp_path, db, run_id)
+
+    incident = next(item for item in result["incidents"] if item["check"] == "yield_drop")
+    assert "stored [3, 3]; prior median was 40" in incident["message"]
 
 
 def test_missing_source_result_is_detected_without_changing_database(tmp_path):

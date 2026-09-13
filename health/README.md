@@ -27,9 +27,16 @@ automatic remediation are not part of this path.
 `health/analyze.py` reads `run`, `run_source`, per-source collection watermarks and
 the current `body_fetch` queue. It detects missing source accounting, individual
 source failures hidden by an otherwise successful command, checkpoint mismatches,
-repeated body failures, consecutive zeros, and sustained yield collapse. Volume
-rules stay in `learning` until seven comparable prior daily runs exist; initial
-backfills and recovery windows longer than 36 hours do not train the baseline.
+repeated body failures, consecutive zero days, and sustained yield collapse.
+
+Volume rules compare days, not runs. Each source's runs are summed into 24-hour
+periods counted back from the latest run's window end, so the 06:00 run and any
+intraday runs before it form one day however many there were. The sum is
+`items_stored`, not `items_found`: a front page lists the same links on every run,
+so a summed "found" would scale with the run count. Rules stay in `learning` until
+seven comparable prior days exist; a day containing a failed run, or whose runs
+span more than 36 hours (initial backfills, recovery windows), does not train the
+baseline.
 
 Both observers retain the first immutable observation for each news run and
 atomically replace a latest pointer:
@@ -63,8 +70,15 @@ The check order is:
 
 1. A marker older than 26 hours is an alert, even if its exits were zero.
 2. A fresh marker with any non-zero stage is an alert.
-3. A missing, malformed, stale or older-cycle coverage snapshot is an alert.
-4. A coverage `warning` or `critical` is an alert; `learning` and `healthy` are
+3. An intraday marker (`data/last_intraday_run.json`) with a non-zero stage is an
+   alert when it finished after the daily marker. The intraday task is optional,
+   so an absent file is not an incident, and it has no staleness rule of its own.
+   A clean 06:00 run ends the alert but does not repair the failure — it covers
+   only its own window. Collection, body fetch, body gate and alert gate resume
+   from their queues and watermarks; a title gate that exited 2 needs
+   `tools\repair_title_gate.bat <run id>` by hand once the cause is fixed.
+4. A missing, malformed, stale or older-cycle coverage snapshot is an alert.
+5. A coverage `warning` or `critical` is an alert; `learning` and `healthy` are
    non-alerting.
 
 If SSH temporarily fails, a cached fresh marker or quality snapshot provides the
