@@ -93,10 +93,16 @@ names the step, not only the date.
 
 ## Hosts and secrets
 
-| Host | Path | Role |
-|---|---|---|
-| Windows laptop | `c:\apps\brandmonitor` | primary database and scheduled pipeline |
-| Contabo VPS | `/var/www/brandmonitor` | heartbeat, backups, and manual disaster recovery |
+| Host | Address | Path | Role |
+|---|---|---|---|
+| Windows laptop | Tailscale `100.80.13.120` (`ssh -l "dell laptop"`) | `c:\apps\brandmonitor` | primary database and scheduled pipeline |
+| Contabo VPS | Tailscale `100.120.172.43`, public `144.91.109.185` (`root`) | `/var/www/brandmonitor` | heartbeat, backups, and manual disaster recovery |
+
+The owner explicitly authorizes Claude to SSH into both hosts for read-only
+inspection — `git log`/`status`, service and timer status, journal logs, config
+files, `--dry-run` and `--test-push`/`--test-email` checks. Changing either host
+(pulling, editing `/etc` files, restarting services, touching the database)
+still needs confirmation in the conversation.
 
 The laptop is reachable remotely without being on the same LAN or network:
 Tailscale SSH (`ssh -l "dell laptop" 100.80.13.120`) and Chrome Remote Desktop are
