@@ -115,6 +115,7 @@ class PendingAlert:
     url: str
     title: str
     summary_zh: str
+    client_name: str
 
 
 @dataclass
@@ -403,14 +404,14 @@ def _store_decision(conn, decision: AlertDecision, profile: ClientProfile,
          decision.summary_zh, json.dumps(payload, ensure_ascii=False)))
 
 
-def pending_alerts(db_path: Path, client_slug: str) -> list[PendingAlert]:
+def pending_alerts(db_path: Path, profile: ClientProfile) -> list[PendingAlert]:
     conn = connect(db_path)
     try:
         rows = list(conn.execute(
             "SELECT d.id,d.source_slug,d.external_id,d.summary_zh,r.url,r.title "
             "FROM alert_decision d JOIN raw_item r ON r.id=d.raw_item_id "
             "WHERE d.client_slug=? AND d.potential_alert=1 AND d.sent_at IS NULL "
-            "ORDER BY d.created_at,d.id", (client_slug,)))
+            "ORDER BY d.created_at,d.id", (profile.slug,)))
     finally:
         conn.close()
 
@@ -425,7 +426,7 @@ def pending_alerts(db_path: Path, client_slug: str) -> list[PendingAlert]:
             decision_ids=ids, source_slug=row["source_slug"],
             external_id=row["external_id"], url=row["url"] or row["external_id"],
             title=row["title"] or row["url"] or row["external_id"],
-            summary_zh=row["summary_zh"],
+            summary_zh=row["summary_zh"], client_name=profile.name,
         )
     return list(grouped.values())
 
@@ -453,10 +454,10 @@ def build_email(alerts: Sequence[PendingAlert], *, sender: str, recipient: str,
     blocks = []
     for number, alert in enumerate(alerts, 1):
         plain.append(
-            f"{number}. {alert.title}\n\n{alert.summary_zh}\n\n"
+            f"{number}. [{alert.client_name}] {alert.title}\n\n{alert.summary_zh}\n\n"
             f"Source: {alert.source_slug}\nURL: {alert.url}")
         blocks.append(
-            f"<h2>{number}. {html.escape(alert.title)}</h2>"
+            f"<h2>{number}. [{html.escape(alert.client_name)}] {html.escape(alert.title)}</h2>"
             f"<p>{html.escape(alert.summary_zh)}</p>"
             f"<p><strong>Source:</strong> {html.escape(alert.source_slug)}<br>"
             f"<strong>URL:</strong> <a href=\"{html.escape(alert.url, quote=True)}\">"
@@ -510,16 +511,23 @@ def build_pushes(alerts: Sequence[PendingAlert]) -> list[dict]:
 
     ntfy.sh turns a message over 4,096 bytes into an attachment; Chinese is three
     bytes a character, so the summary is clipped well below that rather than
-    trusting the prompt's 2-4 sentences.
+    trusting the prompt's 2-4 sentences. The title is prefixed with the client
+    name so a reviewer watching one ntfy topic for several clients can tell at a
+    glance which one an alert is for; the article title is clipped to whatever
+    budget remains after that prefix so the total still fits PUSH_TITLE_BYTES.
     """
-    pushes = [{
-        "title": clip_utf8(alert.title, PUSH_TITLE_BYTES),
-        "message": f"{clip_utf8(alert.summary_zh, PUSH_SUMMARY_BYTES)}\n\n{alert.source_slug}",
-        # A button rather than "click": tapping the notification only opens it.
-        "actions": [{"action": "view", "label": "Open article", "url": alert.url}],
-        "priority": 3,
-        "tags": ["newspaper"],
-    } for alert in alerts[:PUSH_CAP]]
+    pushes = []
+    for alert in alerts[:PUSH_CAP]:
+        prefix = f"[{alert.client_name}] "
+        title_budget = max(PUSH_TITLE_BYTES - len(prefix.encode("utf-8")), 0)
+        pushes.append({
+            "title": prefix + clip_utf8(alert.title, title_budget),
+            "message": f"{clip_utf8(alert.summary_zh, PUSH_SUMMARY_BYTES)}\n\n{alert.source_slug}",
+            # A button rather than "click": tapping the notification only opens it.
+            "actions": [{"action": "view", "label": "Open article", "url": alert.url}],
+            "priority": 3,
+            "tags": ["newspaper"],
+        })
     if len(alerts) > PUSH_CAP:
         pushes.append({
             "title": f"+{len(alerts) - PUSH_CAP} more potential alerts",
@@ -636,7 +644,7 @@ def run_alert_gate(profile: ClientProfile, *, db_path: Path = DB_PATH,
     with session(db_path) as conn:
         advance_watermark(conn, scope, end)
 
-    result.pending = pending_alerts(db_path, profile.slug)
+    result.pending = pending_alerts(db_path, profile)
     if result.pending:
         deliver = sender or smtp_sender()
         message_id = deliver(result.pending)

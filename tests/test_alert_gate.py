@@ -228,8 +228,8 @@ def test_email_contains_every_alert_in_one_message():
     from src.alert_gate import PendingAlert
 
     alerts = [
-        PendingAlert((1,), "one.de", "one", "https://one.de/a", "First", "第一条摘要。"),
-        PendingAlert((2,), "two.de", "two", "https://two.de/a", "Second", "第二条摘要。"),
+        PendingAlert((1,), "one.de", "one", "https://one.de/a", "First", "第一条摘要。", "J&T Express Germany"),
+        PendingAlert((2,), "two.de", "two", "https://two.de/a", "Second", "第二条摘要。", "J&T Express Germany"),
     ]
     message = build_email(
         alerts, sender="sender@example.com", recipient="reviewer@example.com")
@@ -238,6 +238,7 @@ def test_email_contains_every_alert_in_one_message():
     assert message["To"] == "reviewer@example.com"
     assert "2 potential alerts" in message["Subject"]
     assert "第一条摘要。" in plain and "https://two.de/a" in plain
+    assert "[J&T Express Germany] First" in plain
 
 
 
@@ -291,13 +292,13 @@ def test_no_push_without_an_email(corpus):
 
 def pending(number, summary="极兔据报道面临罚款。"):
     return PendingAlert((number,), "dvz", f"x{number}", f"https://example.de/{number}",
-                        f"Title {number}", summary)
+                        f"Title {number}", summary, "J&T Express Germany")
 
 
 def test_push_carries_summary_and_opens_the_article():
     [push] = build_pushes([pending(1)])
 
-    assert push["title"] == "Title 1"
+    assert push["title"] == "[J&T Express Germany] Title 1"
     assert push["message"] == "极兔据报道面临罚款。\n\ndvz"
     assert "click" not in push
     assert push["actions"] == [
