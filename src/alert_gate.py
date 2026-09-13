@@ -31,11 +31,12 @@ import smtplib
 import ssl
 import urllib.request
 from dataclasses import dataclass, field, replace
-from datetime import date
+from datetime import date, datetime
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
 from pathlib import Path
 from typing import Callable, Sequence
+from zoneinfo import ZoneInfo
 
 from src.config import BODY_GATE_BODY_CHARS, BODY_GATE_MODEL, BODY_GATE_REASONING, ROOT
 from src.db import DB_PATH, advance_watermark, connect, get_watermark, session, utcnow
@@ -53,6 +54,10 @@ MAX_ATTEMPTS = 2
 PUSH_CAP = 5
 PUSH_TITLE_BYTES = 250
 PUSH_SUMMARY_BYTES = 1500
+# An alert is for something happening now; older material belongs in the weekly
+# report. A new source's first crawl or a re-keyed URL brings in whole archives.
+STALE_DAYS = 14
+BERLIN = ZoneInfo("Europe/Berlin")
 
 logger = get_logger(__name__)
 
@@ -96,6 +101,8 @@ class AlertItem:
     eligible_at: str
     selector_reasons: tuple[str, ...] = ()
     triggers: tuple[str, ...] = ()
+    published_at: str | None = None
+    published_at_source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -195,6 +202,12 @@ or when the matched alert word is merely ambiguous, hypothetical, generic advice
 a survey called an investigation, historical background, or an event outside the
 client's monitored business.
 
+The message gives TODAY and the article's PUBLISHED date, which is often unknown.
+When it is unknown, use a date the article states for itself, such as a press
+release dateline. Answer false when the article is clearly more than
+{STALE_DAYS} days older than TODAY: an old article is not a current alert, even when
+a crawler has only just found it. Without any date to go on, judge on content.
+
 When true, write a concise Chinese summary of what is happening in 2-4 sentences.
 State claims as reporting (for example, 'the source reports') unless the source is
 an official authority. Do not invent facts, urgency, recommendations, or a risk
@@ -229,18 +242,38 @@ def parse_reply(text: str) -> tuple[bool, str] | None:
     return potential, summary
 
 
-def render_item(item: AlertItem, body_chars: int = BODY_GATE_BODY_CHARS) -> str:
-    return (f"SOURCE: {item.source_slug}\nTITLE: {item.title}\nURL: {item.url}\n"
+def published_label(item: AlertItem) -> str:
+    """The stored publication date for the model, or "unknown".
+
+    ``lastmod`` is a change signal, not a publication date (CLAUDE.md), and a
+    restamped archive would make an old article look current, so it reads as
+    unknown here too.
+    """
+    if not item.published_at or item.published_at_source in (None, "lastmod"):
+        return "unknown"
+    return f"{item.published_at[:10]} ({item.published_at_source})"
+
+
+def berlin_day(timestamp: str) -> str:
+    return datetime.fromisoformat(timestamp).astimezone(BERLIN).date().isoformat()
+
+
+def render_item(item: AlertItem, today: str,
+                body_chars: int = BODY_GATE_BODY_CHARS) -> str:
+    # The date lives here rather than in the system prompt, whose hash is the
+    # prompt version: a daily-changing prompt would version every day's decisions.
+    return (f"TODAY: {today}\nPUBLISHED: {published_label(item)}\n"
+            f"SOURCE: {item.source_slug}\nTITLE: {item.title}\nURL: {item.url}\n"
             f"MATCHED: {', '.join(item.triggers)}\n\n{item.body[:body_chars]}")
 
 
-def _decide(system: str, item: AlertItem, caller: Caller,
+def _decide(system: str, item: AlertItem, caller: Caller, today: str,
             body_chars: int = BODY_GATE_BODY_CHARS) -> AlertDecision:
     error = ""
     tokens_in = tokens_out = 0
     for _attempt in range(MAX_ATTEMPTS):
         try:
-            reply, usage = caller(system, render_item(item, body_chars))
+            reply, usage = caller(system, render_item(item, today, body_chars))
             error = ""
         except GateConfigError:
             raise
@@ -317,6 +350,8 @@ def eligible_news_items(db_path: Path, profile: ClientProfile, since: str,
                 title=(raw["title"] or payload.get("title") or raw["url"] or key[1]),
                 body=body, route="body_gate", eligible_at=gate["created_at"],
                 selector_reasons=tuple(gate_payload.get("selector_reasons") or ()),
+                published_at=raw["published_at"],
+                published_at_source=payload.get("published_at_source"),
             )
 
         for fetch in conn.execute("SELECT * FROM body_fetch WHERE status='ok'"):
@@ -338,6 +373,8 @@ def eligible_news_items(db_path: Path, profile: ClientProfile, since: str,
                 title=(raw["title"] or payload.get("title") or raw["url"] or key[1]),
                 body=body, route="title_gate_body", eligible_at=raw["fetched_at"],
                 selector_reasons=tuple(route.get("reasons") or ()),
+                published_at=raw["published_at"],
+                published_at_source=payload.get("published_at_source"),
             )
         return sorted(items.values(), key=lambda item: (item.eligible_at, item.raw_item_id))
     finally:
@@ -648,8 +685,9 @@ def run_alert_gate(profile: ClientProfile, *, db_path: Path = DB_PATH,
         caller = openai_caller(model=model)
     if offered:
         assert caller is not None
+    today = berlin_day(end)
     for item in offered:
-        decision = _decide(system, item, caller)
+        decision = _decide(system, item, caller, today)
         with session(db_path) as conn:
             _store_decision(conn, decision, profile, version, model)
         result.decisions.append(decision)

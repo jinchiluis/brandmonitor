@@ -124,6 +124,19 @@ disaster recovery and checking on the laptop, not for running anything scheduled
 the "VPS must not run scheduled collection" rule above still applies regardless of
 reachability.
 
+A development checkout has no database, logs or run markers. Inspect production with
+`tools/laptop.py` rather than hand-built SSH lines: the laptop's SSH shell is German
+Windows PowerShell, so `python -c "..."` and cmd-style `set X=... &` fail to parse and
+relative `data/` paths resolve against the SSH user's home. The tool pipes everything
+over stdin, and runs locally when it finds the database beside it.
+
+```text
+python tools/laptop.py status                  # deployed commit, tasks, run markers, lock
+python tools/laptop.py sql "SELECT ..."        # read-only; --json for untruncated rows
+python tools/laptop.py py path/to/script.py    # runs in the laptop repo with its venv
+python tools/laptop.py ps "Get-ScheduledTaskInfo -TaskName brandmonitor-daily"
+```
+
 The live `.env` belongs on the laptop and is never committed. The VPS needs only the
 token required for its scheduled heartbeat/backup role. Activating disaster recovery
 and copying any additional credentials are manual operations.

@@ -149,6 +149,30 @@ def test_all_positives_are_sent_in_one_email_and_not_repeated(corpus):
     assert again_caller.calls == [] and again_sender.calls == []
 
 
+def test_model_sees_today_and_publication_date_but_never_lastmod(corpus):
+    """Two April BPEX releases re-keyed in September were alerted as current:
+    the model had no date to compare their datelines with."""
+    with session(corpus) as conn:
+        add_item(conn, 1, "Temu fine", "Temu faces a regulatory fine.")
+        add_body_gate(conn, 1, 1)
+        add_item(conn, 2, "Temu strike", "A strike may affect Temu deliveries.")
+        add_body_gate(conn, 2, 1)
+        conn.execute("UPDATE raw_item SET published_at='2026-09-11T08:00:00+00:00', "
+                     "payload=json_set(payload,'$.published_at_source','page') WHERE id=1")
+        conn.execute("UPDATE raw_item SET published_at='2026-09-11T08:00:00+00:00', "
+                     "payload=json_set(payload,'$.published_at_source','lastmod') WHERE id=2")
+    caller = FakeCaller(negative(), negative())
+
+    run_alert_gate(PROFILE, db_path=corpus, caller=caller, sender=FakeSender(),
+                   now="2026-09-12T22:30:00+00:00")
+
+    system, first = caller.calls[0]
+    assert "14 days older than TODAY" in system
+    # 22:30 UTC is already the next day in Berlin.
+    assert first.startswith("TODAY: 2026-09-13\nPUBLISHED: 2026-09-11 (page)\n")
+    assert "PUBLISHED: unknown\n" in caller.calls[1][1]
+
+
 def test_negative_is_recorded_without_email(corpus):
     with session(corpus) as conn:
         add_item(conn, 1, "Temu fine explainer",

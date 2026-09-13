@@ -14,8 +14,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.collect import (  # noqa: E402
-    collect_source, is_furniture, is_malformed, slug_for, store_hints,
-    url_is_excluded,
+    collect_source, is_furniture, is_malformed, on_configured_host, slug_for,
+    store_hints, url_is_excluded,
 )
 from src.db import migrate, session, start_run  # noqa: E402
 from vendor.newscrawler.crawler import (  # noqa: E402
@@ -194,6 +194,27 @@ class TestHintDeduplication:
         now = datetime.now(tz=BERLIN_TZ)
         hints, _ = collect_source(self._entry(), now - timedelta(days=30), now, 100)
         assert {h.url for h in hints} == {"https://x.de/a-one", "https://x.de/a-two"}
+
+    def test_www_twin_is_stored_under_the_configured_host(self, monkeypatch):
+        """A timed-out origin probe falls back to www; the identity must not move."""
+        monkeypatch.setattr("src.collect.pick_accessible_origin",
+                            lambda s, u: "https://www.x.de")
+        monkeypatch.setattr(
+            "src.collect.collect_from_sitemaps",
+            lambda *a, **k: [hint("https://www.x.de/presse/a-one", title=None),
+                             hint("https://sub.x.de/a-two")])
+        monkeypatch.setattr(
+            "src.collect.collect_from_feeds",
+            lambda *a, **k: [hint("https://x.de/presse/a-one", title="Real Title",
+                                  source="rss")])
+        now = datetime.now(tz=BERLIN_TZ)
+        hints, _ = collect_source(self._entry(), now - timedelta(days=30), now, 100)
+        # The two copies collapse onto the configured host; another subdomain is
+        # a different site and keeps its own host.
+        assert {h.url for h in hints} == {"https://x.de/presse/a-one", "https://sub.x.de/a-two"}
+
+        entry = {**self._entry(), "url": "https://www.x.de/"}
+        assert on_configured_host(hint("https://x.de/a?b=1"), entry).url == "https://www.x.de/a?b=1"
 
     def test_excluded_dirs_apply_to_every_discovery_method(self, monkeypatch):
         entry = self._entry()

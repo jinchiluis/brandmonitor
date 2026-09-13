@@ -349,4 +349,5 @@ count, lag from the busiest day — belongs here rather than in a one-off query.
 5. Audit subscriptions before purchasing or integrating another account (§3).
 
 My own comments (not written by claude):
-
+- desaster plan is in place: needs few changes on vps to run
+  (build env, schedule runs, copy data from onedrive)

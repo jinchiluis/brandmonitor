@@ -12,6 +12,7 @@ What it guarantees, because mvp_plan requires it:
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import sqlite3
@@ -199,6 +200,25 @@ def collector_entry(name: str, sources_path: Optional[Path] = None) -> Dict[str,
     raise ValueError(f'{path} has no entry with "collector": "{name}"')
 
 
+def on_configured_host(hint: ArticleHint, entry: Dict[str, Any]) -> ArticleHint:
+    """Put a hint on the source's configured host when it differs only by ``www.``.
+
+    ``pick_accessible_origin`` tries the configured host first but falls back to
+    its www twin when the probe times out, and frontpage links resolve against
+    whichever origin won. On 2026-09-13 one slow probe moved 19 BPEX releases from
+    ``bpex-ev.de`` to ``www.bpex-ev.de``; the external id is the URL, so they were
+    stored, body-gated and alerted as new items although they were from April.
+    Measured that day, every web source stored only its configured host, so this
+    rewrites no identity that already exists.
+    """
+    configured = urlparse(entry["url"]).netloc.lower()
+    parts = urlparse(hint.url)
+    host = parts.netloc.lower()
+    if host == configured or host.removeprefix("www.") != configured.removeprefix("www."):
+        return hint
+    return dataclasses.replace(hint, url=parts._replace(netloc=configured).geturl())
+
+
 def _hash(hint: ArticleHint) -> str:
     basis = f"{normalize_url(hint.url)}|{hint.title or ''}|{hint.published_at or ''}"
     return hashlib.sha256(basis.encode("utf-8")).hexdigest()
@@ -270,7 +290,7 @@ def collect_source(entry: Dict[str, Any], start: datetime,
         except Exception as exc:
             errors.append(f"frontpage: {type(exc).__name__}: {exc}")
 
-    unique = _dedupe_hints(hints)
+    unique = _dedupe_hints([on_configured_host(hint, entry) for hint in hints])
     kept = [hint for hint in unique
             if not url_is_excluded(hint.url, entry, hint.title)]
     if len(kept) < len(unique):
