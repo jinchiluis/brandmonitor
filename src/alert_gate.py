@@ -439,6 +439,16 @@ def _required_env(name: str, *fallbacks: str) -> str:
     raise AlertConfigError(f"{name} is not set; it belongs in .env on the laptop")
 
 
+def _defeat_autolink(text: str) -> str:
+    """Break a bare domain like "example.de" so a client's automatic link
+    detector (Apple Mail, Outlook, Gmail, ntfy...) doesn't turn the source
+    slug into a second, misleading link — only the explicit URL should
+    navigate. A zero-width space around every "." defeats the "word.word"
+    pattern those detectors match on without changing how the text looks."""
+    zwsp = "​"
+    return text.replace(".", f"{zwsp}.{zwsp}")
+
+
 def build_email(alerts: Sequence[PendingAlert], *, sender: str, recipient: str,
                 today: date | None = None) -> EmailMessage:
     day = (today or date.today()).isoformat()
@@ -455,11 +465,11 @@ def build_email(alerts: Sequence[PendingAlert], *, sender: str, recipient: str,
     for number, alert in enumerate(alerts, 1):
         plain.append(
             f"{number}. [{alert.client_name}] {alert.title}\n\n{alert.summary_zh}\n\n"
-            f"Source: {alert.source_slug}\nURL: {alert.url}")
+            f"Source: {_defeat_autolink(alert.source_slug)}\nURL: {alert.url}")
         blocks.append(
             f"<h2>{number}. [{html.escape(alert.client_name)}] {html.escape(alert.title)}</h2>"
             f"<p>{html.escape(alert.summary_zh)}</p>"
-            f"<p><strong>Source:</strong> {html.escape(alert.source_slug)}<br>"
+            f"<p><strong>Source:</strong> {_defeat_autolink(html.escape(alert.source_slug))}<br>"
             f"<strong>URL:</strong> <a href=\"{html.escape(alert.url, quote=True)}\">"
             f"{html.escape(alert.url)}</a></p>")
     message.set_content("\n\n".join(plain) + "\n")
@@ -507,7 +517,11 @@ def clip_utf8(text: str, max_bytes: int) -> str:
 
 
 def build_pushes(alerts: Sequence[PendingAlert]) -> list[dict]:
-    """One push per alert with an "Open article" button, capped at PUSH_CAP.
+    """One push per alert, capped at PUSH_CAP. The URL is a bare line in the
+    message body rather than an action button — ntfy auto-linkifies a plain
+    URL into a tappable blue link, which reads better than a button. The
+    source slug next to it goes through _defeat_autolink so ntfy's own
+    detector doesn't also linkify it — only the URL should navigate.
 
     ntfy.sh turns a message over 4,096 bytes into an attachment; Chinese is three
     bytes a character, so the summary is clipped well below that rather than
@@ -522,9 +536,10 @@ def build_pushes(alerts: Sequence[PendingAlert]) -> list[dict]:
         title_budget = max(PUSH_TITLE_BYTES - len(prefix.encode("utf-8")), 0)
         pushes.append({
             "title": prefix + clip_utf8(alert.title, title_budget),
-            "message": f"{clip_utf8(alert.summary_zh, PUSH_SUMMARY_BYTES)}\n\n{alert.source_slug}",
-            # A button rather than "click": tapping the notification only opens it.
-            "actions": [{"action": "view", "label": "Open article", "url": alert.url}],
+            "message": (
+                f"{clip_utf8(alert.summary_zh, PUSH_SUMMARY_BYTES)}\n\n"
+                f"{_defeat_autolink(alert.source_slug)}\n{alert.url}"
+            ),
             "priority": 3,
             "tags": ["newspaper"],
         })

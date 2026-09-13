@@ -241,6 +241,28 @@ def test_email_contains_every_alert_in_one_message():
     assert "[J&T Express Germany] First" in plain
 
 
+def test_source_does_not_look_like_a_bare_domain_to_mail_clients():
+    from src.alert_gate import PendingAlert
+
+    alerts = [PendingAlert(
+        (1,), "example.de", "one", "https://example.de/a", "First",
+        "摘要。", "J&T Express Germany")]
+    message = build_email(
+        alerts, sender="sender@example.com", recipient="reviewer@example.com")
+    plain = message.get_body(preferencelist=("plain",)).get_content()
+    html_body = message.get_body(preferencelist=("html",)).get_content()
+
+    # The source is still readable as "example.de" but must not contain an
+    # unbroken "word.word" substring, which is what mail clients' automatic
+    # data detectors (Apple Mail, Outlook, Gmail...) match on to add their own
+    # link — only the explicit URL link (still a bare "example.de" elsewhere,
+    # inside the URL) should navigate.
+    assert "Source: example.de" not in plain and "Source: example​.​de" in plain
+    assert "Source:</strong> example.de<" not in html_body
+    assert "Source:</strong> example​.​de<" in html_body
+    assert "https://example.de/a" in plain and "https://example.de/a" in html_body
+
+
 
 def test_each_emailed_alert_is_pushed_after_the_email(corpus):
     with session(corpus) as conn:
@@ -295,14 +317,26 @@ def pending(number, summary="极兔据报道面临罚款。"):
                         f"Title {number}", summary, "J&T Express Germany")
 
 
-def test_push_carries_summary_and_opens_the_article():
+def test_push_carries_summary_and_a_linkified_url():
     [push] = build_pushes([pending(1)])
 
     assert push["title"] == "[J&T Express Germany] Title 1"
-    assert push["message"] == "极兔据报道面临罚款。\n\ndvz"
-    assert "click" not in push
-    assert push["actions"] == [
-        {"action": "view", "label": "Open article", "url": "https://example.de/1"}]
+    assert push["message"] == "极兔据报道面临罚款。\n\ndvz\nhttps://example.de/1"
+    assert "actions" not in push
+
+
+def test_push_source_does_not_look_like_a_bare_domain_to_ntfy():
+    alert = PendingAlert(
+        (1,), "example.de", "one", "https://example.de/a", "Title 1",
+        "摘要。", "J&T Express Germany")
+    [push] = build_pushes([alert])
+
+    # The source line itself must not be an unbroken "word.word" substring
+    # (what ntfy's own auto-linker matches on); the URL line still is one,
+    # and should be — that's the one link meant to navigate.
+    assert "\nexample.de\n" not in push["message"]
+    assert "\nexample​.​de\n" in push["message"]
+    assert "https://example.de/a" in push["message"]
 
 
 def test_long_chinese_summary_is_clipped_on_a_character_boundary():

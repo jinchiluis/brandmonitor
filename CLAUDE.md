@@ -143,8 +143,10 @@ unattended; the weekly report stack is still run by hand. The batch now ends its
 analysis work with the news-only alert gate, which sends at most one combined email
 to the internal reviewer directly from the laptop. It needs the SMTP values in the
 laptop's `.env`; the VPS does not relay these emails. With `NTFY_TOPIC` also set,
-a sent digest is followed by one ntfy push per alert (title, clipped Chinese summary,
-an "Open article" button; at most five, then one overflow notice). The email stays the
+a sent digest is followed by one ntfy push per alert (title prefixed with the client
+name, clipped Chinese summary, source slug, and the article URL as a bare line so
+ntfy auto-linkifies it — no action button; at most five, then one overflow notice).
+Each email entry is likewise prefixed with the client name. The email stays the
 record: a failed push is logged and never affects the email's sent state.
 
 It is registered under the logged-on user rather than SYSTEM — SYSTEM sees neither
