@@ -172,7 +172,8 @@ The VPS half is live too: `health/check.py` runs every 15 minutes under
 `brandmonitor-health.timer`, reads `data/last_run.json` and
 `data/health/latest.json` from the laptop over Tailscale SSH, and emails when the
 marker is older than 26 hours, any stage exited non-zero, or the coverage observer
-reports a warning/critical condition. It never opens the database — see
+reports a warning/critical condition. It pushes to its own developer topic,
+`NTFY_HEALTH_TOPIC`, never the admins' alert `NTFY_TOPIC`. It never opens the database — see
 [health/README.md](health/README.md).
 
 `run_daily.bat` makes `backup` the last stage that touches the corpus, so the

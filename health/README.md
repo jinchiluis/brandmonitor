@@ -87,16 +87,21 @@ Every alert and recovery email is also sent as an ntfy push when
 the checker is email-only, exactly as before.
 
 ```bash
-NTFY_TOPIC=brandmonitor-<long random string>
+NTFY_HEALTH_TOPIC=brandmonitor-health-<long random string>
 # NTFY_SERVER=https://ntfy.sh       default; set when self-hosting
 # NTFY_TOKEN=tk_...                 only for a server with access control
 ```
 
+Health pushes have their own topic because they have their own audience:
+developers want pipeline failures, admins want the laptop's news alerts, which
+push to `NTFY_TOPIC` in the laptop `.env`. The checker reads only
+`NTFY_HEALTH_TOPIC` and never falls back to `NTFY_TOPIC`, so a leftover value
+cannot route pipeline status to the admin topic.
+
 On the public `ntfy.sh` the topic name is the only credential: anyone who knows it
 can read and post. That is acceptable for these messages, which carry pipeline
 status and source names but no customer material. Generate the topic with
-`openssl rand -hex 16` and subscribe to it in the phone app. Customer-bearing
-alerts need a self-hosted server with tokens before they are pushed.
+`openssl rand -hex 16` and subscribe to it in the phone app.
 
 Priority separates pipeline failures (urgent: stale, failed, unreachable, malformed)
 from coverage `critical` (high) and `warning` (default); recoveries are low.

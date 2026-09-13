@@ -699,9 +699,14 @@ def push_settings(path: Path) -> PushSettings | None:
 
     The topic name is the credential on a public server, so it lives in a
     root-only file outside the repository rather than in the unit file.
+
+    Health pushes go to developers, news alerts (NTFY_TOPIC) to admins. There is
+    deliberately no fallback to NTFY_TOPIC: one would route pipeline status to
+    the admin topic from any env file that still carries it.
     """
     values = read_env_file(path) if path.exists() else {}
-    topic = (os.environ.get("NTFY_TOPIC") or values.get("NTFY_TOPIC", "")).strip()
+    topic = (os.environ.get("NTFY_HEALTH_TOPIC")
+             or values.get("NTFY_HEALTH_TOPIC", "")).strip()
     if not topic:
         return None
     server = os.environ.get("NTFY_SERVER") or values.get("NTFY_SERVER") or DEFAULT_NTFY_SERVER
@@ -797,7 +802,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--state-file", type=Path, default=DEFAULT_STATE_FILE)
     parser.add_argument(
         "--push-env-file", type=Path, default=DEFAULT_PUSH_ENV_FILE,
-        help="file with NTFY_TOPIC (and optional NTFY_SERVER, NTFY_TOKEN); "
+        help="file with NTFY_HEALTH_TOPIC (and optional NTFY_SERVER, NTFY_TOKEN); "
              "push is off when it is absent",
     )
     parser.add_argument("--sender")
@@ -841,7 +846,7 @@ def run(args: argparse.Namespace) -> int:
     if args.test_push:
         push = push_settings(args.push_env_file)
         if push is None:
-            raise HealthCheckError(f"NTFY_TOPIC is not set in {args.push_env_file}")
+            raise HealthCheckError(f"NTFY_HEALTH_TOPIC is not set in {args.push_env_file}")
         ok = send_push(
             push,
             title="[brandmonitor] health push test",

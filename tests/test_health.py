@@ -198,7 +198,7 @@ def test_warning_quality_requires_an_incident():
 def push_args(tmp_path, *, topic: str | None = "bm-test-topic"):
     push_env = tmp_path / "push.env"
     if topic:
-        push_env.write_text(f"NTFY_TOPIC={topic}\n", encoding="utf-8")
+        push_env.write_text(f"NTFY_HEALTH_TOPIC={topic}\n", encoding="utf-8")
     smtp_env = tmp_path / "smtp.env"
     smtp_env.write_text("SMTP_PASSWORD=secret\n", encoding="utf-8")
     return check.build_parser().parse_args(
@@ -206,17 +206,26 @@ def push_args(tmp_path, *, topic: str | None = "bm-test-topic"):
 
 
 def test_push_is_off_without_a_topic(tmp_path, monkeypatch):
-    monkeypatch.delenv("NTFY_TOPIC", raising=False)
+    monkeypatch.delenv("NTFY_HEALTH_TOPIC", raising=False)
     assert check.push_settings(tmp_path / "missing.env") is None
     settings_file = tmp_path / "push.env"
-    settings_file.write_text("NTFY_TOPIC=abc\nNTFY_SERVER=https://ntfy.example/\n",
+    settings_file.write_text("NTFY_HEALTH_TOPIC=abc\nNTFY_SERVER=https://ntfy.example/\n",
                              encoding="utf-8")
     assert check.push_settings(settings_file) == check.PushSettings(
         "https://ntfy.example", "abc", None)
 
 
+def test_health_push_never_uses_the_admin_alert_topic(tmp_path, monkeypatch):
+    # NTFY_TOPIC belongs to the laptop's news alerts; health must not borrow it.
+    monkeypatch.delenv("NTFY_HEALTH_TOPIC", raising=False)
+    monkeypatch.setenv("NTFY_TOPIC", "admin-alerts")
+    settings_file = tmp_path / "push.env"
+    settings_file.write_text("NTFY_TOPIC=admin-alerts\n", encoding="utf-8")
+    assert check.push_settings(settings_file) is None
+
+
 def test_one_delivered_channel_latches_the_incident(tmp_path, monkeypatch):
-    monkeypatch.delenv("NTFY_TOPIC", raising=False)
+    monkeypatch.delenv("NTFY_HEALTH_TOPIC", raising=False)
     pushes = []
     monkeypatch.setattr(check, "send_email", lambda **_: False)
     monkeypatch.setattr(check, "send_push",
@@ -230,7 +239,7 @@ def test_one_delivered_channel_latches_the_incident(tmp_path, monkeypatch):
 
 
 def test_email_only_behaviour_is_unchanged_without_push(tmp_path, monkeypatch):
-    monkeypatch.delenv("NTFY_TOPIC", raising=False)
+    monkeypatch.delenv("NTFY_HEALTH_TOPIC", raising=False)
     monkeypatch.setattr(check, "send_email", lambda **_: True)
     monkeypatch.setattr(check, "send_push",
                         lambda *a, **k: pytest.fail("push must not be attempted"))
