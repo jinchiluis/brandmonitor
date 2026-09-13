@@ -23,6 +23,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
@@ -37,6 +39,8 @@ DEFAULT_SSH_USER = "dell laptop"
 DEFAULT_MARKER_PATH = r"C:\apps\brandmonitor\data\last_run.json"
 DEFAULT_QUALITY_PATH = r"C:\apps\brandmonitor\data\health\latest.json"
 DEFAULT_ENV_FILE = Path("/root/cost_dashboard/.env")
+DEFAULT_PUSH_ENV_FILE = Path("/etc/brandmonitor-health.env")
+DEFAULT_NTFY_SERVER = "https://ntfy.sh"
 DEFAULT_STATE_FILE = Path("/var/lib/brandmonitor-health/state.json")
 DEFAULT_SENDER = "jinchilu@googlemail.com"
 DEFAULT_RECIPIENT = "jinchilu@hotmail.com"
@@ -630,7 +634,7 @@ def read_env_file(path: Path) -> dict[str, str]:
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
-        raise HealthCheckError(f"cannot read SMTP env file {path}: {exc}") from exc
+        raise HealthCheckError(f"cannot read env file {path}: {exc}") from exc
     values: dict[str, str] = {}
     for line in lines:
         stripped = line.strip()
@@ -683,6 +687,96 @@ def send_email(
     return True
 
 
+@dataclass(frozen=True)
+class PushSettings:
+    server: str
+    topic: str
+    token: str | None = None
+
+
+def push_settings(path: Path) -> PushSettings | None:
+    """ntfy settings, or None when push is not configured on this host.
+
+    The topic name is the credential on a public server, so it lives in a
+    root-only file outside the repository rather than in the unit file.
+    """
+    values = read_env_file(path) if path.exists() else {}
+    topic = (os.environ.get("NTFY_TOPIC") or values.get("NTFY_TOPIC", "")).strip()
+    if not topic:
+        return None
+    server = os.environ.get("NTFY_SERVER") or values.get("NTFY_SERVER") or DEFAULT_NTFY_SERVER
+    token = os.environ.get("NTFY_TOKEN") or values.get("NTFY_TOKEN") or None
+    return PushSettings(server.strip().rstrip("/"), topic, token)
+
+
+def push_priority(action: str, status: HealthStatus) -> int:
+    """ntfy priority: 5 urgent, 4 high, 3 default, 2 low."""
+    if action == "recovery":
+        return 2
+    if status.kind == "quality_warning":
+        return 3
+    if status.kind.startswith("quality_"):
+        return 4
+    return 5
+
+
+def send_push(
+    settings: PushSettings, *, title: str, message: str, priority: int, tags: list[str]
+) -> bool:
+    body = json.dumps({
+        "topic": settings.topic,
+        "title": title,
+        "message": message[:3500],
+        "priority": priority,
+        "tags": tags,
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        settings.server, data=body, method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    if settings.token:
+        request.add_header("Authorization", f"Bearer {settings.token}")
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            response.read()
+    except (OSError, urllib.error.URLError) as exc:
+        print(f"ERROR: failed to send push: {exc}", file=sys.stderr)
+        return False
+    print(f"Sent push to {settings.server}: {title}")
+    return True
+
+
+def deliver(
+    args: argparse.Namespace, *, subject: str, paragraphs: list[str],
+    priority: int, tags: list[str],
+) -> bool:
+    """Send on every configured channel; one successful channel latches the incident.
+
+    Requiring both would turn a Gmail outage into a push every fifteen minutes,
+    because an unlatched incident is retried on each timer run.
+    """
+    push = push_settings(args.push_env_file)
+    delivered = False
+    try:
+        sender, recipient, password = smtp_settings(args)
+    except HealthCheckError as exc:
+        if push is None:
+            raise
+        print(f"ERROR: {exc}", file=sys.stderr)
+    else:
+        delivered = send_email(
+            sender=sender, recipient=recipient, password=password,
+            subject=subject, paragraphs=paragraphs,
+        )
+    if push is not None:
+        pushed = send_push(
+            push, title=subject, message="\n\n".join(paragraphs),
+            priority=priority, tags=tags,
+        )
+        delivered = delivered or pushed
+    return delivered
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ssh-host", default=DEFAULT_SSH_HOST)
@@ -701,6 +795,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stale-hours", type=float, default=26.0)
     parser.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
     parser.add_argument("--state-file", type=Path, default=DEFAULT_STATE_FILE)
+    parser.add_argument(
+        "--push-env-file", type=Path, default=DEFAULT_PUSH_ENV_FILE,
+        help="file with NTFY_TOPIC (and optional NTFY_SERVER, NTFY_TOKEN); "
+             "push is off when it is absent",
+    )
     parser.add_argument("--sender")
     parser.add_argument("--recipient")
     parser.add_argument(
@@ -710,6 +809,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--test-email", action="store_true",
         help="send one SMTP test email without probing or changing state",
+    )
+    parser.add_argument(
+        "--test-push", action="store_true",
+        help="send one ntfy test push without probing or changing state",
     )
     return parser
 
@@ -732,6 +835,20 @@ def run(args: argparse.Namespace) -> int:
                 f"VPS host: {socket.gethostname()}",
                 f"Sent: {format_local(now_utc())}",
             ],
+        )
+        return 0 if ok else 2
+
+    if args.test_push:
+        push = push_settings(args.push_env_file)
+        if push is None:
+            raise HealthCheckError(f"NTFY_TOPIC is not set in {args.push_env_file}")
+        ok = send_push(
+            push,
+            title="[brandmonitor] health push test",
+            message=f"The VPS health checker on {socket.gethostname()} can push.\n"
+                    f"Sent: {format_local(now_utc())}",
+            priority=3,
+            tags=["white_check_mark"],
         )
         return 0 if ok else 2
 
@@ -787,7 +904,6 @@ def run(args: argparse.Namespace) -> int:
 
     sent = False
     if action:
-        sender, recipient, password = smtp_settings(args)
         if action == "alert":
             subject = f"[brandmonitor] ALERT: {status.title}"
             paragraphs = ["Brand Monitor needs attention.", *status.details]
@@ -798,15 +914,15 @@ def run(args: argparse.Namespace) -> int:
                 paragraphs.append(f"Resolved incident: {prior_incident_key}")
             paragraphs.extend(prior_details)
             paragraphs.extend(status.details)
-        sent = send_email(
-            sender=sender,
-            recipient=recipient,
-            password=password,
+        sent = deliver(
+            args,
             subject=subject,
             paragraphs=[
                 *paragraphs,
                 f"Checked by VPS {socket.gethostname()} at {format_local(checked_at)}.",
             ],
+            priority=push_priority(action, status),
+            tags=["rotating_light"] if action == "alert" else ["white_check_mark"],
         )
         if not sent:
             return 2

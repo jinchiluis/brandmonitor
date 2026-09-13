@@ -80,6 +80,32 @@ Monitor. Defaults match Cost Dashboard's current sender and recipient. They can
 be overridden with `--sender` and `--recipient` or `EMAIL_SENDER` and
 `EMAIL_RECIPIENT`.
 
+## Push notifications (ntfy)
+
+Every alert and recovery email is also sent as an ntfy push when
+`/etc/brandmonitor-health.env` (root, mode 600) names a topic. Without that file
+the checker is email-only, exactly as before.
+
+```bash
+NTFY_TOPIC=brandmonitor-<long random string>
+# NTFY_SERVER=https://ntfy.sh       default; set when self-hosting
+# NTFY_TOKEN=tk_...                 only for a server with access control
+```
+
+On the public `ntfy.sh` the topic name is the only credential: anyone who knows it
+can read and post. That is acceptable for these messages, which carry pipeline
+status and source names but no customer material. Generate the topic with
+`openssl rand -hex 16` and subscribe to it in the phone app. Customer-bearing
+alerts need a self-hosted server with tokens before they are pushed.
+
+Priority separates pipeline failures (urgent: stale, failed, unreachable, malformed)
+from coverage `critical` (high) and `warning` (default); recoveries are low.
+
+An incident latches when **either** channel delivers. Requiring both would repeat
+the push every fifteen minutes through a Gmail outage; a failed channel is logged
+to the journal instead. With no channel delivered, nothing latches and the next
+timer run retries.
+
 ## Verify on the VPS
 
 Run a probe without sending mail or changing state:
@@ -100,6 +126,7 @@ Send one real SMTP test:
 
 ```bash
 python3 health/check.py --test-email --env-file /root/cost_dashboard/.env
+python3 health/check.py --test-push
 ```
 
 Do not enable the timer until the Windows daily task is live; otherwise the
