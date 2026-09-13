@@ -3,6 +3,8 @@ env/
 __pycache__/
 *.pyc
 .env
+# backup copies of .env (.env.bak-<date>, .env.old) carry the same secrets
+.env*
 .claude/
 
 # local data — SQLite DB, cached html, generated reports
