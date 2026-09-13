@@ -666,6 +666,33 @@ The body gate's `relevant` and `unsure` rows, plus successfully fetched title-ga
 keeps, define what may reach that expensive stage; irrelevant rows remain queryable
 for audit.
 
+## Daily news alert gate
+
+`python run.py alert-gate` is a small, news-only pass after the daily relevance
+gates. It does not assess regulatory articles, DIP or EP procedures, Safety Gate,
+or DSA records. Its input is exactly the admitted news set above: body-gate
+`relevant` and `unsure` rows plus successful title-gate body fetches. This preserves
+the title-only route, which deliberately never receives a body-gate decision.
+
+The gate first checks the stored title and body for an own-brand match or a term
+from `clients/<slug>/alert_taxonomy.json`. Only those hits call the model. The model
+returns a Boolean potential-alert decision and, for a positive, a short Chinese
+summary. It does not assign urgency, risk levels or customer-facing treatment; the
+email recipient is the human reviewer.
+
+Every newly eligible candidate is decided before delivery begins. All unsent
+positives are then put into one combined email, so one daily run sends zero or one
+message rather than one message per article. Decisions and `sent_at` live in
+`alert_decision`; a failed SMTP attempt leaves positives pending for the next run
+without repeating their model calls. The analysis watermark is
+`analysis:<client>:alert-news`. On its first invocation it begins at the latest news
+collection run, so enabling the feature does not mail the historical backfill.
+
+SMTP is direct from the primary laptop. `EMAIL_SENDER`, `SMTP_PASSWORD`, and
+`ALERT_EMAIL_RECIPIENT` (or `EMAIL_RECIPIENT`) live in its `.env`; `SMTP_HOST`,
+`SMTP_PORT`, and `SMTP_USERNAME` are optional overrides. The VPS health checker is
+not part of delivery.
+
 `shadow-body-gate-title-keeps` is an evaluation command only. It applies the
 current news body-gate prompt to successfully fetched title keeps and appends the
 results to the campaign's `title-body-gate-shadow.jsonl`. It writes no
@@ -773,11 +800,11 @@ make an upstream change visible after the fact.
 - Full assessment model and prompt, and how it reads the body gate's decisions.
 - How the full assessment finds the passage of a long parliamentary document that
   matters to the client, where the document's summary does not say it.
-- Structured output required by weekly reports and immediate alerts.
 - When a profile-version change triggers reassessment of historical items.
-- Alert cadence the customer is promised. `01519` is answered and needs nothing
-  built: it is J&T Global Express's Hong Kong stock code, and no German news
-  source uses it (`clients/jt-express/alert_taxonomy.json`).
+- Customer-facing alert cadence after the daily internal-review pilot. `01519` is
+  answered and needs nothing built: it is J&T Global Express's Hong Kong stock
+  code, and no German news source uses it
+  (`clients/jt-express/alert_taxonomy.json`).
 
 **Decided 2026-09-12: the full assessment runs weekly over a window of
 `raw_item.fetched_at`, not daily and never over `published_at`.** The assessor is

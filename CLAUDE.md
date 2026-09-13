@@ -33,9 +33,10 @@ When the documents disagree, follow `mvp_plan.md`.
 
 ## Operating model
 
-Collection runs **daily**; customer reports go out **weekly**. Those two cadences
-are the design target — a source is worth keeping if it produces something a weekly
-report would carry.
+Collection and the internal news-alert review run **daily**; customer reports go
+out **weekly**. Those cadences are the design target — a source is worth keeping if
+it produces something a weekly report or a genuine potential-alert email would
+carry.
 
 The 30-day collection window is inherited from `vendor/newscrawler` and is an
 emergency backstop for refilling after an outage, not the operating cadence. Do not
@@ -130,7 +131,10 @@ changes cannot be part of the pushed deployment.
 
 **Live since 2026-09-12.** `run_daily.bat` runs on the primary laptop under Task
 Scheduler as `brandmonitor-daily`, daily at 06:00 Europe/Berlin. Collection is
-unattended; the weekly report stack is still run by hand.
+unattended; the weekly report stack is still run by hand. The batch now ends its
+analysis work with the news-only alert gate, which sends at most one combined email
+to the internal reviewer directly from the laptop. It needs the SMTP values in the
+laptop's `.env`; the VPS does not relay these emails.
 
 It is registered under the logged-on user rather than SYSTEM — SYSTEM sees neither
 the `.venv` nor the user's OneDrive folder. The settings that matter are

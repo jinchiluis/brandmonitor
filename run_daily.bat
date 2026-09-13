@@ -3,7 +3,8 @@ rem brandmonitor daily collection.
 rem
 rem News, regulatory articles, Safety Gate and parliamentary procedures (Bundestag,
 rem Bundesrat, European Parliament), plus title selection, fetch-on-match, and the
-rem body gate over every selected body that has no decision yet.
+rem body gate over every selected body that has no decision yet, followed by one
+rem combined internal-review email when the news alert gate finds anything.
 rem
 rem The weekly assessment and report (run.py export-window / assess / report /
 rem verify-report) are deliberately absent from this script. Collection is daily
@@ -63,6 +64,7 @@ set "CODE_dip=2"
 set "CODE_ep_procedures=2"
 set "CODE_body_gate=2"
 set "CODE_dip_docs=2"
+set "CODE_alert_gate=2"
 set "CODE_backup=2"
 set "CODE_canary=2"
 set "CODE_quality_health=2"
@@ -84,7 +86,7 @@ del "%TMPVAL%" "%TMPVAL%.err" 2>nul
     echo   "finished_utc": "!FINISHED!Z",
     echo   "worst_exit": !WORST!,
     echo   "cycle_date": "%DAY%",
-    echo   "stages": { "news": !CODE_news!, "title_gate": !CODE_title_gate!, "title_bodies": !CODE_title_bodies!, "regulatory": !CODE_regulatory!, "safety_gate": !CODE_safety_gate!, "dip": !CODE_dip!, "ep_procedures": !CODE_ep_procedures!, "body_gate": !CODE_body_gate!, "dip_docs": !CODE_dip_docs!, "backup": !CODE_backup!, "canary": !CODE_canary!, "quality_health": !CODE_quality_health! },
+    echo   "stages": { "news": !CODE_news!, "title_gate": !CODE_title_gate!, "title_bodies": !CODE_title_bodies!, "regulatory": !CODE_regulatory!, "safety_gate": !CODE_safety_gate!, "dip": !CODE_dip!, "ep_procedures": !CODE_ep_procedures!, "body_gate": !CODE_body_gate!, "dip_docs": !CODE_dip_docs!, "alert_gate": !CODE_alert_gate!, "backup": !CODE_backup!, "canary": !CODE_canary!, "quality_health": !CODE_quality_health! },
     echo   "log": "data/log/%DAY%/run_daily.txt"
     echo }
 )
@@ -122,6 +124,10 @@ rem The documents behind the DIP procedures the gate judged relevant - the answe
 rem the bill. DIP publishes a Drucksache's text days after its date, so a document
 rem without text waits in the queue for a later run rather than failing this one.
 call :stage dip_docs fetch-dip-docs --client jt-express
+rem News alerts are an extra pass over the items admitted above. It waits until
+rem every collection and enrichment stage has finished, then sends at most one
+rem combined email directly from this laptop.
+call :stage alert_gate alert-gate
 rem Backup is the last stage that handles the corpus, so the snapshot carries the
 rem day's collection rather than yesterday's. The two observers after it read the
 rem final database without modifying it and publish their own atomic JSON files.

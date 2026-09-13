@@ -33,7 +33,7 @@ class TestMigrations:
             names = {r["name"] for r in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"run", "run_source", "raw_item", "assessment",
-                "report", "watermark"} <= names
+                "report", "watermark", "alert_decision"} <= names
 
     def test_is_idempotent(self, db):
         assert migrate(db) == []

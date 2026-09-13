@@ -13,6 +13,7 @@ Commands:
     fetch-bodies  Enrich stored hints and retry failed public-page fetches.
     gate      Ask a cheap LLM which new title-only candidates are worth a body fetch.
     body-gate Ask a cheap LLM whether each selected body is a signal for the client.
+    alert-gate Email one digest of potential alerts found in newly admitted news.
     export-window  Freeze one client-week of stored material into a report bundle.
     assess    Assess a frozen bundle: carry-forward, triage, cluster, read, challenge.
     report    Render the Chinese report, editorial ledger and source coverage.
@@ -309,6 +310,39 @@ def cmd_body_gate(args: argparse.Namespace) -> int:
             worst = max(worst, 1)
     print(f"\nDecisions are stored in the assessment table. Log: {log_path}")
     return worst
+
+
+def cmd_alert_gate(args: argparse.Namespace) -> int:
+    from src.alert_gate import AlertConfigError, AlertDeliveryError, run_alert_gate
+    from src.db import DB_PATH, migrate
+    from src.logger import install_excepthook, set_pipeline_log
+    from src.profile import load_profile
+
+    log_path = set_pipeline_log(f"alert_gate_{args.client}")
+    install_excepthook()
+    migrate()
+    profile = load_profile(args.client)
+    try:
+        result = run_alert_gate(profile, db_path=DB_PATH, dry_run=args.dry_run)
+    except (AlertConfigError, AlertDeliveryError) as exc:
+        print(f"alert gate could not run: {exc}")
+        return 2
+
+    print(f"alert gate: {profile.slug}, {result.since[:19]} -> {result.until[:19]}")
+    print(f"{result.eligible} newly admitted news bodies; "
+          f"{len(result.offered)} matched own-brand or alert terms")
+    if args.dry_run:
+        for item in result.offered:
+            print(f"  [{', '.join(item.triggers)}] {item.source_slug}  {item.title[:100]}")
+        print("dry run: no model calls, decisions, watermark, or email")
+    else:
+        print(f"checked {len(result.decisions)}; {result.positives} potential alerts")
+        if result.emailed:
+            print(f"emailed one digest containing {result.emailed} alert(s)")
+        else:
+            print("no email needed")
+    print(f"Log: {log_path}")
+    return 0
 
 
 def cmd_collect_dsa(args: argparse.Namespace) -> int:
@@ -820,6 +854,24 @@ def build_parser() -> argparse.ArgumentParser:
     body_gate.add_argument("--dry-run", action="store_true",
                            help="print the prompts and counts without calling the model")
     body_gate.set_defaults(func=cmd_body_gate)
+
+    alert_gate = sub.add_parser(
+        "alert-gate",
+        help="email one digest of potential alerts in newly admitted news",
+        description="After the news relevance gates have run, inspect newly admitted "
+                    "news bodies carrying an own-brand or category 4/5 alert term. "
+                    "A small model makes a binary potential-alert decision and writes "
+                    "a short Chinese summary. All positives are sent in one email "
+                    "directly from this host. Needs OPENAI_API_KEY, EMAIL_SENDER, "
+                    "ALERT_EMAIL_RECIPIENT (or EMAIL_RECIPIENT), and SMTP_PASSWORD "
+                    "in the laptop's .env when matching items exist.",
+    )
+    alert_gate.add_argument("--client", default="jt-express",
+                            help="client profile slug or path (default: jt-express)")
+    alert_gate.add_argument("--dry-run", action="store_true",
+                            help="show newly eligible term matches without model calls, "
+                                 "state changes, or email")
+    alert_gate.set_defaults(func=cmd_alert_gate)
 
     dsa = sub.add_parser(
         "collect-dsa",

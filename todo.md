@@ -17,8 +17,11 @@ Authoritative references:
 Built and running daily: news and regulatory discovery, SQLite storage and
 versioning, the durable body queue, public/PDF/browser extraction, source path
 policy, DIP and EP procedures, EU Safety Gate, the deterministic selector, the
-title gate, title-only fetch-on-match, the body gate, and the DIP documents behind
-the procedures it keeps. DSA aggregates are collected by hand, not daily.
+title gate, title-only fetch-on-match, the body gate, the DIP documents behind
+the procedures it keeps, and the daily news alert gate. The alert gate runs last,
+reads only news admitted by the relevance gates, and sends at most one combined
+Chinese email directly from the laptop. DSA aggregates are collected by hand,
+not daily.
 
 Built and run by hand, weekly: the report stack in `src/report_agent/` —
 `run.py export-window / assess / report / verify-report`. It produces a Chinese
@@ -26,10 +29,10 @@ weekly report, an editorial ledger accounting for every identity, a coverage
 page and a verification file. It is validated structurally, not yet by
 measurement; see §1.3.
 
-**Not built: alert delivery.** `assessment` still holds only gate decisions —
-the weekly stage keeps its output in the bundle rather than in that table,
-because its key is an issue rather than an item. The `report` table is filled
-only by `run.py report --record`.
+Alert decisions live in `alert_decision`, not `assessment`: alerting is an action
+on top of weekly eligibility and must not overwrite a relevance decision. Delivery
+is internal-review only for the pilot. The live laptop still needs its SMTP values
+and one real end-to-end email test before this path is operationally proven.
 
 Outside the current build: customer complaints and service-quality monitoring from
 reviews and comments. That needs a separate social/review collection path and must
@@ -88,9 +91,9 @@ Consequences to build to:
   `run_daily.bat`, changeable after the first pilot cycle.
 - **Own-brand alerting is decoupled from assessment cadence.** The taxonomy marks
   `own_brand` as an alert push, and a weekly assessment cannot deliver a same-day
-  alert — but the deterministic selector already finds `role: own` brand matches
-  with no model at all, and J&T returned zero German media mentions in 30 days. A
-  daily deterministic check carries it; the full assessor is not in that path.
+  alert. The daily news alert gate takes the selector's `role: own` matches plus
+  category 4/5 term hits, asks only whether each is a potential alert, and sends
+  one combined email to the human reviewer. The full assessor is not in that path.
 - **Risk accepted:** a weekly run that fails on report day leaves no slack, where a
   daily one would have surfaced the failure earlier. Acceptable while the pipeline
   is run by hand; once scheduled, run the assessment the day before the report.
@@ -148,7 +151,8 @@ Built, and not yet trusted. In priority order:
   anything else. Confirm on a real cycle that the grouped block the customer
   needs — key-customer items named individually, the rest by product class and
   risk — actually comes out of clustering rather than needing its own rule.
-- Alert delivery is not built at all.
+- Run `python run.py alert-gate --dry-run` on the live laptop, configure its SMTP
+  values, then prove one real combined email. No customer receives this directly.
 - Run one fixed pilot window end to end twice. Verify no duplicate raw items or
   assessments, complete source accounting, stable versions, runtime and LLM cost.
 
@@ -159,7 +163,8 @@ Built, and not yet trusted. In priority order:
 - Is "local logistics industry" parcel and e-commerce logistics only, or also port
   strikes, truck tolls and rail funding? The profile assumes the former; the
   measured cost of the latter is in `docs/selection_and_assessment.md`.
-- What must trigger an immediate alert, and what delivery time is promised?
+- What customer-facing alert threshold and SLA follow the daily internal-review
+  pilot? The current build promises neither real-time nor direct customer delivery.
 - Confirm product/material categories, sourcing countries, EU legal role, and any
   company-size thresholds needed for regulation assessment.
 - Safety Gate wording: confirm the report may say *your customer's listing was
@@ -310,6 +315,18 @@ count, lag from the busiest day — belongs here rather than in a one-off query.
 
 ## 5. Scheduling and operations
 
+- `health/analyze.py`'s coverage baseline has no day-of-week awareness: the
+  rolling median (`_source_metrics`, `BASELINE_RUNS = 7`) blends weekday and
+  weekend daily counts, and `zero_streak >= 2` fires on any two consecutive
+  zero days — which is exactly a normal Sat+Sun for weekday-only trade press
+  (BGL, HDE, Haendlerbund, DSLV, BVDW, Wettbewerbszentrale, bevh, DVZ, LOGISTIK
+  HEUTE, e-commerce Magazin all zeroed on 2026-09-13, a Sunday). No incidents
+  have fired yet because `baseline_state` is still `"learning"`
+  (`comparable_baseline_runs` < 7 for every source as of 2026-09-13); once it
+  reaches "ready" this will produce a recurring false-positive `zero_streak`
+  warning most Mondays, reaching the VPS health emailer. Fix before that: make
+  the baseline/zero-streak logic day-of-week aware, or exclude Sat/Sun from the
+  streak count for sources with an established weekday-only pattern.
 - Verify laptop-to-VPS backups. A fresh heartbeat says the pipeline ran, not that
   the database is recoverable; check those separately.
 - Send one `health/check.py --test-email` from the VPS. The checker is live and its
@@ -334,6 +351,5 @@ count, lag from the busiest day — belongs here rather than in a one-off query.
 My own comments (not written by claude):
 - brightdata fallback in case of blocked crawl/scrape? e-commerce failed fetch is a candidate. part of backup plan we can use in production actually
   (I have already ISP IP with deposit)
-- for alerts i wanna try wechat over WeCom work.weixin.qq.com --- but if i have enough tokens and with chrome mcp
 - apply backup plan
 - a new report must be sent per email / Wechat

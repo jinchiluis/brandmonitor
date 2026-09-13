@@ -1,9 +1,10 @@
 # Brandmonitor MVP Plan
 
 Status: **in progress**. Collection, storage, body enrichment, client profiles, the
-deterministic selector, Safety Gate alerts, and DSA aggregates are built. Assessment
-and report generation remain. This is the implementation plan for the first customer pilot.
-The longer product plans remain available as research and future ideas.
+selection gates, weekly assessment/report stack, Safety Gate, DSA aggregates, and
+the internal daily news-alert email are built. The first customer cycle and its
+quality measurement remain. This is the implementation plan for the first customer
+pilot. The longer product plans remain available as research and future ideas.
 
 ## 1. Goal
 
@@ -61,6 +62,10 @@ profile and prompt, then analyzing the already collected material.
 - Use deterministic selection first, a cheap title relevance check for title-only
   publishers, and full assessment only after body evidence exists.
 - Fetch title-only bodies only after a match; do not bulk-fetch paid publications.
+- After the relevance gates, inspect admitted news bodies carrying J&T or the
+  customer's category 4/5 vocabulary. Send all model-confirmed potential alerts
+  in one Chinese email to the human reviewer per daily run. Regulatory records,
+  Safety Gate, DIP, EP and DSA are not part of this alert path.
 - Include social or manual collection only where the customer has explicitly
   confirmed the platform and method.
 
@@ -82,6 +87,7 @@ The SQLite model only needs to represent:
 - pipeline runs and per-source success/failure;
 - versioned raw source items with stable source IDs or URLs;
 - customer assessments tied to a raw item, customer, and prompt/profile version;
+- news-alert decisions and whether a positive decision was emailed;
 - generated reports and their covered time windows.
 
 Exact regulatory and media payloads may differ, but both use this boundary. Do not
@@ -98,7 +104,7 @@ Still required before the pilot report:
 
 - confirmation whether the September 10 keyword list extends or replaces the earlier
   monitoring terms;
-- explanation of the customer's identifier `01519` and expected alert cadence;
+- customer-facing alert SLA beyond the daily internal-review pilot;
 - product and material categories;
 - sourcing countries and EU legal role;
 - approximate turnover/headcount bands where relevant;
@@ -114,10 +120,12 @@ generic configuration framework is needed.
 2. ~~Store versioned raw output and enriched bodies in SQLite.~~
 3. ~~Apply a versioned client profile and deterministic candidate selector.~~
 4. ~~Build Safety Gate and store its native structured payload.~~
-5. Sketch the report and define the structured assessment output it requires.
-6. Implement title gating, fetch-on-match, and full assessment.
-7. Store assessments with prompt/profile/source versions.
-8. Render a minimal Chinese report and run both tracks over one fixed pilot window.
+5. ~~Sketch the report and define the structured assessment output it requires.~~
+6. ~~Implement title gating, fetch-on-match, and full assessment.~~
+7. ~~Store assessments with prompt/profile/source versions.~~
+8. ~~Render a minimal Chinese report.~~
+9. ~~Add one daily, combined potential-alert email to the internal reviewer.~~
+10. Run both tracks over one fixed pilot window and review their quality.
 
 Build sequentially in that order. Do not scaffold every future connector or analysis
 stage before the first source completes the full path.
@@ -138,7 +146,7 @@ The MVP is done when:
 ## 8. Explicitly later
 
 - regulatory-to-reputation cross-linking;
-- daily alert products;
+- customer-facing alert delivery, WeCom, urgency scoring, and sub-daily collection;
 - competitor comparison and advanced trend analytics;
 - automated task management for manual collectors;
 - a generalized plugin/connector framework;
