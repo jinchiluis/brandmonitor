@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from lxml import html, etree
 from .crawler_playwright import fetch_html_with_playwright
-from . import proxy as isp_proxy
 from bs4 import BeautifulSoup
 from typing import Optional
 from src.logger import get_logger
@@ -247,14 +246,9 @@ def fetch_html(session, url, timeout=(3,5), use_playwright_fallback=True, use_br
 
         if _VERBOSE: logger.info(f"[fetch_html] requests status={r.status_code} for {url}")
 
-        # If 403 or other error, try the ISP-proxy fallback, then Playwright
-        # (unless disabled)
+        # If 403 or other error, try Playwright fallback (unless disabled)
         if r.status_code >= 400:
             if use_playwright_fallback:
-                proxy_resp = isp_proxy.try_fetch(url, dict(session.headers))
-                if proxy_resp is not None:
-                    if _VERBOSE: logger.info(f"[fetch_html] ISP-proxy fallback succeeded for {url}")
-                    return proxy_resp.content
                 if _VERBOSE: logger.info(f"[fetch_html] trying Playwright fallback for {url}")
                 try:
                     return fetch_html_with_playwright(url, timeout_ms=40000)
@@ -265,13 +259,8 @@ def fetch_html(session, url, timeout=(3,5), use_playwright_fallback=True, use_br
     except Exception as e:
         if _VERBOSE: logger.info(f"[fetch_html] requests failed {url}: {e}")
 
-        # Try the ISP-proxy fallback, then Playwright, on network errors too
-        # (unless disabled)
+        # Try Playwright fallback on network errors too (unless disabled)
         if use_playwright_fallback:
-            proxy_resp = isp_proxy.try_fetch(url, dict(session.headers))
-            if proxy_resp is not None:
-                if _VERBOSE: logger.info(f"[fetch_html] ISP-proxy fallback succeeded for {url}")
-                return proxy_resp.content
             if _VERBOSE: logger.info(f"[fetch_html] trying Playwright fallback for {url}")
             try:
                 return fetch_html_with_playwright(url, timeout_ms=40000)

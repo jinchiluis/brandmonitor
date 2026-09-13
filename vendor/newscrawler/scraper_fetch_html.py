@@ -28,7 +28,6 @@ from .crawler_playwright import fetch_html_with_playwright
 from .crawler_brightdata import fetch_html_with_api as fetch_html_with_brightdata_api
 from .paywall.handler import get_paywall_cfg, fetch_paywall_article
 from .source_loader import sources
-from . import proxy as isp_proxy
 from src.logger import get_logger
 
 logger = get_logger(__name__)
@@ -331,15 +330,6 @@ def fetch_html(url: str) -> str:
                 except Exception as e:
                     last_err = e
                     continue
-
-    # Naked datacenter IP blocked (or no real content) on every profile/AMP
-    # attempt. Try a Bright Data ISP-proxy fetch — plain HTTP only, no browser,
-    # no paywall login — before paying for a Playwright render.
-    proxy_resp = isp_proxy.try_fetch(url, profiles[0])
-    if proxy_resp is not None:
-        txt = _decode_body(proxy_resp.content, dict(proxy_resp.headers))
-        logger.info("[fetch_html] ISP-proxy fetch success, returning %d chars", len(txt))
-        return txt
 
     ##### Last try: PLAYWRIGHT! (with caching for sites already crawled)
     logger.info("[fetch_html] Falling back to Playwright for %s", url)

@@ -165,6 +165,14 @@ Tagesschau 0 → 143 entries, e-commerce Magazin 40 → 120, BGL 20 → 30, HDE 
 Extending the path list would have fixed these three; autodiscovery fixes the next
 site too, and a wrong `"feeds": false` costs coverage silently.
 
+**2026-09-13 — `proxy.py` added, then unwired.** A Bright Data ISP-proxy fallback
+ported from rewriter was hooked into `crawler_html_utils.fetch_html` and
+`scraper_fetch_html.fetch_html`, then removed the same day. Neither hook reached the
+body fetch (`src/bodies.py` uses neither function), the collection hook fired on
+404s and discarded listing pages, and the laptop's residential IP has no measured
+blocking problem. The module stays for VPS disaster recovery; its header says where
+to wire it and what to test first.
+
 ## googlesearch
 
 | Field | Value |

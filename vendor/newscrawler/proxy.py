@@ -1,16 +1,45 @@
 # proxy.py
-# Bright Data ISP-proxy fallback for the cheap-HTML fetch ladder.
+# Bright Data ISP-proxy fallback for a datacenter IP that publishers block.
 #
-# Reached when a naked (datacenter-IP) fetch is blocked (403 / reset / timeout)
-# by a source that was never explicitly flagged for Bright Data. Deliberately
-# narrow in scope: plain HTTP only, one rotate-on-failure tier, no Playwright
-# render and no paywall login. See backup_plan.md Section 4 for why a proxied
-# browser render and paywall proxy support for bild.de/welt.de are out of
-# scope here.
+# NOT WIRED IN. Nothing imports this module. The pipeline runs on the laptop's
+# residential connection, where blocking is not a measured problem: on
+# 2026-09-13 body_fetch held one 403 against 25 paywall and 14 empty-render
+# failures, and a proxy fixes neither of those. It is kept for disaster
+# recovery, when collection has to run from the Contabo VPS (backup_plan.md).
 #
-# Ported from the ladder proven on this same VPS under rewriter-scrape.service
-# (documented in /var/www/rewriter/vendor/html_scrape_with_proxy.md), trimmed
-# to the naked-httpx -> ISP-proxy-httpx tiers.
+# Before wiring it in, prove the need: fetch a sample of configured sources and
+# queued bodies from the VPS without the proxy, and wire this in only if the
+# Contabo IP is actually refused (403 / 429 / connection reset) where the
+# laptop succeeds. Then hook it in at these two places, and nowhere else:
+#
+#   1. src/bodies.py _fetch_public (the body fetch). Try the proxy only on 403,
+#      429 or a connection error / timeout, and classify the proxied response
+#      exactly as the plain one (404/410 unavailable, PDF detection, final URL).
+#      Never on 401/402/404/410 - those are permanent and would cost up to
+#      HTTP_ATTEMPTS paid requests per dead URL on every retry.
+#   2. vendor/newscrawler/crawler_html_utils.fetch_html, before the Playwright
+#      fallback (frontpage sections, title fallback, date sniffing), with the
+#      same status restriction. has_sufficient_content wants >=3 <p> and 300
+#      chars, which listing/section pages fail - skip that gate for them, or
+#      every proxied frontpage fetch is discarded after all attempts.
+#
+# Sitemaps (crawler.polite_get) and feeds (use_playwright_fallback=False) do not
+# pass through either place; add them only if the VPS test shows them refused.
+# vendor/newscrawler/scraper_fetch_html.py is not used by the pipeline - do not
+# hook it there.
+#
+# Credentials: BRD_PASS_ISP is read from os.environ, and the collect and body
+# processes do not call load_dotenv, so call load_dotenv(ROOT / ".env") before
+# the first try_fetch. The VPS /var/www/brandmonitor/.env already carries
+# BRD_PASS_ISP (same value as /var/www/rewriter/.env, checked 2026-09-13).
+#
+# Scope is deliberately narrow: plain HTTP only, one rotate-on-failure tier, no
+# Playwright render and no paywall login. See backup_plan.md Section 4 for why a
+# proxied browser render and paywall proxy support for bild.de/welt.de are out
+# of scope. Ported from the ladder proven on the VPS under
+# rewriter-scrape.service (documented in
+# /var/www/rewriter/vendor/html_scrape_with_proxy.md), trimmed to the
+# naked-httpx -> ISP-proxy-httpx tiers.
 
 from __future__ import annotations
 
