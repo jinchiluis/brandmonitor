@@ -883,7 +883,7 @@ def run(args: argparse.Namespace) -> int:
             sender=sender,
             recipient=recipient,
             password=password,
-            subject="[brandmonitor] health email test",
+            subject="[brandmonitor-health] health email test",
             paragraphs=[
                 "The Brand Monitor VPS health checker can send email.",
                 f"VPS host: {socket.gethostname()}",
@@ -898,7 +898,7 @@ def run(args: argparse.Namespace) -> int:
             raise HealthCheckError(f"NTFY_HEALTH_TOPIC is not set in {args.push_env_file}")
         ok = send_push(
             push,
-            title="[brandmonitor] health push test",
+            title="[brandmonitor-health] health push test",
             message=f"The VPS health checker on {socket.gethostname()} can push.\n"
                     f"Sent: {format_local(now_utc())}",
             priority=3,
@@ -969,10 +969,10 @@ def run(args: argparse.Namespace) -> int:
     sent = False
     if action:
         if action == "alert":
-            subject = f"[brandmonitor] ALERT: {status.title}"
+            subject = f"[brandmonitor-health] ALERT: {status.title}"
             paragraphs = ["Brand Monitor needs attention.", *status.details]
         else:
-            subject = "[brandmonitor] RECOVERED: daily pipeline is healthy"
+            subject = "[brandmonitor-health] RECOVERED: daily pipeline is healthy"
             paragraphs = ["Brand Monitor has recovered from the previous health incident."]
             if prior_incident_key:
                 paragraphs.append(f"Resolved incident: {prior_incident_key}")

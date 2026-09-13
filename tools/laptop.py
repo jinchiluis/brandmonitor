@@ -148,7 +148,8 @@ def main(argv: list[str] | None = None) -> int:
                                               width=args.width))
     if args.command == "py":
         source = (sys.stdin.read() if args.script == "-"
-                  else Path(args.script).read_text(encoding="utf-8"))
+                  # utf-8-sig: Windows PowerShell 5.1 writes a BOM Python rejects.
+                  else Path(args.script).read_text(encoding="utf-8-sig"))
         return run_python(source)
     if args.command == "ps":
         return run_powershell(sys.stdin.read() if args.script == "-" else args.script)
