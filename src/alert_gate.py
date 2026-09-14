@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 from zoneinfo import ZoneInfo
 
-from src.config import BODY_GATE_BODY_CHARS, BODY_GATE_MODEL, BODY_GATE_REASONING, ROOT
+from src.config import ALERT_GATE_MODEL, ALERT_GATE_REASONING, BODY_GATE_BODY_CHARS, ROOT
 from src.db import DB_PATH, advance_watermark, connect, get_watermark, session, utcnow
 from src.logger import get_logger
 from src.profile import ClientProfile, Rule, compile_term
@@ -123,6 +123,8 @@ class PendingAlert:
     title: str
     summary_zh: str
     client_name: str
+    # Same string the model saw (published_label), not recomputed.
+    published_label: str = "unknown"
 
 
 @dataclass
@@ -182,10 +184,14 @@ def _taxonomy_lines(taxonomy: dict) -> list[str]:
 def render_system_prompt(profile: ClientProfile, taxonomy: dict) -> str:
     about = profile.prompt.about if profile.prompt else profile.name
     own = ", ".join(profile.brands_with_role("own")) or profile.name
+    # Named so "a key customer" below is a list, not the model's guess: without
+    # it, an EU review of JD.com's Ceconomy bid was alerted as customer news.
+    customers = ", ".join(profile.brands_with_role("customer")) or "none listed"
     return f"""You screen already-relevant German and European news for {profile.name}.
 
 Client: {about}
 Own-brand names: {own}
+Key customers: {customers}
 
 The article has already passed a relevance gate and contains an own-brand name or
 one of these alert concepts:
@@ -194,7 +200,7 @@ one of these alert concepts:
 Answer potential_alert=true when a human monitoring {profile.name} should look at
 this now as a possible alert. This includes any genuine article mention of the own
 brand, even when neutral or brief, and a concrete current sensitive event affecting
-the client, a key customer, or the parcel/e-commerce market. Prefer recall: the
+the client, a key customer, or the parcel market. Prefer recall: the
 recipient is a human reviewer, so an uncertain but plausible alert should be sent.
 
 Answer false when the own-brand text is a different entity or incidental boilerplate,
@@ -219,8 +225,8 @@ def prompt_version(system: str) -> str:
     return f"{STAGE}-{KIND}-{digest}"
 
 
-def openai_caller(model: str = BODY_GATE_MODEL,
-                  effort: str = BODY_GATE_REASONING) -> Caller:
+def openai_caller(model: str = ALERT_GATE_MODEL,
+                  effort: str = ALERT_GATE_REASONING) -> Caller:
     return _openai_caller(model=model, effort=effort, text_format=REPLY_FORMAT)
 
 
@@ -429,7 +435,7 @@ def _store_decision(conn, decision: AlertDecision, profile: ClientProfile,
     payload = {
         "stage": STAGE, "kind": KIND, "route": item.route,
         "triggers": list(item.triggers), "selector_reasons": list(item.selector_reasons),
-        "model": model,
+        "model": model, "published_label": published_label(item),
         "tokens": {"in": decision.input_tokens, "out": decision.output_tokens},
     }
     conn.execute(
@@ -445,7 +451,7 @@ def pending_alerts(db_path: Path, profile: ClientProfile) -> list[PendingAlert]:
     conn = connect(db_path)
     try:
         rows = list(conn.execute(
-            "SELECT d.id,d.source_slug,d.external_id,d.summary_zh,r.url,r.title "
+            "SELECT d.id,d.source_slug,d.external_id,d.summary_zh,d.payload,r.url,r.title "
             "FROM alert_decision d JOIN raw_item r ON r.id=d.raw_item_id "
             "WHERE d.client_slug=? AND d.potential_alert=1 AND d.sent_at IS NULL "
             "ORDER BY d.created_at,d.id", (profile.slug,)))
@@ -464,6 +470,7 @@ def pending_alerts(db_path: Path, profile: ClientProfile) -> list[PendingAlert]:
             external_id=row["external_id"], url=row["url"] or row["external_id"],
             title=row["title"] or row["url"] or row["external_id"],
             summary_zh=row["summary_zh"], client_name=profile.name,
+            published_label=_payload(row["payload"]).get("published_label") or "unknown",
         )
     return list(grouped.values())
 
@@ -502,11 +509,13 @@ def build_email(alerts: Sequence[PendingAlert], *, sender: str, recipient: str,
     for number, alert in enumerate(alerts, 1):
         plain.append(
             f"{number}. [{alert.client_name}] {alert.title}\n\n{alert.summary_zh}\n\n"
+            f"Published: {alert.published_label}\n"
             f"Source: {_defeat_autolink(alert.source_slug)}\nURL: {alert.url}")
         blocks.append(
             f"<h2>{number}. [{html.escape(alert.client_name)}] {html.escape(alert.title)}</h2>"
             f"<p>{html.escape(alert.summary_zh)}</p>"
-            f"<p><strong>Source:</strong> {_defeat_autolink(html.escape(alert.source_slug))}<br>"
+            f"<p><strong>Published:</strong> {html.escape(alert.published_label)}<br>"
+            f"<strong>Source:</strong> {_defeat_autolink(html.escape(alert.source_slug))}<br>"
             f"<strong>URL:</strong> <a href=\"{html.escape(alert.url, quote=True)}\">"
             f"{html.escape(alert.url)}</a></p>")
     message.set_content("\n\n".join(plain) + "\n")
@@ -527,6 +536,9 @@ def smtp_sender() -> Sender:
         raise AlertConfigError("SMTP_PORT must be an integer") from exc
     sender_address = _required_env("EMAIL_SENDER")
     recipient = _required_env("ALERT_EMAIL_RECIPIENT", "EMAIL_RECIPIENT")
+    recipients = [item.strip() for item in recipient.split(",") if item.strip()]
+    if not recipients:
+        raise AlertConfigError("EMAIL_RECIPIENT is empty")
     username = os.getenv("SMTP_USERNAME", sender_address).strip()
     password = _required_env("SMTP_PASSWORD").replace(" ", "")
 
@@ -536,7 +548,7 @@ def smtp_sender() -> Sender:
             with smtplib.SMTP(host, port, timeout=30) as server:
                 server.starttls(context=ssl.create_default_context())
                 server.login(username, password)
-                server.send_message(message)
+                server.send_message(message, to_addrs=recipients)
         except (OSError, smtplib.SMTPException) as exc:
             raise AlertDeliveryError(f"SMTP delivery failed: {exc}") from exc
         return str(message["Message-ID"])
@@ -575,6 +587,7 @@ def build_pushes(alerts: Sequence[PendingAlert]) -> list[dict]:
             "title": prefix + clip_utf8(alert.title, title_budget),
             "message": (
                 f"{clip_utf8(alert.summary_zh, PUSH_SUMMARY_BYTES)}\n\n"
+                f"Published: {alert.published_label}\n"
                 f"{_defeat_autolink(alert.source_slug)}\n{alert.url}"
             ),
             "priority": 3,
@@ -654,7 +667,7 @@ def run_alert_gate(profile: ClientProfile, *, db_path: Path = DB_PATH,
                    caller: Caller | None = None, sender: Sender | None = None,
                    notifier: Notifier | None = None,
                    taxonomy_file: Path | None = None, now: str | None = None,
-                   dry_run: bool = False, model: str = BODY_GATE_MODEL) -> AlertGateResult:
+                   dry_run: bool = False, model: str = ALERT_GATE_MODEL) -> AlertGateResult:
     taxonomy = load_taxonomy(taxonomy_file or taxonomy_path(profile))
     system = render_system_prompt(profile, taxonomy)
     version = prompt_version(system)

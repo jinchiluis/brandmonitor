@@ -93,6 +93,7 @@ existing `/root/cost_dashboard/.env`; the token is never copied into Brand
 Monitor. Defaults match Cost Dashboard's current sender and recipient. They can
 be overridden with `--sender` and `--recipient` or `EMAIL_SENDER` and
 `EMAIL_RECIPIENT`.
+Multiple recipients may be supplied as a comma-separated list.
 
 ## Push notifications (ntfy)
 

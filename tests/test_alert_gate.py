@@ -168,9 +168,33 @@ def test_model_sees_today_and_publication_date_but_never_lastmod(corpus):
 
     system, first = caller.calls[0]
     assert "14 days older than TODAY" in system
+    assert "Key customers: Temu, Shein, AliExpress, TikTok Shop\n" in system
     # 22:30 UTC is already the next day in Berlin.
     assert first.startswith("TODAY: 2026-09-13\nPUBLISHED: 2026-09-11 (page)\n")
     assert "PUBLISHED: unknown\n" in caller.calls[1][1]
+
+
+def test_published_label_reaches_the_pending_alert_and_email(corpus):
+    """Reviewer sees the same PUBLISHED value the model was shown, not a recomputed one."""
+    with session(corpus) as conn:
+        add_item(conn, 1, "Temu fine", "Temu faces a regulatory fine.")
+        add_body_gate(conn, 1, 1)
+        conn.execute("UPDATE raw_item SET published_at='2026-08-07', "
+                     "payload=json_set(payload,'$.published_at_source','page') WHERE id=1")
+        add_item(conn, 2, "Temu strike", "A strike may affect Temu deliveries.")
+        add_body_gate(conn, 2, 1)
+    sender = FakeSender()
+
+    result = run_alert_gate(
+        PROFILE, db_path=corpus, caller=FakeCaller(positive(), positive()),
+        sender=sender, now=NOW)
+
+    labels = {alert.title: alert.published_label for alert in result.pending}
+    assert labels == {"Temu fine": "2026-08-07 (page)", "Temu strike": "unknown"}
+    [sent] = sender.calls
+    message = build_email(sent, sender="s@example.com", recipient="r@example.com")
+    plain = message.get_body(preferencelist=("plain",)).get_content()
+    assert "Published: 2026-08-07 (page)" in plain and "Published: unknown" in plain
 
 
 def test_negative_is_recorded_without_email(corpus):
@@ -345,7 +369,7 @@ def test_push_carries_summary_and_a_linkified_url():
     [push] = build_pushes([pending(1)])
 
     assert push["title"] == "[J&T Express Germany] Title 1"
-    assert push["message"] == "极兔据报道面临罚款。\n\ndvz\nhttps://example.de/1"
+    assert push["message"] == "极兔据报道面临罚款。\n\nPublished: unknown\ndvz\nhttps://example.de/1"
     assert "actions" not in push
 
 

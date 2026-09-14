@@ -693,41 +693,50 @@ def read_env_file(path: Path) -> dict[str, str]:
     return values
 
 
-def smtp_settings(args: argparse.Namespace) -> tuple[str, str, str]:
+def parse_recipients(value: str) -> list[str]:
+    recipients = [item.strip() for item in value.split(",") if item.strip()]
+    if not recipients:
+        raise HealthCheckError("EMAIL_RECIPIENT is empty")
+    return recipients
+
+
+def smtp_settings(args: argparse.Namespace) -> tuple[str, list[str], str]:
     file_values = read_env_file(args.env_file)
     sender = args.sender or os.environ.get("EMAIL_SENDER") or file_values.get(
         "EMAIL_SENDER", DEFAULT_SENDER
     )
-    recipient = args.recipient or os.environ.get("EMAIL_RECIPIENT") or file_values.get(
+    recipient_value = args.recipient or os.environ.get("EMAIL_RECIPIENT") or file_values.get(
         "EMAIL_RECIPIENT", DEFAULT_RECIPIENT
     )
+    recipients = parse_recipients(recipient_value)
     password = os.environ.get("SMTP_PASSWORD") or file_values.get("SMTP_PASSWORD", "")
     password = password.replace(" ", "")
     if not password:
         raise HealthCheckError("SMTP_PASSWORD is missing")
-    return sender, recipient, password
+    return sender, recipients, password
 
 
 def send_email(
-    *, sender: str, recipient: str, password: str, subject: str, paragraphs: list[str]
+    *, sender: str, recipients: list[str], password: str, subject: str,
+    paragraphs: list[str]
 ) -> bool:
     text_body = "\n\n".join(paragraphs) + "\n"
     html_body = "".join(f"<p>{html.escape(paragraph)}</p>" for paragraph in paragraphs)
     message = MIMEMultipart("alternative")
     message["Subject"] = subject
     message["From"] = f"Brand Monitor Health <{sender}>"
-    message["To"] = recipient
+    message["To"] = ", ".join(recipients)
     message.attach(MIMEText(text_body, "plain", "utf-8"))
     message.attach(MIMEText(html_body, "html", "utf-8"))
     try:
         with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
             server.starttls(context=ssl.create_default_context())
             server.login(sender, password)
-            server.send_message(message)
+            server.send_message(message, to_addrs=recipients)
     except (OSError, smtplib.SMTPException) as exc:
         print(f"ERROR: failed to send email: {exc}", file=sys.stderr)
         return False
-    print(f"Sent email to {recipient}: {subject}")
+    print(f"Sent email to {', '.join(recipients)}: {subject}")
     return True
 
 
@@ -807,14 +816,14 @@ def deliver(
     push = push_settings(args.push_env_file)
     delivered = False
     try:
-        sender, recipient, password = smtp_settings(args)
+        sender, recipients, password = smtp_settings(args)
     except HealthCheckError as exc:
         if push is None:
             raise
         print(f"ERROR: {exc}", file=sys.stderr)
     else:
         delivered = send_email(
-            sender=sender, recipient=recipient, password=password,
+            sender=sender, recipients=recipients, password=password,
             subject=subject, paragraphs=paragraphs,
         )
     if push is not None:
@@ -878,10 +887,10 @@ def run(args: argparse.Namespace) -> int:
         raise HealthCheckError("--stale-hours must be positive")
 
     if args.test_email:
-        sender, recipient, password = smtp_settings(args)
+        sender, recipients, password = smtp_settings(args)
         ok = send_email(
             sender=sender,
-            recipient=recipient,
+            recipients=recipients,
             password=password,
             subject="[brandmonitor-health] health email test",
             paragraphs=[

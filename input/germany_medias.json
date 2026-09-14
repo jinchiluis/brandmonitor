@@ -441,14 +441,14 @@
     "type": "行业协会",
     "language": "德语",
     "url": "https://www.bvl.de/",
-    "sitemap": true,
-    "feeds": true,
+    "sitemap": false,
+    "feeds": false,
     "frontpage": false,
     "allowed_dirs": [
       "blog",
       "presse/meldungen"
     ],
-    "notes": "association website, not a publisher: the sitemap is the whole site. Narrowed 2026-09-09 from 2002 items to blog posts + press releases (~30). Excluded /service, /files, /lore, /en, /logistik-indikator, /presse/multimedia photo galleries, plus membership and contact pages. All 5323 sitemap URLs share ONE lastmod, regenerated periodically - dates are meaningless and every regeneration re-queues every body. 0 brand hits; kept for the de-minimis blog post. See todo.md Switched to title_only 2026-09-09: 0 brand hits in 620 URLs, and sampled bodies are management/leadership essays, not events. Under the balanced selector policy only 3 of 620 slugs are worth opening. Its sitemap ships bare URLs, so the slug is the index - the selector matches on it.",
+    "notes": "DISABLED 2026-09-14: every discovery method switched off (was sitemap + feeds), so nothing is crawled. Kept because it was on the client's first list. Measured before switching off: 621 items, 0 brand hits, 0 alerts, 0 report findings. It made up 93 of 281 titles judged and 12 of 26 kept on the 2026-09-11 title-gate run, and 14 of the 34 undated triage items in the 2026-09-05..11 report, all omitted. Press releases are association business (board, awards, congress). Its sitemap restamps every URL on regeneration (579 extra rows on 2026-09-13). See weaknesses.md. To re-enable, restore sitemap and feeds to true. Earlier notes: association website, not a publisher: the sitemap is the whole site. Narrowed 2026-09-09 from 2002 items to blog posts + press releases (~30). Excluded /service, /files, /lore, /en, /logistik-indikator, /presse/multimedia photo galleries, plus membership and contact pages. All 5323 sitemap URLs share ONE lastmod, regenerated periodically - dates are meaningless and every regeneration re-queues every body. 0 brand hits; kept for the de-minimis blog post. See todo.md Switched to title_only 2026-09-09: 0 brand hits in 620 URLs, and sampled bodies are management/leadership essays, not events. Under the balanced selector policy only 3 of 620 slugs are worth opening. Its sitemap ships bare URLs, so the slug is the index - the selector matches on it.",
     "content_mode": "title_only",
     "access": "free"
   },

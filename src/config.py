@@ -57,6 +57,11 @@ BODY_GATE_WORKERS = _BODY_GATE.get("workers", 4)
 BODY_GATE_BODY_CHARS = _BODY_GATE.get("body_chars", 12000)
 BODY_GATE_LIMIT = _BODY_GATE.get("limit", 300)
 
+# -- alert gate (daily news-alert pass over items already admitted by the other gates) --
+_ALERT_GATE = _CFG.get("alert_gate", {})
+ALERT_GATE_MODEL = _ALERT_GATE.get("model", BODY_GATE_MODEL)
+ALERT_GATE_REASONING = _ALERT_GATE.get("reasoning_effort", BODY_GATE_REASONING)
+
 # -- report agent (the weekly assessment and report) --
 # Kept as the whole section rather than unpacked: the per-step reasoning efforts
 # are read by name in src/report_agent/assess.py, and flattening them here would
