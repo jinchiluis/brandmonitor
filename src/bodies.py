@@ -712,7 +712,7 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
     decisions are newly queued, regardless of ``content_mode``; existing queued
     title-only failures remain eligible after the originating log is pruned.
     """
-    from src.collect import crawled_entries, slug_for, url_is_excluded
+    from src.collect import crawled_entries, discovery_enabled, slug_for, url_is_excluded
     from vendor.newscrawler.source_loader import sources
 
     if limit < 1:
@@ -732,9 +732,15 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
         if title_gate_client:
             from src.title_gate import logged_keeps
 
+            # A source crawled by nothing had its rows deleted; its old keeps
+            # stay in the JSONL log and would warn on every run.
+            disabled: dict[str, int] = {}
             for decision in logged_keeps(title_gate_client, title_gate_log_root):
                 slug, external_id = decision["source"], decision["external_id"]
                 if slug not in by_slug:
+                    continue
+                if not discovery_enabled(by_slug[slug]):
+                    disabled[slug] = disabled.get(slug, 0) + 1
                     continue
                 row = conn.execute(
                     "SELECT * FROM raw_item WHERE source_slug=? AND external_id=? "
@@ -756,6 +762,8 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
                 }
                 queue_body(conn, slug, external_id, json.loads(row["payload"]),
                            only_missing=True, title_gate_route=route)
+            for slug, count in sorted(disabled.items()):
+                logger.info("[bodies] %s is disabled; %d keeps ignored", slug, count)
         for slug, entry in by_slug.items():
             if title_gate_client:
                 # A title-only body task can only have been created explicitly.

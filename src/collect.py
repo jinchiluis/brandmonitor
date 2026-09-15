@@ -192,6 +192,14 @@ def crawled_entries(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [entry for entry in entries if not entry.get("collector")]
 
 
+DISCOVERY_METHODS = ("sitemap", "feeds", "frontpage", "brightdata")
+
+
+def discovery_enabled(entry: Dict[str, Any]) -> bool:
+    """True when any discovery method is switched on; a listed domain defaults off."""
+    return any(entry.get(method) is True for method in DISCOVERY_METHODS)
+
+
 def collector_entry(name: str, sources_path: Optional[Path] = None) -> Dict[str, Any]:
     """The regulatory source entry stored by the collector called ``name``."""
     path = Path(sources_path) if sources_path else DEFAULT_REGULATORY_SOURCES

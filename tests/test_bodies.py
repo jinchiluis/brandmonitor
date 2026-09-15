@@ -25,8 +25,10 @@ def project(tmp_path):
     migrate(db)
     sources = tmp_path / "sources.json"
     sources.write_text(json.dumps([
-        {"url": "https://trade.test/", "organization": "Trade", "content_mode": "full_text"},
-        {"url": "https://major.test/", "organization": "Major", "content_mode": "title_only"},
+        {"url": "https://trade.test/", "organization": "Trade", "content_mode": "full_text",
+         "sitemap": True},
+        {"url": "https://major.test/", "organization": "Major", "content_mode": "title_only",
+         "sitemap": True},
     ]), encoding="utf-8")
     return db, sources
 
@@ -204,6 +206,30 @@ def test_title_gate_fetch_retries_its_queue_after_the_jsonl_is_gone(
 
     assert first["failed"] == 1
     assert second["ok"] == 1 and second["stored"] == 1
+
+
+def test_title_gate_keeps_of_a_source_crawled_by_nothing_are_ignored_quietly(
+        project, monkeypatch, tmp_path, caplog):
+    entries = json.loads(project[1].read_text())
+    entries.append({"url": "https://www.off.test/", "organization": "Off",
+                    "content_mode": "title_only", "sitemap": False, "feeds": False})
+    project[1].write_text(json.dumps(entries), encoding="utf-8")
+    log_dir = tmp_path / "title_gate" / "client"
+    log_dir.mkdir(parents=True)
+    decisions = [{"client": "client", "source": "off.test", "decision": "keep",
+                  "external_id": f"https://www.off.test/deleted-{i}"} for i in range(3)]
+    (log_dir / "2026-09-11.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in decisions) + "\n", encoding="utf-8")
+    monkeypatch.setattr("src.bodies.fetch_body", lambda url: success())
+
+    with caplog.at_level("INFO", logger="bm.src.bodies"):
+        summary = run(project, title_gate_client="client",
+                      title_gate_log_root=tmp_path / "title_gate")
+
+    assert summary["attempted"] == 0
+    assert not [r for r in caplog.records if r.levelname == "WARNING"]
+    assert [r.getMessage() for r in caplog.records
+            if "disabled" in r.getMessage()] == ["[bodies] off.test is disabled; 3 keeps ignored"]
 
 
 def test_backfill_respects_narrowed_sitemap_sections(project, monkeypatch):
