@@ -51,9 +51,10 @@ Facts the tasks below rely on. Numbers are from the laptop database at 17:40 CES
    would look identical. T3.
 5. **Section index pages are stored items and are re-fetched every run.**
    `etailment.de/magazin`, `/magazin/ki`, `/magazin/logistik`, …,
-   `verkehrsrundschau.de/nachrichten`, `/nachrichten/recht-geld`, …: 15 URLs,
-   each with 6 stored versions, re-fetched in every one of the 8 daily runs
-   because their `<lastmod>` moves. The selector's hub gate keeps them out of the
+   `verkehrsrundschau.de/nachrichten`, `/nachrichten/recht-geld`, …: 7 etailment
+   section pages (up to 6 stored versions each) and 8 VerkehrsRundschau ones
+   (2 versions each), re-fetched in every one of the 8 daily runs because their
+   `<lastmod>` moves. The selector's hub gate keeps them out of the
    gates, so the cost is ~120 fetches a day and version churn, not wrong output.
    T8.
 6. **Two title-gate keeps are stuck behind a paywall and reach nothing.** FAZ
@@ -300,15 +301,26 @@ remove every article under the section.
 expressions, matched against the URL path, applied in `url_is_excluded` (so
 selection and body backfill honour it too). Entries:
 
-- etailment: `^/magazin(/[a-z-]+)?/?$` — articles are `/magazin/2026-09-14-slug`.
-- VerkehrsRundschau: `^/nachrichten(/[a-z-]+)?/?$` — articles end in `-\d{7}`.
+- etailment: `^/magazin(/[a-z]+)?/?$` — the section names are single words
+  (`ki`, `tech`, `payment`, `logistik`, `marketing`, `nachhaltigkeit`) and every
+  article slug contains a hyphen. Do **not** use `[a-z-]+`: only 38 of 290
+  etailment articles carry a date prefix, and a hyphen-tolerant pattern matched
+  24 real articles when checked against the stored URLs on 2026-09-15.
+- VerkehrsRundschau: `^/nachrichten(/[a-z-]+)?/?$` — section names do contain
+  hyphens here (`recht-geld`, `lager-umschlag`) and every article ends in
+  `-\d{7}`, so the digit keeps articles out. Checked: 8 matches, all sections.
 
 Write the reason in each entry's `notes`. Document the key in CLAUDE.md's
 "Adding news sources" table in one sentence. Do not delete the stored rows; they
 are already kept out of the gates by the hub rule.
 
-**Tests.** The two patterns exclude the listed index URLs and keep one real
-article URL from each source; a source without the key is unaffected.
+**Tests.** The two patterns exclude the listed index URLs and keep real article
+URLs from each source — for etailment include an undated slug such as
+`/magazin/jd-com-stoesst-bei-mediamarktsaturn-an-europas-pruefgrenze-im-handel`,
+for VerkehrsRundschau one ending in `-3897413`; a source without the key is
+unaffected. Before committing, run the patterns over every stored URL of both
+sources (read-only, via `tools/laptop.py py`) and confirm the match lists are
+exactly the 7 and 8 section pages.
 
 **Done when** the next run's body-fetch log no longer lists those 15 URLs.
 
