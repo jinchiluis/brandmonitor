@@ -18,7 +18,12 @@ What is enforced:
 
 A failure exits 1. `cited_but_unread` is reported as a warning rather than an
 error: citing an item the assessor never opened is worth seeing every time, but
-a restatement merged into a story is a legitimate case of it.
+a restatement merged into a story is a legitimate case of it. So is
+`cited_but_not_reported` - a finding or the watchlist linking an identity whose
+ledger row says the report did not use it. The first report linked an August
+article as background while its row read ``archive_no_week_update``; the link
+may be fine, but then the row is wrong, and complete accounting means a row a
+reader can believe.
 """
 
 from __future__ import annotations
@@ -34,10 +39,15 @@ from urllib.parse import urlsplit
 from src.logger import get_logger
 from src.report_agent.bundle import FROZEN_FILES, Bundle
 from src.report_agent.export import TRUSTED_DATE_SOURCES
+from src.report_agent.schema import REPORTED
 
 logger = get_logger(__name__)
 
 RAW_MD_LINK = re.compile(r"\]\(https?://")
+ITEM_LINK = re.compile(r"\]\(item:(\d+)\)")
+# Parts of the draft whose job is to name what the report could not use: titles
+# without a readable body, limits of the material. A link there claims nothing.
+LIMIT_FIELDS = ("scope_note", "coverage_markdown")
 # Structured sources assert their own event date through a named field rather
 # than through published_at_source, so they are dated by a different rule.
 STRUCTURED_PROVENANCE = frozenset({"weekly_bulletin", "submission_date_not_event"})
@@ -165,6 +175,15 @@ def verify_bundle(bundle: Bundle) -> dict[str, Any]:
     if unread:
         warnings.append(f"{len(unread)} cited identity/identities were never opened by "
                         f"the assessor: {unread[:8]}")
+    treatment_of = {row["raw_item_id"]: row["treatment"] for row in ledger}
+    not_reported = sorted(raw_id for raw_id in _finding_ids(bundle.maybe("report-draft.json", {}))
+                          if treatment_of.get(raw_id) not in REPORTED)
+    if not_reported:
+        warnings.append(
+            f"{len(not_reported)} identity/identities linked outside the coverage notes "
+            "have a ledger treatment saying the report did not use them: "
+            + ", ".join(f"{raw_id} ({treatment_of.get(raw_id)})"
+                        for raw_id in not_reported[:8]))
 
     # -- the register -----------------------------------------------------
     register = bundle.maybe("issue-register.json", [])
@@ -184,6 +203,7 @@ def verify_bundle(bundle: Bundle) -> dict[str, Any]:
         "unique_report_source_links": len(set(external)),
         "cited_identities": len(cited_ids),
         "cited_but_unread": unread,
+        "cited_but_not_reported": not_reported,
         "bodies_read_in_full": sum(1 for d in depth_of.values() if d == "full_stored_body"),
         "checks": {
             "frozen_export_complete": not missing,
@@ -198,6 +218,15 @@ def verify_bundle(bundle: Bundle) -> dict[str, Any]:
         },
     }
     return _write_result(bundle, errors, warnings, summary)
+
+
+def _finding_ids(draft: dict[str, Any]) -> set[int]:
+    """Ids the draft links as findings, verdict or watchlist - not as limits."""
+    texts = [value for key, value in draft.items()
+             if isinstance(value, str) and key not in LIMIT_FIELDS]
+    for section in draft.get("sections") or []:
+        texts += [section.get("heading") or "", section.get("markdown") or ""]
+    return {int(raw_id) for text in texts for raw_id in ITEM_LINK.findall(text)}
 
 
 def _cited_ids(bundle: Bundle, external: list[str]) -> set[int]:

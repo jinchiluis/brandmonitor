@@ -41,9 +41,9 @@ RULE_TREATMENTS = {
 
 TREATMENTS = {**ASSESSOR_TREATMENTS, **RULE_TREATMENTS}
 
-# Treatments that put an item in front of the customer in some form. Used by the
-# renderer to decide what may be cited and by the verifier to check that
-# everything cited was actually read.
+# Treatments that put an item in front of the customer in some form. The verifier
+# warns when the report links an identity outside its coverage notes whose
+# treatment is not one of these; the renderer itself cites any frozen identity.
 REPORTED = frozenset({"report", "merge", "background_only", "carry_forward"})
 
 # -- how deeply an identity was actually read ------------------------------

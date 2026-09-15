@@ -246,6 +246,114 @@ def test_failed_email_is_retried_without_repeating_model_call(corpus):
     assert result.emailed == 1 and len(sender.calls) == 1
 
 
+def _watermark(db):
+    with session(db) as conn:
+        row = conn.execute(
+            "SELECT position FROM watermark WHERE scope='analysis:jt-express:alert-news'"
+        ).fetchone()
+    return row["position"] if row else None
+
+
+def _three_temu_items(db):
+    with session(db) as conn:
+        for raw_id, title in ((1, "Temu fine"), (2, "Temu strike"), (3, "Temu fire")):
+            add_item(conn, raw_id, title, f"{title}: Temu faces a regulatory fine.")
+            add_body_gate(conn, raw_id, 1)
+
+
+def test_an_unusable_reply_becomes_a_flagged_alert_and_later_items_are_decided(corpus):
+    """One item the model cannot answer used to stop the run before the watermark
+    and before the email, and every later run retried it first."""
+    _three_temu_items(corpus)
+    wrong_shape = {"potential_alert": False, "summary_zh": "Not an alert because..."}
+    sender = FakeSender()
+
+    result = run_alert_gate(
+        PROFILE, db_path=corpus, sender=sender, now=NOW,
+        caller=FakeCaller(wrong_shape, wrong_shape, negative(), positive("罢工。")))
+
+    assert result.stopped is None and result.skipped == []
+    assert [d.fail_open for d in result.decisions] == [True, False, False]
+    assert [alert.title for alert in sender.calls[0]] == ["Temu fine", "Temu fire"]
+    with session(corpus) as conn:
+        payload = json.loads(conn.execute(
+            "SELECT payload FROM alert_decision WHERE raw_item_id=1").fetchone()["payload"])
+    assert payload["fail_open"] and "unusable reply" in payload["error"]
+    assert _watermark(corpus) == NOW
+
+
+def test_a_failed_call_leaves_only_that_item_for_the_next_run(corpus):
+    _three_temu_items(corpus)
+    sender = FakeSender()
+
+    result = run_alert_gate(
+        PROFILE, db_path=corpus, sender=sender, now=NOW,
+        caller=FakeCaller(TimeoutError("slow"), TimeoutError("slow"),
+                          positive("罢工。"), negative()))
+
+    assert [item.raw_item_id for item, _error in result.skipped] == [1]
+    assert result.stopped is None and len(result.decisions) == 2
+    assert [alert.title for alert in sender.calls[0]] == ["Temu strike"]
+    assert _watermark(corpus) is None
+
+    retry = FakeCaller(positive("罚款。"))
+    again = run_alert_gate(PROFILE, db_path=corpus, caller=retry, sender=FakeSender(),
+                           now="2026-09-12T08:00:00+00:00")
+    assert len(retry.calls) == 1 and "Temu fine" in retry.calls[0][1]
+    assert again.emailed == 1 and _watermark(corpus) == "2026-09-12T08:00:00+00:00"
+
+
+def test_a_refused_request_after_an_answer_is_about_the_item(corpus):
+    from src.title_gate import GateConfigError
+
+    _three_temu_items(corpus)
+    result = run_alert_gate(
+        PROFILE, db_path=corpus, sender=FakeSender(), now=NOW,
+        caller=FakeCaller(negative(), GateConfigError("BadRequestError: invalid_prompt"),
+                          negative()))
+
+    assert result.stopped is None
+    assert [item.raw_item_id for item, _error in result.skipped] == [2]
+
+
+def test_repeated_configuration_errors_stop_but_decided_alerts_still_go_out(corpus):
+    from src.title_gate import GateConfigError
+
+    with session(corpus) as conn:
+        add_item(conn, 9, "Temu fine", "Temu faces a regulatory fine.")
+        conn.execute(
+            "INSERT INTO alert_decision (raw_item_id,source_slug,external_id,client_slug,"
+            "prompt_version,profile_version,created_at,potential_alert,summary_zh,payload) "
+            "VALUES (9,'example.de','https://example.de/9',?,?,?,?,1,'罚款。','{}')",
+            (PROFILE.slug, "alert_gate-news-old", PROFILE.profile_version, START))
+    _three_temu_items(corpus)
+    sender = FakeSender()
+
+    result = run_alert_gate(
+        PROFILE, db_path=corpus, sender=sender, now=NOW,
+        caller=FakeCaller(GateConfigError("NotFoundError: model"),
+                          GateConfigError("NotFoundError: model")))
+
+    assert result.stopped.startswith("configuration error") and result.decisions == []
+    assert result.emailed == 1 and _watermark(corpus) is None
+
+
+def test_three_failures_in_a_row_stop_the_run(corpus):
+    _three_temu_items(corpus)
+    with session(corpus) as conn:
+        add_item(conn, 4, "Temu layoffs", "Temu faces a regulatory fine.")
+        add_body_gate(conn, 4, 1)
+    wrong_shape = {"potential_alert": True, "summary_zh": ""}
+    caller = FakeCaller(*[wrong_shape] * 6)
+
+    result = run_alert_gate(PROFILE, db_path=corpus, caller=caller, sender=FakeSender(),
+                            now=NOW)
+
+    assert "3 items in a row" in result.stopped
+    assert len(result.decisions) == 3 and len(caller.calls) == 6
+    assert _watermark(corpus) is None
+
+
 def test_dry_run_changes_nothing(corpus):
     with session(corpus) as conn:
         add_item(conn, 1, "Temu fine", "Temu faces a regulatory fine.")

@@ -310,8 +310,9 @@ def selection_from_db(db_path: Path,
     ``first_seen_in`` limits selection to items whose first version was stored
     by one of those runs - the daily pipeline passes the day's collection run,
     so each article reaches the LLM stages once. Later versions do not count as
-    new: a sitemap restamp writes version 2 of every URL it touches, which on BVL
-    would otherwise re-offer the whole archive after each regeneration.
+    new: a retitle or a fetched body writes version 2, and before re-dated
+    title-only hints stopped versioning, a sitemap restamp wrote version 2 of
+    every URL it touched - on BVL, the whole archive after each regeneration.
     """
     mode = "title_only" if scope == "title-only" else "all"
     configured: dict[tuple[str, str], dict] = {}

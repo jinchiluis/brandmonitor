@@ -226,6 +226,30 @@ def test_an_unsupported_story_marks_every_member_insufficient(bundle):
     assert by_id[101]["treatment"] == by_id[102]["treatment"] == "insufficient_evidence"
 
 
+def test_an_unsupported_story_is_never_written_up_as_a_main_finding(bundle):
+    """The write step gives every `main` issue its own section; the ledger would
+    call the same story insufficient_evidence."""
+    register, _ = _assess_scripted(bundle, status="insufficient_evidence")
+    assert register[0]["use"] == "conditional_watch"
+    reportable, _ = _assess_scripted(bundle)
+    assert reportable[0]["use"] == "main"
+
+
+def test_carry_forward_takes_its_effort_and_budget_from_config(bundle, monkeypatch):
+    calls = {}
+
+    class Recorder:
+        def agent(self, step, system, user, schema, tools, *, effort, max_tool_calls):
+            calls.update(effort=effort, budget=max_tool_calls)
+            return {"issues": []}
+
+    monkeypatch.setattr(BundleTools, "open_issues", lambda self: {
+        "issues": [{"id": "ports", "use": "conditional_watch"}], "source": "earlier"})
+    A._carry_forward(Recorder(), bundle, BundleTools(bundle, ToolLog()), "system",
+                     effort="high", budget=7)
+    assert calls == {"effort": "high", "budget": 7}
+
+
 def test_the_register_carries_evidence_and_a_next_trigger(bundle):
     register, _ = _assess_scripted(bundle)
     issue = register[0]
@@ -329,6 +353,23 @@ def test_verification_warns_when_the_report_cites_something_unread(bundle):
     # 102 was merged, never opened. Worth seeing every week; not a build failure.
     assert result["status"] == "passed"
     assert any("never opened" in warning for warning in result["warnings"])
+
+
+def test_verification_warns_when_a_finding_links_an_item_the_ledger_did_not_use(bundle):
+    draft = _draft()
+    draft["watchlist_markdown"] += "\n\n见[背景](item:103)。"
+    _rendered(bundle, draft)
+    result = verify_bundle(bundle)
+    assert result["status"] == "passed"
+    assert result["cited_but_not_reported"] == [103]
+    assert any("103 (retain_gate_stop)" in warning for warning in result["warnings"])
+
+
+def test_coverage_notes_may_name_what_the_report_could_not_use(bundle):
+    draft = _draft()
+    draft["coverage_markdown"] = "只有标题：[天气](item:103)。"
+    _rendered(bundle, draft)
+    assert verify_bundle(bundle)["cited_but_not_reported"] == []
 
 
 def test_bundle_hashes_cover_every_file(bundle):

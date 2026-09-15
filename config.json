@@ -5,6 +5,10 @@
   "lookback_days": {
     "news": 30
   },
+  "collection": {
+    "_comment": "overlap_hours widens each sitemap and feed date filter below the source's watermark; URL dedup drops what is already stored. Without it an article whose discovery date is earlier than the previous run's start is never collected. Measured 2026-09-15: DVZ and haendlerbund.de state date-only dates (read as 02:00), so nothing published after 06:00 fell inside a later window; VerkehrsRundschau lists articles hours after their lastmod, which a 2-hour intraday window never contains. All three had stored nothing new for 3-5 days while reporting ok or zero. 48 covers a date-only day plus that lag and matches a news sitemap's two-day listing. Frontpage discovery is not date-filtered and does not use it. The watermark itself is unchanged.",
+    "overlap_hours": 48
+  },
   "body_fetch": {
     "_comment": "Full-text sources produce ~157 items/day, so a limit of 100 could never keep up. 1000 is a safety rail, not a throttle. delay_seconds is enforced per host, not globally: tasks are interleaved across sources, so consecutive requests normally hit different publishers anyway. max_attempts counts consecutive retryable failures (a success resets it); after that many the URL is retired as unavailable and only --retry-unavailable or a changed discovery hint reopens it.",
     "limit": 1000,
@@ -41,6 +45,7 @@
     "model": "gpt-5.6-sol",
     "timeout_seconds": 600,
     "triage_batch_size": 25,
+    "carry_forward_tool_calls": 40,
     "deep_read_tool_calls": 30,
     "challenge_tool_calls": 20,
     "max_stories": 20,

@@ -22,6 +22,9 @@ CRAWLER_WORKERS = _CFG["workers"]["crawler"]
 
 # -- lookback --
 NEWS_LOOKBACK_DAYS = _CFG["lookback_days"]["news"]
+# Sitemap and feed dates are filtered from this many hours before a source's
+# watermark, because a discovery date can precede the moment the article appears.
+COLLECTION_OVERLAP_HOURS = _CFG.get("collection", {}).get("overlap_hours", 48)
 
 # -- public body fetches (bounded per invocation) --
 BODY_FETCH_LIMIT = _CFG.get("body_fetch", {}).get("limit", 100)

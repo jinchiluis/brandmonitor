@@ -317,6 +317,7 @@ def cmd_alert_gate(args: argparse.Namespace) -> int:
     from src.db import DB_PATH, migrate
     from src.logger import install_excepthook, set_pipeline_log
     from src.profile import load_profile
+    from src.title_gate import GateConfigError
 
     log_path = set_pipeline_log(f"alert_gate_{args.client}")
     install_excepthook()
@@ -324,7 +325,7 @@ def cmd_alert_gate(args: argparse.Namespace) -> int:
     profile = load_profile(args.client)
     try:
         result = run_alert_gate(profile, db_path=DB_PATH, dry_run=args.dry_run)
-    except (AlertConfigError, AlertDeliveryError) as exc:
+    except (AlertConfigError, AlertDeliveryError, GateConfigError) as exc:
         print(f"alert gate could not run: {exc}")
         return 2
 
@@ -336,14 +337,21 @@ def cmd_alert_gate(args: argparse.Namespace) -> int:
             print(f"  [{', '.join(item.triggers)}] {item.source_slug}  {item.title[:100]}")
         print("dry run: no model calls, decisions, watermark, or email")
     else:
-        print(f"checked {len(result.decisions)}; {result.positives} potential alerts")
+        print(f"checked {len(result.decisions)}; {result.positives} potential alerts, "
+              f"{result.fail_open} of them flagged because the model gave no usable answer")
+        for item, error in result.skipped:
+            print(f"  undecided, retried next run: {item.url} - {error}")
         if result.emailed:
             print(f"emailed one digest containing {result.emailed} alert(s); "
                   f"{result.pushed} push notification(s) sent")
         else:
             print("no email needed")
+        if result.stopped:
+            print(f"stopped early - {result.stopped}; the watermark did not advance")
     print(f"Log: {log_path}")
-    return 0
+    # An undecided item is retried by the next run, but one that keeps failing
+    # needs a person, so it must not look like a clean run.
+    return 2 if result.stopped else 1 if result.skipped else 0
 
 
 def cmd_collect_dsa(args: argparse.Namespace) -> int:

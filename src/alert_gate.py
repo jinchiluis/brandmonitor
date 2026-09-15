@@ -18,6 +18,13 @@ weekly relevance ledger, and alerting is an additional action on top of that
 ledger.  The alert watermark advances after every candidate was decided.  Email
 delivery is separate: positive rows stay unsent and are retried together on the
 next invocation if SMTP fails.
+
+One item must never hold up the others. A model that twice answers in the wrong
+shape gets a flagged "could not decide" alert, so a person looks - the reviewer
+is a human and recall is the point. A call that fails outright leaves that item
+undecided and the watermark where it is, so the next run retries it, while every
+other item is still decided and every decided alert still sent. Three such
+outcomes in a row stop the run: that is an outage or a broken model, not an item.
 """
 
 from __future__ import annotations
@@ -58,6 +65,9 @@ PUSH_SUMMARY_BYTES = 1500
 # report. A new source's first crawl or a re-keyed URL brings in whole archives.
 STALE_DAYS = 14
 BERLIN = ZoneInfo("Europe/Berlin")
+MAX_FAILURES_IN_A_ROW = 3
+# The summary a flagged fail-open alert carries in place of the model's.
+FAIL_OPEN_SUMMARY = "模型两次未给出可用判断，未能自动筛查；请人工查看原文。"
 
 logger = get_logger(__name__)
 
@@ -89,6 +99,10 @@ class AlertDeliveryError(AlertGateError):
     """The combined alert email could not be delivered."""
 
 
+class AlertCallError(AlertGateError):
+    """The model call for one item failed outright, twice."""
+
+
 @dataclass(frozen=True)
 class AlertItem:
     raw_item_id: int
@@ -112,6 +126,8 @@ class AlertDecision:
     summary_zh: str
     input_tokens: int = 0
     output_tokens: int = 0
+    fail_open: bool = False
+    error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -140,10 +156,18 @@ class AlertGateResult:
     email_message_id: str | None = None
     pushed: int = 0
     dry_run: bool = False
+    # Offered items left undecided for the next run, with the error for each.
+    skipped: list[tuple[AlertItem, str]] = field(default_factory=list)
+    # Why deciding stopped before every offered item was tried, if it did.
+    stopped: str | None = None
 
     @property
     def positives(self) -> int:
         return sum(decision.potential_alert for decision in self.decisions)
+
+    @property
+    def fail_open(self) -> int:
+        return sum(decision.fail_open for decision in self.decisions)
 
 
 Sender = Callable[[Sequence[PendingAlert]], str]
@@ -275,17 +299,24 @@ def render_item(item: AlertItem, today: str,
 
 def _decide(system: str, item: AlertItem, caller: Caller, today: str,
             body_chars: int = BODY_GATE_BODY_CHARS) -> AlertDecision:
+    """Ask twice at most.
+
+    Two replies in the wrong shape give a flagged fail-open alert: the model
+    answered, so asking again next run would likely get the same. A call that
+    failed outright the last time raises AlertCallError and stays undecided.
+    """
     error = ""
+    call_failed = False
     tokens_in = tokens_out = 0
     for _attempt in range(MAX_ATTEMPTS):
         try:
             reply, usage = caller(system, render_item(item, today, body_chars))
-            error = ""
+            error, call_failed = "", False
         except GateConfigError:
             raise
         except Exception as exc:
             reply, usage = "", {}
-            error = f"{type(exc).__name__}: {exc}"[:300]
+            error, call_failed = f"{type(exc).__name__}: {exc}"[:300], True
         tokens_in += usage.get("in", 0)
         tokens_out += usage.get("out", 0)
         parsed = None if error else parse_reply(reply)
@@ -294,7 +325,10 @@ def _decide(system: str, item: AlertItem, caller: Caller, today: str,
             return AlertDecision(item, potential, summary, tokens_in, tokens_out)
         if not error:
             error = f"unusable reply: {reply[:200]!r}"
-    raise AlertGateError(f"could not decide {item.url}: {error}")
+    if call_failed:
+        raise AlertCallError(f"could not decide {item.url}: {error}")
+    return AlertDecision(item, True, FAIL_OPEN_SUMMARY, tokens_in, tokens_out,
+                         fail_open=True, error=error)
 
 
 def _payload(value: str) -> dict:
@@ -436,6 +470,7 @@ def _store_decision(conn, decision: AlertDecision, profile: ClientProfile,
         "stage": STAGE, "kind": KIND, "route": item.route,
         "triggers": list(item.triggers), "selector_reasons": list(item.selector_reasons),
         "model": model, "published_label": published_label(item),
+        "fail_open": decision.fail_open, "error": decision.error,
         "tokens": {"in": decision.input_tokens, "out": decision.output_tokens},
     }
     conn.execute(
@@ -699,16 +734,45 @@ def run_alert_gate(profile: ClientProfile, *, db_path: Path = DB_PATH,
     if offered:
         assert caller is not None
     today = berlin_day(end)
+    answered = False
+    config_errors = failures_in_a_row = 0
     for item in offered:
-        decision = _decide(system, item, caller, today)
-        with session(db_path) as conn:
-            _store_decision(conn, decision, profile, version, model)
-        result.decisions.append(decision)
+        try:
+            decision = _decide(system, item, caller, today)
+        except (AlertCallError, GateConfigError) as exc:
+            message = (str(exc) if isinstance(exc, AlertCallError)
+                       else f"{type(exc).__name__}: {exc}"[:300])
+            result.skipped.append((item, message))
+            logger.warning("alert gate left %s undecided: %s", item.url, message)
+            # openai_caller reports a refused request as a configuration error.
+            # Once any call in this run has been answered, the key and model are
+            # fine, and a refusal is about this item - a content filter, say.
+            config_errors += isinstance(exc, GateConfigError)
+            if not answered and config_errors >= 2:
+                result.stopped = f"configuration error: {message}"
+                break
+        else:
+            answered = True
+            with session(db_path) as conn:
+                _store_decision(conn, decision, profile, version, model)
+            result.decisions.append(decision)
+            if not decision.fail_open:
+                failures_in_a_row = 0
+                continue
+            logger.warning("alert gate could not decide %s, sent as a flagged alert: %s",
+                           item.url, decision.error)
+        failures_in_a_row += 1
+        if failures_in_a_row >= MAX_FAILURES_IN_A_ROW:
+            result.stopped = f"{failures_in_a_row} items in a row got no usable answer"
+            break
 
-    # Every candidate in this time slice now has a durable decision. Delivery can
-    # fail independently; unsent positives are selected without using the watermark.
-    with session(db_path) as conn:
-        advance_watermark(conn, scope, end)
+    # The watermark moves only when every candidate in this time slice has a
+    # durable decision; otherwise the next run re-offers the undecided ones.
+    # Delivery is independent either way: unsent positives are selected without
+    # the watermark, so what was decided goes out now.
+    if result.stopped is None and not result.skipped:
+        with session(db_path) as conn:
+            advance_watermark(conn, scope, end)
 
     result.pending = pending_alerts(db_path, profile)
     if result.pending:

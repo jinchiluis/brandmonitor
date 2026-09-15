@@ -24,7 +24,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import requests
 
-from src.config import CRAWLER_WORKERS, INPUT_DIR, NEWS_LOOKBACK_DAYS
+from src.config import (COLLECTION_OVERLAP_HOURS, CRAWLER_WORKERS, INPUT_DIR,
+                        NEWS_LOOKBACK_DAYS)
 from src.db import (
     advance_watermark, finish_run, get_watermark, record_source_result, session,
     set_watermark,
@@ -224,6 +225,30 @@ def _hash(hint: ArticleHint) -> str:
     return hashlib.sha256(basis.encode("utf-8")).hexdigest()
 
 
+def _title_key(title: Optional[str]) -> str:
+    return " ".join((title or "").split())
+
+
+def _is_retitle(hint: ArticleHint, prior: List[sqlite3.Row]) -> bool:
+    """Whether a hint for an already stored title-only item is a new version.
+
+    A title-only item's content is its title. Its discovery date is not content:
+    WELT, WiWo and Handelsblatt move <news:publication_date> when they update an
+    article, ZEIT moves its feed <pubDate>, BVL restamps <lastmod>, and SZ's
+    frontpage invents 23:59:59 - about 500 bodyless versions a day, measured
+    2026-09-15. So only a title no version has carried yet is a new version, and
+    a missing title never is: it would replace a known title with a stub.
+
+    Nothing discovered replaces a fetched body either. A frontpage re-date wrote
+    version 3 over the fetched body of an SZ article about Temu and Shein, and
+    every stage reads the latest version, so the body vanished for all of them.
+    """
+    title = _title_key(hint.title)
+    if not title or any(row["has_body"] for row in prior):
+        return False
+    return all(_title_key(row["title"]) != title for row in prior)
+
+
 def _dedupe_hints(hints: List[ArticleHint]) -> List[ArticleHint]:
     """Collapse hints that point at the same article.
 
@@ -245,13 +270,25 @@ def _dedupe_hints(hints: List[ArticleHint]) -> List[ArticleHint]:
 
 
 def collect_source(entry: Dict[str, Any], start: datetime,
-                   end: datetime, max_per_source: int) -> Tuple[List[ArticleHint], Optional[str]]:
+                   end: datetime, max_per_source: int, *,
+                   overlap: timedelta = timedelta(hours=COLLECTION_OVERLAP_HOURS),
+                   ) -> Tuple[List[ArticleHint], Optional[str]]:
     """Run every enabled discovery method for one source.
 
     Returns (hints, error). An error from one method is fatal for that source only;
     it is surfaced rather than swallowed, because a silently failing source looks
     exactly like a quiet one.
+
+    ``start`` is the source's watermark, but sitemap and feed dates are filtered
+    from ``start - overlap``. A discovery date is not the moment an article became
+    visible: DVZ and haendlerbund.de state date-only dates, read as 02:00, and
+    VerkehrsRundschau lists articles hours after their <lastmod>. Filtering from
+    the watermark itself lost every such article for good while the source
+    reported ok. Re-found URLs cost nothing - store_hints skips them - so the
+    overlap re-reads without re-storing. Frontpage results are not date-filtered
+    and keep the unshifted start.
     """
+    since = start - overlap
     hints: List[ArticleHint] = []
     errors: List[str] = []
     session_html = requests.Session()
@@ -269,7 +306,7 @@ def collect_source(entry: Dict[str, Any], start: datetime,
         sm = requests.Session()
         sm.headers.update(SITEMAP_HEADERS)
         try:
-            hints += collect_from_sitemaps(sm, entry["url"], start, end,
+            hints += collect_from_sitemaps(sm, entry["url"], since, end,
                                            max_per_source=max_per_source)
         except Exception as exc:
             errors.append(f"sitemap: {type(exc).__name__}: {exc}")
@@ -279,7 +316,7 @@ def collect_source(entry: Dict[str, Any], start: datetime,
             feed_hints = collect_from_feeds(session_html, origin)
             # Feeds are not window-limited by the collector, so filter here.
             hints += [h for h in feed_hints
-                      if h.published_at is None or in_range(h.published_at, start, end)]
+                      if h.published_at is None or in_range(h.published_at, since, end)]
         except Exception as exc:
             errors.append(f"feeds: {type(exc).__name__}: {exc}")
 
@@ -304,11 +341,11 @@ def store_hints(conn: sqlite3.Connection, run_id: int, slug: str,
                 full_text: bool = False) -> int:
     """Insert hints as raw items. Returns the number of rows written.
 
-    For title-only sources, a hash matching any stored version is skipped. One whose
-    hash is new - a retitled or re-dated article - is written as a further version
+    For title-only sources, a retitled article is written as a further version
     rather than dropped, which is what mvp_plan means by "versioned raw source
-    items". Earlier versions are left intact. Full-text sources instead queue a
-    body recheck and let the body stage decide whether content has changed.
+    items"; a re-dated one is not, and nothing is written over a fetched body (see
+    _is_retitle). Earlier versions are left intact. Full-text sources instead queue
+    a body recheck and let the body stage decide whether content has changed.
     """
     from src.bodies import queue_body
 
@@ -342,8 +379,9 @@ def store_hints(conn: sqlite3.Connection, run_id: int, slug: str,
         # other - and comparing only the newest let that ratchet a fresh version
         # on every run, without bound.
         prior = conn.execute(
-            "SELECT version, content_hash FROM raw_item "
-            "WHERE source_slug = ? AND external_id = ?",
+            "SELECT version, content_hash, title, "
+            "json_extract(payload, '$.body_text') IS NOT NULL AS has_body "
+            "FROM raw_item WHERE source_slug = ? AND external_id = ?",
             (slug, external_id),
         ).fetchall()
         if full_text:
@@ -353,6 +391,8 @@ def store_hints(conn: sqlite3.Connection, run_id: int, slug: str,
             if prior:
                 continue
             payload_data["body_status"] = "pending"
+        elif prior and not _is_retitle(h, prior):
+            continue
         if any(r["content_hash"] == content_hash for r in prior):
             continue
         version = max(r["version"] for r in prior) + 1 if prior else 1

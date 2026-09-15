@@ -409,12 +409,14 @@
       "kep-branche-",
       "presse/pressemeldungen",
       "presse/pressekontakt",
-      "presse/mediendownload"
+      "presse/mediendownload",
+      "themen-und-positionen",
+      "kep-branche/zahlen-und-fakten"
     ],
     "excluded_url_substrings": [
       "/aktuelles?"
     ],
-    "notes": "frontpage-only fallback (48 links, undated); client wrote 'BPEX'; biek.de redirects here after the BIEK->BPEX rename. bpex.de is an unrelated consultancy - do not monitor it. Frontpage keeps every navigation link, so 38 of 57 stored rows were about, legal, listing and pagination pages (2026-09-11). Excluded: those sections, and '/aktuelles?' - the pagination and PDF copies of the /presse/meldung releases share the bare section path with real /aktuelles/meldung items. The PDFs were the only dated BPEX rows; the HTML releases are kept undated, as for other associations",
+    "notes": "frontpage-only fallback (48 links, undated); client wrote 'BPEX'; biek.de redirects here after the BIEK->BPEX rename. bpex.de is an unrelated consultancy - do not monitor it. Frontpage keeps every navigation link, so 38 of 57 stored rows were about, legal, listing and pagination pages (2026-09-11). Excluded: those sections, and '/aktuelles?' - the pagination and PDF copies of the /presse/meldung releases share the bare section path with real /aktuelles/meldung items. The PDFs were the only dated BPEX rows; the HTML releases are kept undated, as for other associations. 2026-09-15: themen-und-positionen and kep-branche/zahlen-und-fakten excluded as output too - all 9 stored rows there were topic pages (Zoll, Postgesetz, ...), no article sits below them, and the body gate passed every one because a topic page on postal law is on topic. They stay in allowed_dirs: excluded_dirs filters results, not frontpage seeds, so their links to /presse/meldung releases are still followed.",
     "content_mode": "full_text",
     "access": "free"
   },

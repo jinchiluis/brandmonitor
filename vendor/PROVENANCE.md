@@ -165,6 +165,20 @@ Tagesschau 0 → 143 entries, e-commerce Magazin 40 → 120, BGL 20 → 30, HDE 
 Extending the path list would have fixed these three; autodiscovery fixes the next
 site too, and a wrong `"feeds": false` costs coverage silently.
 
+**2026-09-15 — a sitemap URL counts once against `max_per_source`.**
+`collect_from_sitemaps` counted every in-window `<url>` entry, so a URL listed by
+the news sitemap and again by an archive sitemap spent two slots. It now keeps one
+hint per normalised URL, replacing the kept copy only with a richer one (a title,
+then a date - the rule `src/collect.py`'s `_dedupe_hints` applies), and counts
+only new URLs.
+
+Found while widening the collection window by a 48-hour overlap (weaknesses.md
+N1): WELT lists 111 URLs as 307 entries in two hours, and a 50-hour window hit the
+2,000 cap at about 1,000 distinct URLs, dropping one of the latest two hours'
+articles. After the change the same window yields 1,223 distinct URLs with none of
+the recent ones missing. Nothing downstream changes, since storage already
+de-duplicated; the reported "found" counts for such sources fall to distinct URLs.
+
 **2026-09-13 — `proxy.py` added, then unwired.** A Bright Data ISP-proxy fallback
 ported from rewriter was hooked into `crawler_html_utils.fetch_html` and
 `scraper_fetch_html.fetch_html`, then removed the same day. Neither hook reached the

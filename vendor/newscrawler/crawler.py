@@ -546,6 +546,12 @@ def collect_from_sitemaps(session: requests.Session, site_url: str, start: datet
     # (already extracted above, removed duplicate code)
 
     per_source_counts: Dict[str, int] = {"sitemap": 0}
+    # A URL listed by several sitemaps counts once against max_per_source. WELT
+    # lists 111 URLs as 307 entries in two hours, so counting entries spent the
+    # cap on repeats: with a two-day window its 2,000 slots held ~1,000 URLs and
+    # the traversal stopped before reaching some new ones. A later copy replaces
+    # the kept one only when it is richer, by the same rule as collect._dedupe_hints.
+    position: Dict[str, int] = {}
     max_sitemap_fetches = 100  # guards against broken/infinite sitemap trees; skips don't count
     sitemap_fetch_count = 0
     while queue:
@@ -585,13 +591,21 @@ def collect_from_sitemaps(session: requests.Session, site_url: str, start: datet
                 # Filter by allowed_dirs if specified
                 if not url_matches_dirs(loc, allowed_dirs):
                     continue
+                # An entry without a date of its own inherits the containing
+                # sitemap's <lastmod> or filename month. That is a change
+                # signal at best, so it is labelled like one.
+                hint = ArticleHint(url=normalize_url(loc), published_at=entry_dt, title=title,
+                                   source="sitemap",
+                                   date_source=date_source if dt else "lastmod")
+                if hint.url in position:
+                    kept = hints[position[hint.url]]
+                    if (hint.title is not None, hint.published_at is not None) > (
+                            kept.title is not None, kept.published_at is not None):
+                        hints[position[hint.url]] = hint
+                    continue
                 if per_source_counts["sitemap"] < max_per_source:
-                    # An entry without a date of its own inherits the containing
-                    # sitemap's <lastmod> or filename month. That is a change
-                    # signal at best, so it is labelled like one.
-                    hints.append(ArticleHint(url=normalize_url(loc), published_at=entry_dt, title=title,
-                                             source="sitemap",
-                                             date_source=date_source if dt else "lastmod"))
+                    position[hint.url] = len(hints)
+                    hints.append(hint)
                     per_source_counts["sitemap"] += 1
 
         # News sitemaps first, then newest-first. Both orderings exist to spend a

@@ -104,6 +104,51 @@ class TestStoreHints:
                     conn.execute("SELECT COUNT(*) c FROM raw_item").fetchone()["c"])
         assert totals[0] == totals[1] == totals[2]
 
+    def test_a_redated_title_only_item_writes_no_version(self, db):
+        """WELT and WiWo move <news:publication_date> whenever they update an
+        article; BVL restamps <lastmod>. A date is not a title-only item's content."""
+        with session(db) as conn:
+            rid = start_run(conn, "news", "a", "b")
+            for when in ("2026-09-08T17:19:00+02:00", "2026-09-15T12:20:00+02:00"):
+                store_hints(conn, rid, "x.de", [hint("https://x.de/a-one", title="Same",
+                                                     when=when)])
+            rows = list(conn.execute("SELECT version, published_at FROM raw_item"))
+        assert [(r["version"], r["published_at"][:10]) for r in rows] == [(1, "2026-09-08")]
+
+    def test_an_untitled_stub_gains_its_title_once_and_never_loses_it(self, db):
+        with session(db) as conn:
+            rid = start_run(conn, "news", "a", "b")
+            store_hints(conn, rid, "x.de", [hint("https://x.de/a-one", title=None, when=None)])
+            store_hints(conn, rid, "x.de", [hint("https://x.de/a-one", title="Real Title",
+                                                 source="rss")])
+            # SZ's frontpage re-finds it untitled with a made-up 23:59:59 date.
+            store_hints(conn, rid, "x.de", [hint("https://x.de/a-one", title=None,
+                                                 when="2026-09-14T23:59:59+00:00",
+                                                 source="frontpage")])
+            store_hints(conn, rid, "x.de", [hint("https://x.de/a-one", title=" Real  Title ")])
+            rows = list(conn.execute("SELECT version, title FROM raw_item ORDER BY version"))
+        assert [(r["version"], r["title"]) for r in rows] == [(1, None), (2, "Real Title")]
+
+    def test_discovery_never_writes_over_a_fetched_body(self, db):
+        """A frontpage re-date wrote version 3 over an SZ body; every stage reads
+        the latest version, so the body vanished from all of them."""
+        with session(db) as conn:
+            rid = start_run(conn, "news", "a", "b")
+            store_hints(conn, rid, "x.de", [hint("https://x.de/a-one", title=None)])
+            conn.execute(
+                "INSERT INTO raw_item (source_slug, source_kind, external_id, version, url, "
+                "title, published_at, fetched_at, first_run_id, content_hash, payload) "
+                "SELECT source_slug, source_kind, external_id, 2, url, 'Page Title', "
+                "published_at, fetched_at, first_run_id, 'body-hash', "
+                "json_set(payload, '$.body_text', 'Der Artikel.') FROM raw_item")
+            stored = store_hints(conn, rid, "x.de", [
+                hint("https://x.de/a-one", title="Feed Title", when="2026-09-12T14:51:00+02:00",
+                     source="frontpage")])
+            latest = conn.execute(
+                "SELECT version, json_extract(payload, '$.body_text') body FROM raw_item "
+                "ORDER BY version DESC LIMIT 1").fetchone()
+        assert stored == 0 and (latest["version"], latest["body"]) == (2, "Der Artikel.")
+
     def test_undated_items_are_still_stored(self, db):
         with session(db) as conn:
             rid = start_run(conn, "news", "a", "b")
@@ -156,6 +201,58 @@ class TestCollectSourceErrors:
         now = datetime.now(tz=BERLIN_TZ)
         hints, error = collect_source(self._entry(), now - timedelta(days=30), now, 100)
         assert hints == [] and "origin probe failed" in error
+
+
+class TestWindowOverlap:
+    """A discovery date can precede the moment an article becomes visible.
+
+    DVZ's news sitemap says only "2026-09-15" (read as 02:00) and VerkehrsRundschau
+    lists an article hours after its <lastmod>. Filtering from the watermark itself
+    stored nothing from either for days while both reported ok.
+    """
+
+    def _entry(self):
+        return {"url": "https://x.de/", "sitemap": True, "feeds": True,
+                "frontpage": True, "organization": "X"}
+
+    def test_sitemap_and_feed_dates_are_filtered_from_before_the_watermark(self, monkeypatch):
+        watermark = datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN_TZ)
+        end = watermark + timedelta(hours=2)
+        seen = {}
+        monkeypatch.setattr("src.collect.pick_accessible_origin",
+                            lambda s, u: "https://x.de")
+
+        def sitemaps(_session, _url, start, _end, max_per_source):
+            seen["sitemap"] = start
+            return []
+
+        def frontpage(_session, _origin, start_date, cap):
+            seen["frontpage"] = start_date
+            return []
+
+        monkeypatch.setattr("src.collect.collect_from_sitemaps", sitemaps)
+        monkeypatch.setattr("src.collect.collect_from_frontpage", frontpage)
+        monkeypatch.setattr("src.collect.collect_from_feeds", lambda *a: [
+            hint("https://x.de/date-only", when="2026-09-15T02:00:00+02:00", source="rss"),
+            hint("https://x.de/too-old", when="2026-09-13T13:00:00+02:00", source="rss"),
+        ])
+
+        hints, error = collect_source(self._entry(), watermark, end, 100,
+                                      overlap=timedelta(hours=48))
+
+        assert error is None
+        assert seen == {"sitemap": watermark - timedelta(hours=48), "frontpage": watermark}
+        assert {h.url for h in hints} == {"https://x.de/date-only"}
+
+    def test_refinding_stored_urls_in_the_overlap_stores_nothing(self, tmp_path):
+        path = tmp_path / "t.sqlite3"
+        migrate(path)
+        hints = [hint("https://x.de/a-one", when="2026-09-15T02:00:00+02:00")]
+        with session(path) as conn:
+            rid = start_run(conn, "news", "a", "b")
+            first = store_hints(conn, rid, "x.de", hints)
+            again = store_hints(conn, rid, "x.de", hints)
+        assert (first, again) == (1, 0)
 
 
 class TestHintDeduplication:
@@ -423,6 +520,32 @@ class TestNewsSitemapPriority:
 
         assert fetched == ["https://x.de/news-sitemap.xml"]
         assert hints[0].title == "https://x.de/news-sitemap.xml"
+
+    def test_a_url_listed_by_several_sitemaps_counts_once_against_the_cap(self, monkeypatch):
+        """WELT lists 111 URLs as 307 entries in two hours; counting entries spent
+        the cap on repeats before the traversal reached some new URLs."""
+        from vendor.newscrawler import crawler
+
+        when = datetime(2026, 9, 10, tzinfo=BERLIN_TZ)
+        monkeypatch.setattr(crawler.sources, "get_site_rules", lambda url: {})
+        monkeypatch.setattr(crawler, "discover_sitemaps", lambda session, site_url, extra=None: [
+            "https://x.de/news-sitemap.xml", "https://x.de/sitemap-a.xml",
+            "https://x.de/sitemap-b.xml"])
+        listings = {
+            "https://x.de/news-sitemap.xml": [("https://x.de/one", when, None, "news_sitemap")],
+            "https://x.de/sitemap-a.xml": [("https://x.de/one", when, "One", "news_sitemap")],
+            "https://x.de/sitemap-b.xml": [("https://x.de/one", when, None, "lastmod"),
+                                           ("https://x.de/two", when, None, "lastmod")],
+        }
+        monkeypatch.setattr(crawler, "fetch_sitemap_urls",
+                            lambda session, url: (listings[url], []))
+
+        hints = crawler.collect_from_sitemaps(
+            None, "https://x.de/", when - timedelta(days=1), when + timedelta(days=1),
+            max_per_source=2)
+
+        assert [(h.url, h.title) for h in hints] == [
+            ("https://x.de/one", "One"), ("https://x.de/two", None)]
 
 
 class TestExtraSitemapUrls:

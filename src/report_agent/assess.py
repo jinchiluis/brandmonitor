@@ -208,7 +208,9 @@ def run_assessment(bundle: Bundle, *, model: str, config: dict[str, Any],
                              **fields})
 
     # -- step 1: carry-forward ------------------------------------------
-    carried = _carry_forward(assessor, bundle, tools, system_for("carry_forward"))
+    carried = _carry_forward(assessor, bundle, tools, system_for("carry_forward"),
+                             effort=_effort(config, "carry_forward", "medium"),
+                             budget=int(config.get("carry_forward_tool_calls", 40)))
     note("carry_forward", issues=len(carried["issues"]),
          matched=sum(len(i["matched"]) for i in carried["issues"]),
          skipped=carried.get("skipped"))
@@ -289,7 +291,7 @@ def _effort(config: dict[str, Any], step: str, fallback: str) -> str:
 # ── steps ─────────────────────────────────────────────────────────────────
 
 def _carry_forward(assessor: Assessor, bundle: Bundle, tools: BundleTools,
-                   system: str) -> dict[str, Any]:
+                   system: str, *, effort: str, budget: int) -> dict[str, Any]:
     step_tools = tools.for_story("carry_forward", None)
     previous = step_tools.open_issues()
     open_issues = [i for i in previous["issues"] if i.get("use") != "closed"]
@@ -301,7 +303,7 @@ def _carry_forward(assessor: Assessor, bundle: Bundle, tools: BundleTools,
                            if k in ("id", "label", "use", "status", "next", "current")}
                           for issue in open_issues], ensure_ascii=False, indent=1))
     reply = assessor.agent("carry_forward", system, user, CARRY_SCHEMA, step_tools,
-                           effort="medium", max_tool_calls=40)
+                           effort=effort, max_tool_calls=budget)
     known = {i["id"] for i in open_issues}
     issues = [i for i in reply.get("issues", []) if i.get("issue_id") in known]
     for issue in issues:
@@ -489,6 +491,12 @@ def _build_register(bundle: Bundle, stories: list[dict[str, Any]],
         use = drafted.get("use", "main")
         if drafted["status"] == "background_only":
             use = "background"
+        elif drafted["status"] == "insufficient_evidence" and use == "main":
+            # The write step gives every `main` issue a section of its own, while
+            # the ledger calls this story unsupported. Deep read or the challenge
+            # can reach that status with `use` still at main; at most it is a
+            # thing to watch for the evidence that would carry it.
+            use = "conditional_watch"
         register.append({
             "id": issue_id, "label": story.get("label") or drafted.get("headline", ""),
             "use": use,
