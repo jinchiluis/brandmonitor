@@ -320,7 +320,10 @@
     "allowed_dirs": [
       "nachrichten"
     ],
-    "notes": "sitemap 232/14d",
+    "excluded_url_patterns": [
+      "^/nachrichten(/[a-z-]+)?/?$"
+    ],
+    "notes": "sitemap 232/14d. excluded_url_patterns (2026-09-15) keeps the /nachrichten section index pages out: their lastmod moves, so they were re-fetched every run. Section names contain hyphens (recht-geld) but every article ends in -\\d{7}; checked against stored URLs, 8 matches, all sections.",
     "content_mode": "full_text",
     "access": "free"
   },
@@ -350,7 +353,10 @@
     "allowed_dirs": [
       "magazin"
     ],
-    "notes": "sitemap 698/14d. Narrowed 2026-09-09 to /magazin: excluded /tag (442), /autoren, /themen, /experten, /format, /dossiers - 515 index pages of 2000. Its plain sitemap is unusable for dates: a 2026-08-13 migration restamped the whole archive, so stored rows were 90% pre-2025 and untitled. news-sitemap.xml carries titles and real publication dates and is now traversed first (see vendor/PROVENANCE.md); it is a rolling ~3-day, ~13/day window, so a missed daily run loses coverage permanently. No paywall: 53 pages sampled, all isAccessibleForFree=true. See todo.md",
+    "excluded_url_patterns": [
+      "^/magazin(/[a-z]+)?/?$"
+    ],
+    "notes": "sitemap 698/14d. excluded_url_patterns (2026-09-15) keeps the /magazin section index pages (ki, tech, payment, ...) out: their lastmod moves, so they were re-fetched every run. Section names are single words and every article slug has a hyphen; only 38 of 290 articles carry a date prefix, so a hyphen-tolerant pattern would drop real articles. Narrowed 2026-09-09 to /magazin: excluded /tag (442), /autoren, /themen, /experten, /format, /dossiers - 515 index pages of 2000. Its plain sitemap is unusable for dates: a 2026-08-13 migration restamped the whole archive, so stored rows were 90% pre-2025 and untitled. news-sitemap.xml carries titles and real publication dates and is now traversed first (see vendor/PROVENANCE.md); it is a rolling ~3-day, ~13/day window, so a missed daily run loses coverage permanently. No paywall: 53 pages sampled, all isAccessibleForFree=true. See todo.md",
     "content_mode": "full_text",
     "access": "free"
   },

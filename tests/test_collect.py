@@ -341,6 +341,25 @@ class TestHintDeduplication:
         assert not url_is_excluded(
             "https://x.de/news/acme-eroeffnet-paketzentrum-124.html", entry)
 
+    @pytest.mark.parametrize("pattern,excluded,kept", [
+        ("^/magazin(/[a-z]+)?/?$",
+         ["https://www.etailment.de/magazin", "https://www.etailment.de/magazin/ki",
+          "https://www.etailment.de/magazin/nachhaltigkeit/"],
+         ["https://www.etailment.de/magazin/"
+          "jd-com-stoesst-bei-mediamarktsaturn-an-europas-pruefgrenze-im-handel",
+          "https://www.etailment.de/magazin/2026-09-14-temu-verliert-den-preisvorteil"]),
+        ("^/nachrichten(/[a-z-]+)?/?$",
+         ["https://www.verkehrsrundschau.de/nachrichten",
+          "https://www.verkehrsrundschau.de/nachrichten/recht-geld"],
+         ["https://www.verkehrsrundschau.de/nachrichten/recht-geld/"
+          "einfuhrumsatzsteuer-logistikbranche-fordert-tempo-3897413"]),
+    ])
+    def test_url_patterns_exclude_section_indexes_not_articles(self, pattern, excluded, kept):
+        entry = {**self._entry(), "excluded_url_patterns": [pattern]}
+        assert all(url_is_excluded(url, entry) for url in excluded)
+        assert not any(url_is_excluded(url, entry) for url in kept)
+        assert not any(url_is_excluded(url, self._entry()) for url in excluded)
+
     def test_url_fragments_see_the_query_string(self):
         """BPEX pagination and PDF copies share the bare section path with real
         items one level down; only the query separates them."""

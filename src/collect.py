@@ -15,6 +15,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import re
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
@@ -113,6 +114,11 @@ def url_is_excluded(url: str, entry: Dict[str, Any], title: str | None = None) -
         return True
     fragments = entry.get("excluded_url_substrings") or []
     parts = urlparse(url)
+    # Regular expressions over the path, for section indexes that share a prefix
+    # with their articles: etailment's /magazin/ki beside /magazin/<slug-with-hyphens>.
+    patterns = entry.get("excluded_url_patterns") or []
+    if any(re.search(pattern, parts.path or "/") for pattern in patterns):
+        return True
     target = unquote(parts.path + (f"?{parts.query}" if parts.query else "")).casefold()
     if any(str(fragment).casefold() in target for fragment in fragments):
         return True

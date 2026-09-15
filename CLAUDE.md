@@ -390,6 +390,8 @@ whenever `frontpage` is on.
 `excluded_dirs` is a final output rule: matching path prefixes are removed from
 sitemap, feed, and frontpage results, and are also ignored by body backfills and
 candidate selection. Use it for a section that should never enter the corpus.
+`excluded_url_patterns` applies the same way but takes regular expressions matched
+against the URL path, for index pages that share a prefix with their articles.
 
 Crawl every new site once before writing its entry. Do not infer these values from
 how the site looks:
