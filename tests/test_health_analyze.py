@@ -216,6 +216,65 @@ def test_zero_streak_skips_the_weekend_it_spans(tmp_path):
     assert "no new items for 3 consecutive days" in incident["message"]
 
 
+def _ep_run(db, status, finished):
+    with session(db) as conn:
+        run_id = start_run(conn, "ep_procedures", "2021", "2026-09-13")
+        record_source_result(conn, run_id, "oeil.secure.europarl.europa.eu",
+                             status, items_found=3, items_stored=1,
+                             error="listing: HTTP 503" if status == "failed" else None)
+        finish_run(conn, run_id, status, note="3 of 40 due procedures, 1 versions stored")
+        conn.execute("UPDATE run SET finished_at = ? WHERE id = ?",
+                     (finished.isoformat(), run_id))
+
+
+def _analyze_with_ep(tmp_path, db, run_id):
+    news, _, canary_config = _inputs(tmp_path)
+    regulatory = _json(tmp_path / "regulatory.json", [{
+        "url": "https://oeil.secure.europarl.europa.eu/", "organization": "EP",
+        "collector": "ep_procedures",
+    }])
+    return analyze(
+        db_path=db, news_sources=news, regulatory_sources=regulatory,
+        canary_config=canary_config, canary_file=_canary(tmp_path / "canary.json", run_id),
+        output_dir=tmp_path / "health", cycle_date="2026-09-13",
+        generated_at=datetime(2026, 9, 13, 5, 1, tzinfo=UTC),
+    )
+
+
+def test_failed_collector_run_is_an_incident_and_an_ok_one_is_not(tmp_path):
+    db = tmp_path / "db.sqlite3"
+    migrate(db)
+    run_id = _add_news_run(db, 11, 12)
+    _ep_run(db, "ok", datetime(2026, 9, 13, 4, 14, tzinfo=UTC))
+
+    healthy = _analyze_with_ep(tmp_path, db, run_id)
+    row = next(item for item in healthy["sources"]
+               if item["source"] == "oeil.secure.europarl.europa.eu")
+    assert row["kind"] == "ep_procedures" and row["latest_status"] == "ok"
+    assert not [item for item in healthy["incidents"]
+                if item["source"] == "oeil.secure.europarl.europa.eu"]
+
+    _ep_run(db, "failed", datetime(2026, 9, 13, 4, 20, tzinfo=UTC))
+    failed = _analyze_with_ep(tmp_path, db, run_id)
+    incident = next(item for item in failed["incidents"]
+                    if item["source"] == "oeil.secure.europarl.europa.eu")
+    assert (incident["check"], incident["severity"]) == ("source_failed", "warning")
+    assert incident["message"].endswith("failed: listing: HTTP 503")
+
+
+def test_collector_without_a_recent_run_is_missing(tmp_path):
+    db = tmp_path / "db.sqlite3"
+    migrate(db)
+    run_id = _add_news_run(db, 11, 12)
+    _ep_run(db, "ok", datetime(2026, 9, 11, 4, 0, tzinfo=UTC))
+
+    result = _analyze_with_ep(tmp_path, db, run_id)
+
+    incident = next(item for item in result["incidents"]
+                    if item["source"] == "oeil.secure.europarl.europa.eu")
+    assert incident["check"] == "missing_collection_run"
+
+
 def test_missing_source_result_is_detected_without_changing_database(tmp_path):
     db = tmp_path / "db.sqlite3"
     migrate(db)

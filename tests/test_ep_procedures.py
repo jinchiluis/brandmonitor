@@ -12,7 +12,7 @@ import pytest
 from src.config import ROOT
 from src.db import get_watermark, migrate, session, start_run
 from src.ep_procedures import (
-    DORMANT_AFTER_DAYS, EpRateLimited, compose_body, content_hash, due_procedures,
+    DORMANT_AFTER_DAYS, EpError, EpRateLimited, compose_body, content_hash, due_procedures,
     is_dormant, is_final, process_id, run_ep_collection, store_procedure,
 )
 from src.profile import load_profile
@@ -193,9 +193,14 @@ def test_first_run_stores_open_procedures_and_skips_law_it_never_saw(project):
     assert (s["listed"], s["due"], s["fetched"], s["stored"]) == (3, 3, 1, 1)
     # Law since 2024, first seen in September 2026: history, not this week's news.
     assert s["stale"] == 1
-    # Listed by the API and then unknown to it: visible, not fatal.
-    assert s["unknown"] == 1 and "listed but unknown" in s["errors"][0]
+    # Listed by the API and then unknown to it: visible in the note, not a failure.
+    assert s["unknown"] == ["2026/0009(COD)"] and s["errors"] == []
     assert s["swept"] is True
+    with session(db) as conn:
+        run_row = conn.execute("SELECT status, note FROM run").fetchone()
+        assert conn.execute("SELECT status FROM run_source").fetchone()["status"] == "ok"
+    assert run_row["status"] == "ok"
+    assert "1 listed but unknown to the API: 2026/0009(COD)" in run_row["note"]
 
     stored = {r["external_id"]: json.loads(r["payload"]) for r in rows(db)}
     assert stored[REFERENCE]["body_text"]
@@ -246,8 +251,27 @@ def test_a_failed_listing_collects_nothing_and_says_so(project):
 
     s = run(db, sources, Broken({}))
     assert s["fetched"] == 0 and s["errors"] and s["errors"][0].startswith("listing:")
+    assert s["listing_failed"] is True
     with session(db) as conn:
         assert conn.execute("SELECT status FROM run_source").fetchone()["status"] == "failed"
+
+
+def test_a_server_error_on_a_known_procedure_still_fails_the_run(project):
+    db, sources, _ = project
+
+    class ServerError(FakeClient):
+        def procedure(self, pid):
+            if pid == "2026-0001":
+                raise EpError(f"{pid}: giving up after 4 attempts - HTTP 500")
+            return super().procedure(pid)
+
+    client = ServerError({"2023-0156": record()},
+                         years={2026: [REFERENCE, "2026/0001(COD)"]})
+    s = run(db, sources, client)
+    assert s["fetched"] == 1 and s["unknown"] == [] and s["listing_failed"] is False
+    assert "HTTP 500" in s["errors"][0]
+    with session(db) as conn:
+        assert conn.execute("SELECT status FROM run").fetchone()["status"] == "failed"
 
 
 # ── client side ───────────────────────────────────────────────────────────

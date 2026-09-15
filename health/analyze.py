@@ -41,6 +41,7 @@ SEVERITY_RANK = {"healthy": 0, "learning": 0, "warning": 1, "critical": 2}
 BASELINE_DAYS = 7
 BASELINE_MAX_DAYS = 28
 PERIOD = timedelta(hours=24)
+COLLECTOR_MAX_AGE = timedelta(hours=48)
 COMPARABLE_WINDOW = timedelta(hours=36)
 
 
@@ -289,6 +290,46 @@ def _source_metrics(
     return metrics, incidents, learning
 
 
+def _collector_metrics(
+    entries: list[dict[str, Any]], latest_runs: dict[str, dict[str, Any]],
+    rows: list[dict[str, Any]], generated: datetime,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """Judge a collector source (DIP, EP) by the latest run of its own kind.
+
+    Only failure and absence are checked. A procedure list is quiet by nature, so
+    the volume rules that suit a news source would warn about nothing.
+    """
+    metrics: list[dict[str, Any]] = []
+    incidents: list[dict[str, str]] = []
+    for entry in entries:
+        kind = entry["collector"]
+        slug = _slug(entry["url"])
+        run = latest_runs.get(kind)
+        finished = _parse_time(run["finished_at"]) if run else None
+        if finished is None or generated - finished > COLLECTOR_MAX_AGE:
+            incidents.append(_incident(
+                slug, "missing_collection_run", "warning",
+                f"no completed {kind} run within {COLLECTOR_MAX_AGE.total_seconds() / 3600:g} hours",
+            ))
+        elif run["status"] == "failed":
+            error = next((row["error"] for row in rows
+                          if row["run_id"] == run["id"] and row["source_slug"] == slug), None)
+            incidents.append(_incident(
+                slug, "source_failed", "warning",
+                f"latest {kind} run {run['id']} failed: {error or run['note'] or 'no error recorded'}",
+            ))
+        metrics.append({
+            "kind": kind,
+            "source": slug,
+            "organization": entry.get("organization"),
+            "latest_run_id": run["id"] if run else None,
+            "latest_status": run["status"] if run else "missing",
+            "latest_finished_utc": format_utc(finished) if finished else None,
+            "baseline_state": "not_applicable",
+        })
+    return metrics, incidents
+
+
 def _body_metrics(conn: sqlite3.Connection, latest_runs: dict[str, dict[str, Any]]) -> tuple[dict[str, Any], list[dict[str, str]]]:
     if not _table_exists(conn, "body_fetch"):
         return {"available": False}, []
@@ -427,6 +468,12 @@ def analyze(
         "news": _source_entries(news_sources),
         "regulatory": _source_entries(regulatory_sources),
     }
+    collectors = [
+        entry
+        for path in (news_sources, regulatory_sources)
+        for entry in _source_entries(path, include_collectors=True)
+        if entry.get("collector")
+    ]
     critical_sources, canary_config_raw = _load_canary_sources(canary_config)
     with _connect_readonly(db_path) as conn:
         latest_runs = _latest_runs(conn)
@@ -442,7 +489,11 @@ def analyze(
             watermarks=watermarks,
             critical_sources=critical_sources,
         )
+        collector_metrics, collector_incidents = _collector_metrics(
+            collectors, latest_runs, rows, generated)
         body_metrics, body_incidents = _body_metrics(conn, latest_runs)
+    source_metrics.extend(collector_metrics)
+    incidents.extend(collector_incidents)
     incidents.extend(body_incidents)
     news_run = latest_runs.get("news")
     canary, canary_incidents = _load_canary(
@@ -481,7 +532,7 @@ def analyze(
         "incident_key": _incident_key(incidents),
         "incidents": incidents,
         "summary": {
-            "configured_sources": sum(len(entries) for entries in expected.values()),
+            "configured_sources": sum(len(entries) for entries in expected.values()) + len(collectors),
             "sources_learning_baseline": learning,
             "warnings": sum(item["severity"] == "warning" for item in incidents),
             "critical": sum(item["severity"] == "critical" for item in incidents),

@@ -371,8 +371,9 @@ def run_ep_collection(*, client: Optional[EpClient] = None, db_path: Optional[Pa
     api = client or EpClient()
     summary: dict[str, Any] = {
         "kind": RUN_KIND, "source": slug, "types": list(types), "since_year": start_year,
-        "listed": 0, "due": 0, "fetched": 0, "stored": 0, "stale": 0, "unknown": 0,
+        "listed": 0, "due": 0, "fetched": 0, "stored": 0, "stale": 0, "unknown": [],
         "changed": [], "final": [], "errors": [], "stopped": None, "swept": False,
+        "listing_failed": False,
     }
     with session(db_path) as conn:
         run_id = start_run(conn, RUN_KIND, str(start_year), today.isoformat())
@@ -392,6 +393,7 @@ def run_ep_collection(*, client: Optional[EpClient] = None, db_path: Optional[Pa
         # look like those procedures had ended.
         logger.warning("[ep] listing: %s", exc)
         summary["errors"].append(f"listing: {exc}")
+        summary["listing_failed"] = True
         _finish(db_path, run_id, slug, summary)
         return summary
     summary["listed"] = len(listed)
@@ -421,9 +423,10 @@ def run_ep_collection(*, client: Optional[EpClient] = None, db_path: Optional[Pa
             summary["errors"].append(f"{reference}: {exc}")
             continue
         if record is None:
-            # The API listed it and then did not know it: worth seeing, not fatal.
-            summary["unknown"] += 1
-            summary["errors"].append(f"{reference}: listed but unknown to the API")
+            # The API listed it and then did not know it: a listing mismatch worth
+            # seeing in the note, not a failure - a real outage fails the listing.
+            logger.info("[ep] %s: listed but unknown to the API", reference)
+            summary["unknown"].append(reference)
             continue
         if reference not in stored and is_final(record) and (
                 last_event_date(record) or "") < stale_before:
@@ -454,6 +457,7 @@ def run_ep_collection(*, client: Optional[EpClient] = None, db_path: Optional[Pa
 def _finish(db_path: Optional[Path], run_id: int, slug: str, summary: dict[str, Any]) -> None:
     with session(db_path) as conn:
         errors = summary["errors"]
+        unknown = summary["unknown"]
         status = "failed" if errors else ("ok" if summary["fetched"] else "zero")
         record_source_result(conn, run_id, slug, status, items_found=summary["fetched"],
                              items_stored=summary["stored"],
@@ -461,4 +465,6 @@ def _finish(db_path: Optional[Path], run_id: int, slug: str, summary: dict[str, 
         finish_run(conn, run_id, "failed" if errors else "ok",
                    note=(f"{summary['fetched']} of {summary['due']} due procedures, "
                          f"{summary['stored']} versions stored"
+                         + (f"; {len(unknown)} listed but unknown to the API: "
+                            f"{', '.join(unknown)}" if unknown else "")
                          + (f"; stopped: {summary['stopped']}" if summary["stopped"] else "")))

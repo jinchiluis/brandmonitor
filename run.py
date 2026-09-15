@@ -483,9 +483,13 @@ def cmd_collect_ep(args: argparse.Namespace) -> int:
         print(f"published as law, no longer polled: {', '.join(s['final'][:12])}")
     if s["stopped"]:
         print(f"stopped early: {s['stopped']}")
+    if s["unknown"]:
+        print(f"{len(s['unknown'])} listed but unknown to the API: {', '.join(s['unknown'])}")
     for error in s["errors"][:5]:
         print(f"    -> {error[:120]}")
     print(f"Log: {log_path}")
+    if s["listing_failed"]:
+        return 2
     return 1 if s["errors"] and not s["fetched"] else 0
 
 
