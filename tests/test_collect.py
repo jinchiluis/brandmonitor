@@ -568,6 +568,61 @@ class TestNewsSitemapPriority:
             ("https://x.de/one", "One"), ("https://x.de/two", None)]
 
 
+class TestFrontpageTitles:
+    """A frontpage-only source (SZ) has no title but the one its links carry."""
+
+    PAGE = """<html><body>
+      <a href="/politik/heading-inside-li.1"><h3>Film<span>:</span> Schauspieler ist tot</h3></a>
+      <a href="/politik/overlay-li.2" aria-labelledby="teaser-2"></a>
+      <article id="teaser-2"><h3>Sachsen-Anhalt: BSW schließt Koalition aus</h3>
+        <p>Ein langer Teaser, der nicht Teil des Titels sein darf.</p></article>
+      <a href="/projekte/card-e3/"><div class="overline-title">Geologie</div>
+        <div class="title">Wie kam es zur Sturzflut in Nepal?</div>
+        <div class="teaser">Ein Fels- und Eissturz soll die Katastrophe ausgelöst haben.</div></a>
+      <a href="/politik/plain-li.4"><style>.css-1{white-space:normal}</style>Temu verliert den Preisvorteil</a>
+      <a href="/politik/plain-li.4">Mehr</a>
+      <a href="/politik/card-li.5">Kicker Eine Überschrift Und dann ein sehr langer Teaser, der viel
+        mehr erzählt als eine Überschrift es je täte, bis weit über hundertfünfzig Zeichen hinaus,
+        damit er als Karte erkannt wird.</a>
+      <a href="/politik/short-li.6">Weiterlesen</a>
+    </body></html>"""
+
+    def _hints(self, monkeypatch):
+        from vendor.newscrawler import crawler
+
+        monkeypatch.setattr(crawler.sources, "get_site_rules",
+                            lambda url: {"allowed_dirs": ["politik"]})
+        monkeypatch.setattr(crawler.sources, "is_brightdata_enabled", lambda url: False)
+        monkeypatch.setattr(crawler, "fetch_html", lambda *a, **k: self.PAGE.encode())
+        hints = crawler.collect_from_frontpage(None, "https://www.sz.test/")
+        return {h.url.rsplit("/", 2)[-2] if h.url.endswith("/") else h.url.rsplit("/", 1)[-1]:
+                h.title for h in hints}
+
+    def test_headline_comes_from_heading_labelled_teaser_title_class_or_short_link_text(
+            self, monkeypatch):
+        titles = self._hints(monkeypatch)
+        assert titles == {
+            "heading-inside-li.1": "Film: Schauspieler ist tot",
+            "overlay-li.2": "Sachsen-Anhalt: BSW schließt Koalition aus",
+            "card-e3": "Wie kam es zur Sturzflut in Nepal?",
+            "plain-li.4": "Temu verliert den Preisvorteil",
+            "card-li.5": None,
+            "short-li.6": None,
+        }
+
+    def test_the_same_link_title_seen_twice_versions_an_untitled_item_once(self, db):
+        url = "https://www.sz.test/politik/plain-li.4"
+        with session(db) as conn:
+            rid = start_run(conn, "news", "a", "b")
+            stored = [store_hints(conn, rid, "sz.test", [hint(url, title=title)])
+                      for title in (None, "Temu verliert den Preisvorteil",
+                                     "Temu verliert den Preisvorteil")]
+            versions = [r["title"] for r in conn.execute(
+                "SELECT title FROM raw_item ORDER BY version")]
+        assert stored == [1, 1, 0]
+        assert versions == [None, "Temu verliert den Preisvorteil"]
+
+
 class TestSitemapCaps:
     """A capped traversal stays ok but says it stopped early."""
 

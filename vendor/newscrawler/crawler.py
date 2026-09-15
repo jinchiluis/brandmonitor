@@ -785,6 +785,52 @@ def collect_from_feeds(session, site_url):
     return hints
 
 # ------------------ Discovery from Frontpage ------------------
+# Shorter link text is "Weiterlesen", "Mehr" or a section label, not a headline.
+FRONTPAGE_TITLE_MIN_CHARS = 15
+# Plain link text longer than this is a whole teaser card (kicker, headline and
+# summary run together on SZ's /projekte cards), not a headline. Headings are exempt.
+FRONTPAGE_LINK_TEXT_MAX_CHARS = 150
+_HEADINGS = ".//h1|.//h2|.//h3|.//h4"
+# A teaser card without a heading element marks its headline by class, beside the
+# kicker and summary: SZ's <div class="title"> next to "overline-title" and "teaser".
+_TITLE_CLASSES = (".//*[contains(concat(' ', normalize-space(@class), ' '), ' title ') or "
+                  "contains(concat(' ', normalize-space(@class), ' '), ' headline ')]")
+
+
+def _visible_text(element) -> str:
+    """Element text without inline <style>/<script>; SZ puts CSS inside its links."""
+    parts = element.xpath(".//text()[not(ancestor::style) and not(ancestor::script)]")
+    text = " ".join(" ".join(parts).split())
+    return re.sub(r" ([:,.;!?])", r"\1", text)
+
+
+def _link_title(link_elem):
+    """(is_heading, text) naming the article a link points to, or None.
+
+    A card link often wraps kicker, headline and teaser, and SZ's article links are
+    empty overlays that name their teaser through aria-labelledby. A heading inside
+    the link or inside that labelled teaser is the headline, then an element whose
+    class is exactly ``title`` or ``headline``; the link's own text is only a
+    fallback, and only while it is short enough to be a headline.
+    """
+    containers = [link_elem]
+    labelled = (link_elem.get("aria-labelledby") or "").split()
+    if labelled:
+        try:
+            containers += link_elem.getroottree().getroot().xpath(
+                "//*[@id=$ref]", ref=labelled[0])[:1]
+        except Exception:
+            pass
+    for query in (_HEADINGS, _TITLE_CLASSES):
+        for container in containers:
+            for heading in container.xpath(query):
+                text = _visible_text(heading)
+                if text:
+                    return True, text
+    text = _visible_text(link_elem)
+    return (False, text) if text and len(text) <= FRONTPAGE_LINK_TEXT_MAX_CHARS else None
+
+
 def _extract_date_near_link(link_elem):
     """
     Try to find a date near an article link in the HTML.
@@ -894,6 +940,10 @@ def collect_from_frontpage(session, site_url, start_date=None, cap=80):
 
     # Track URLs with their dates: {url: (datetime|None)}
     url_dates = {}
+    # The best link title seen for each URL: a heading beats plain link text, then
+    # longer beats shorter. A frontpage-only source (SZ) has no other title, and the
+    # gates and the report would otherwise read the slug.
+    url_titles = {}
     netloc_root = urlparse(site_url).netloc
 
     # Check if brightdata should be used
@@ -989,6 +1039,13 @@ def collect_from_frontpage(session, site_url, start_date=None, cap=80):
                 if u not in url_dates:
                     url_dates[u] = None  # Initialize
 
+                found = _link_title(link_elem)
+                if found and len(found[1]) >= FRONTPAGE_TITLE_MIN_CHARS \
+                        and found[1] not in (u, href):
+                    candidate = (found[0], len(found[1]), found[1])
+                    if candidate > url_titles.get(u, (False, 0, "")):
+                        url_titles[u] = candidate
+
                 # Try to extract date if we don't have one yet
                 if url_dates[u] is None:
                     date_found = _extract_date_near_link(link_elem)
@@ -1022,7 +1079,8 @@ def collect_from_frontpage(session, site_url, start_date=None, cap=80):
 
 
     return [
-        ArticleHint(url=url, published_at=dt, title=None, source="frontpage",
+        ArticleHint(url=url, published_at=dt,
+                    title=url_titles[url][2] if url in url_titles else None, source="frontpage",
                     date_source="frontpage" if dt else None)
         for url, dt in selected_items
     ]

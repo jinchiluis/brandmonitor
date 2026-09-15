@@ -179,6 +179,18 @@ articles. After the change the same window yields 1,223 distinct URLs with none 
 the recent ones missing. Nothing downstream changes, since storage already
 de-duplicated; the reported "found" counts for such sources fall to distinct URLs.
 
+**2026-09-15 — frontpage hints carry the link's headline.** `collect_from_frontpage`
+built every hint with `title=None`, so all SZ items (frontpage-only) reached the
+gates and the report as URL slugs. It now takes, per URL, a heading (h1-h4) inside
+the link or inside the teaser the link names via `aria-labelledby`, then an element
+with class `title` or `headline`, and only then the link's own text, capped at 150
+characters; `<style>`/`<script>` text is ignored. The brief's "longest link text"
+was measured first and rejected: SZ's article links are empty overlays, and its
+card links wrap kicker, headline and teaser (median 252 characters, some with CSS).
+On the SZ homepage 269 of 300 probe hints now carry a title, median 44 characters;
+the untitled rest are section pages. A title-only item gains the title as one new
+version (`src/collect.py` `_is_retitle`) and does not churn on repeat sightings.
+
 **2026-09-15 — a capped sitemap traversal says so.** `collect_from_sitemaps` takes
 an optional `report` dict and fills `cap` (`url_cap` or `fetch_cap`) and `note`
 when `max_per_source` dropped an in-window URL or left sitemaps unread, or when

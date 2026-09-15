@@ -303,8 +303,9 @@ def format_report(report: Dict, depth: int = 1, samples: int = 2) -> str:
         lines.append("Mode:   verify - this domain's rules from the sources file are applied")
     lines.append("")
 
-    lines.append(f"{'method':<12}{'status':<9}{'urls':>7}{'in window':>12}{'undated':>10}")
-    lines.append("-" * 50)
+    lines.append(f"{'method':<12}{'status':<9}{'urls':>7}{'in window':>12}{'undated':>10}"
+                 f"{'titled':>8}")
+    lines.append("-" * 58)
     capped = []
     for result in results:
         in_window, undated = _window_counts(result.hints, start, end)
@@ -320,7 +321,7 @@ def format_report(report: Dict, depth: int = 1, samples: int = 2) -> str:
         note = f"  ({', '.join(notes)})" if notes else ""
         lines.append(
             f"{result.name:<12}{result.status:<9}{len(result.hints):>7}"
-            f"{in_window:>12}{undated:>10}{note}"
+            f"{in_window:>12}{undated:>10}{sum(1 for h in result.hints if h.title):>8}{note}"
         )
         if result.error:
             lines.append(f"    -> {result.error}")
@@ -386,7 +387,7 @@ def format_report(report: Dict, depth: int = 1, samples: int = 2) -> str:
                 for hint in result.hints:
                     url = normalize_url(hint.url)
                     if _looks_like_article(url) and _dir_key(url, depth) == directory:
-                        lines.append(f"  {url}")
+                        lines.append(f"  {url}" + (f"\n      {hint.title}" if hint.title else ""))
                         shown += 1
                         if shown >= samples:
                             break
