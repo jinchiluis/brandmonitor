@@ -97,10 +97,10 @@ def test_manual_reruns_on_one_day_do_not_train_a_daily_baseline(tmp_path):
 def test_two_zeros_against_established_baseline_are_critical_for_canary_source(tmp_path):
     db = tmp_path / "db.sqlite3"
     migrate(db)
-    for day in range(7):
+    for day in range(9):  # 2026-09-01 is a Tuesday; days 4 and 5 are a weekend
         _add_news_run(db, day, 20)
-    _add_news_run(db, 7, 0, status="zero")
-    run_id = _add_news_run(db, 8, 0, status="zero")
+    _add_news_run(db, 9, 0, status="zero")
+    run_id = _add_news_run(db, 10, 0, status="zero")
     news, regulatory, canary_config = _inputs(tmp_path)
     canary = _canary(tmp_path / "canary.json", run_id)
 
@@ -139,14 +139,14 @@ def _analyze(tmp_path, db, run_id):
 def test_light_runs_sum_into_one_day_rather_than_reading_as_a_drop(tmp_path):
     db = tmp_path / "db.sqlite3"
     migrate(db)
-    for day in range(8):
+    for day in range(10):
         _add_news_run(db, day, 24)
-    # Day 8: eight two-hour light runs, then the overnight 06:00 run closes the day.
-    cursor = datetime(2026, 9, 9, 4, tzinfo=UTC)
+    # Day 10: eight two-hour light runs, then the overnight 06:00 run closes the day.
+    cursor = datetime(2026, 9, 11, 4, tzinfo=UTC)
     for _ in range(8):
         _add_window_run(db, cursor, cursor + timedelta(hours=2), 2)
         cursor += timedelta(hours=2)
-    run_id = _add_window_run(db, cursor, datetime(2026, 9, 10, 4, tzinfo=UTC), 8)
+    run_id = _add_window_run(db, cursor, datetime(2026, 9, 12, 4, tzinfo=UTC), 8)
 
     result = _analyze(tmp_path, db, run_id)
 
@@ -162,11 +162,11 @@ def test_baseline_counts_stored_items_not_repeated_front_page_links(tmp_path):
     db = tmp_path / "db.sqlite3"
     migrate(db)
     # A front page lists the same 259 links every run; only a few are new.
-    for day in range(7):
+    for day in range(9):
         _add_window_run(db, datetime(2026, 9, 1, 4, tzinfo=UTC) + timedelta(days=day),
                         datetime(2026, 9, 2, 4, tzinfo=UTC) + timedelta(days=day),
                         40, found=259)
-    for day in (7, 8):
+    for day in (9, 10):
         run_id = _add_window_run(
             db, datetime(2026, 9, 1, 4, tzinfo=UTC) + timedelta(days=day),
             datetime(2026, 9, 2, 4, tzinfo=UTC) + timedelta(days=day), 3, found=259)
@@ -175,6 +175,45 @@ def test_baseline_counts_stored_items_not_repeated_front_page_links(tmp_path):
 
     incident = next(item for item in result["incidents"] if item["check"] == "yield_drop")
     assert "stored [3, 3]; prior median was 40" in incident["message"]
+
+
+def _weekday_source(db, days, zero_days=()):
+    """Days from Tuesday 2026-09-01; weekends store nothing, as trade press does."""
+    run_id = None
+    for day in days:
+        weekend = (datetime(2026, 9, 1) + timedelta(days=day)).weekday() >= 5
+        quiet = weekend or day in zero_days
+        run_id = _add_news_run(db, day, 0 if quiet else 20, status="zero" if quiet else "ok")
+    return run_id
+
+
+def test_weekend_zeros_do_not_warn_on_monday_or_tuesday(tmp_path):
+    db = tmp_path / "db.sqlite3"
+    migrate(db)
+    # Day 12 is Sunday 09-13: the run ending Monday 06:00 Berlin covers it.
+    monday_run = _weekday_source(db, range(13))
+    monday = _analyze(tmp_path, db, monday_run)
+    assert monday["sources"][0]["baseline_state"] == "ready"
+    assert monday["sources"][0]["zero_streak"] == 0
+    assert monday["incidents"] == []
+
+    tuesday_run = _weekday_source(db, [13])
+    tuesday = _analyze(tmp_path, db, tuesday_run)
+    assert tuesday["sources"][0]["baseline_median_stored"] == 20
+    assert tuesday["incidents"] == []
+
+
+def test_zero_streak_skips_the_weekend_it_spans(tmp_path):
+    db = tmp_path / "db.sqlite3"
+    migrate(db)
+    # Zero on Thu 09-10, Fri 09-11, Sat, Sun and Mon 09-14; Tuesday's run covers Monday.
+    run_id = _weekday_source(db, range(14), zero_days={9, 10, 13})
+
+    result = _analyze(tmp_path, db, run_id)
+
+    assert result["sources"][0]["zero_streak"] == 3
+    incident = next(item for item in result["incidents"] if item["check"] == "zero_streak")
+    assert "no new items for 3 consecutive days" in incident["message"]
 
 
 def test_missing_source_result_is_detected_without_changing_database(tmp_path):

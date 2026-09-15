@@ -20,6 +20,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -34,6 +35,7 @@ DEFAULT_CANARY_CONFIG = ROOT / "health" / "canaries.json"
 DEFAULT_CANARY = ROOT / "data" / "health" / "canaries" / "latest.json"
 DEFAULT_OUTPUT = ROOT / "data" / "health"
 UTC = timezone.utc
+BERLIN = ZoneInfo("Europe/Berlin")
 RULES_VERSION = "coverage-health-v2"
 SEVERITY_RANK = {"healthy": 0, "learning": 0, "warning": 1, "critical": 2}
 BASELINE_DAYS = 7
@@ -101,6 +103,10 @@ def _daily_periods(rows: list[dict[str, Any]], anchor: datetime | None) -> list[
     ``items_stored`` is summed rather than ``items_found`` because a front page
     lists the same links on every run - Süddeutsche finds ~259 each time and
     stores 20-57 - so a summed "found" would scale with the run count.
+
+    A period is marked ``weekend`` when the Berlin day it covers is a Saturday or
+    Sunday. Trade press publishes nothing then, so those periods are left out of
+    the zero streak, the yield-drop pair and the baseline for every source.
     """
     if anchor is None:
         return []
@@ -119,8 +125,11 @@ def _daily_periods(rows: list[dict[str, Any]], anchor: datetime | None) -> list[
         failed = any(row["status"] == "failed" for row in members)
         stored = sum(row["items_stored"] or 0 for row in members)
         span_ok = all(starts) and timedelta(0) <= max(ends) - min(starts) <= COMPARABLE_WINDOW
+        # The Berlin day the period starts in: a period ending Monday 06:00 covers Sunday.
+        covered = (anchor - PERIOD * (offset + 1)).astimezone(BERLIN).date()
         periods.append({
             "offset": offset,
+            "weekend": covered.weekday() >= 5,
             "status": "failed" if failed else ("ok" if stored else "zero"),
             "stored": stored,
             "runs": len(members),
@@ -193,9 +202,10 @@ def _source_metrics(
                 history, _parse_time(latest_run["window_end"]) if latest_run else None)
             current_day = periods[-1] if periods and periods[-1]["offset"] == 0 else None
             statuses = [period["status"] for period in periods[-7:]]
+            weekdays = [period for period in periods if not period["weekend"]]
             zero_streak = 0
             failure_streak = 0
-            for status in reversed(statuses):
+            for status in reversed([period["status"] for period in weekdays[-7:]]):
                 if status == "zero":
                     zero_streak += 1
                 else:
@@ -206,7 +216,7 @@ def _source_metrics(
                 else:
                     break
 
-            comparable = [period for period in periods if period["comparable"]]
+            comparable = [period for period in weekdays if period["comparable"]]
             previous = [period["stored"] for period in comparable
                         if period["offset"] != 0][-BASELINE_MAX_DAYS:]
             baseline_ready = len(previous) >= BASELINE_DAYS
