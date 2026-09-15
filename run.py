@@ -334,7 +334,10 @@ def cmd_alert_gate(args: argparse.Namespace) -> int:
           f"{len(result.offered)} matched own-brand or alert terms")
     if args.dry_run:
         for item in result.offered:
-            print(f"  [{', '.join(item.triggers)}] {item.source_slug}  {item.title[:100]}")
+            label = ", ".join(item.triggers)
+            if item.body_unavailable is not None:
+                label = ", ".join(filter(None, (label, "body unavailable")))
+            print(f"  [{label}] {item.source_slug}  {item.title[:100]}")
         print("dry run: no model calls, decisions, watermark, or email")
     else:
         print(f"checked {len(result.decisions)}; {result.positives} potential alerts, "

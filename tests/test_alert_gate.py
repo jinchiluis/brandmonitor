@@ -89,6 +89,18 @@ def add_title_route(conn, raw_id, url, *, reasons=("brand:J&T",)):
         "VALUES ('example.de',?,?,?,'ok')", (url, f"discovery-{raw_id}", json.dumps(hint)))
 
 
+def add_unavailable(conn, raw_id, url, *, route=True, error="subscriber login page",
+                    attempted="2026-09-12T06:10:00+00:00", slug="example.de"):
+    hint = {"url": url}
+    if route:
+        hint["title_gate_routes"] = {PROFILE.slug: {
+            "client": PROFILE.slug, "reasons": ["brand:DHL"], "label": "label"}}
+    conn.execute(
+        "INSERT INTO body_fetch (source_slug,external_id,discovery_hash,hint_payload,status,"
+        "attempts,attempted_at,error) VALUES (?,?,?,?,'unavailable',1,?,?)",
+        (slug, url, f"discovery-{raw_id}", json.dumps(hint), attempted, error))
+
+
 def positive(summary="这是一个需要人工查看的潜在预警。"):  # model response
     return {"potential_alert": True, "summary_zh": summary}
 
@@ -195,6 +207,50 @@ def test_published_label_reaches_the_pending_alert_and_email(corpus):
     message = build_email(sent, sender="s@example.com", recipient="r@example.com")
     plain = message.get_body(preferencelist=("plain",)).get_content()
     assert "Published: 2026-08-07 (page)" in plain and "Published: unknown" in plain
+
+
+def test_paywalled_title_gate_keep_is_judged_on_its_title_once(corpus):
+    with session(corpus) as conn:
+        # No own-brand name or alert term: a body could have matched one, a title can't.
+        url = add_item(conn, 1, "DHL und Alibaba prüfen KI-Kooperation", "")
+        add_unavailable(conn, 1, url)
+    caller = FakeCaller(positive("报道称DHL与阿里巴巴探讨合作。"))
+    sender = FakeSender()
+
+    result = run_alert_gate(PROFILE, db_path=corpus, caller=caller, sender=sender, now=NOW)
+
+    [decision] = result.decisions
+    assert decision.item.route == "title_gate_unavailable"
+    system, user = caller.calls[0]
+    assert "BODY: not obtainable" in system
+    assert user.endswith("MATCHED: none\n\n"
+                         "BODY: not obtainable (subscriber login page); judge on the title alone.")
+    with session(corpus) as conn:
+        payload = json.loads(conn.execute("SELECT payload FROM alert_decision").fetchone()[0])
+    assert (payload["body"], payload["body_unavailable_reason"]) == (
+        "unavailable", "subscriber login page")
+    [sent] = sender.calls
+    assert sent[0].title == "DHL und Alibaba prüfen KI-Kooperation (正文不可用)"
+    plain = build_email(sent, sender="s@example.com", recipient="r@example.com") \
+        .get_body(preferencelist=("plain",)).get_content()
+    assert "DHL und Alibaba prüfen KI-Kooperation (正文不可用)" in plain
+
+    # Even with the window reopened over it, a decided keep is not offered again.
+    with session(corpus) as conn:
+        conn.execute("DELETE FROM watermark")
+    again = run_alert_gate(PROFILE, db_path=corpus, caller=FakeCaller(), sender=FakeSender(),
+                           now="2026-09-12T08:00:00+00:00")
+    assert again.offered == []
+
+
+def test_unavailable_body_without_title_route_or_before_the_window_is_ignored(corpus):
+    with session(corpus) as conn:
+        full_text = add_item(conn, 1, "DHL strike", "")
+        add_unavailable(conn, 1, full_text, route=False)
+        old = add_item(conn, 2, "DHL and Alibaba", "")
+        add_unavailable(conn, 2, old, attempted="2026-09-11T17:17:34+00:00")
+
+    assert eligible_news_items(corpus, PROFILE, START, NOW) == []
 
 
 def test_negative_is_recorded_without_email(corpus):

@@ -11,7 +11,10 @@ News reaches this stage through either of the two existing routes:
 
 * a relevant or unsure news body-gate decision; or
 * a successful body fetch caused by a title-gate keep (those intentionally skip
-  the body gate).
+  the body gate); or
+* a title-gate keep whose body fetch ended ``unavailable`` - a paywall or a
+  subscriber login. The title gate already judged it, so it is offered on its
+  title alone, without the term prefilter a missing body could never pass.
 
 Decisions have their own table rather than ``assessment``.  The latter is the
 weekly relevance ledger, and alerting is an additional action on top of that
@@ -68,6 +71,9 @@ BERLIN = ZoneInfo("Europe/Berlin")
 MAX_FAILURES_IN_A_ROW = 3
 # The summary a flagged fail-open alert carries in place of the model's.
 FAIL_OPEN_SUMMARY = "模型两次未给出可用判断，未能自动筛查；请人工查看原文。"
+# Appended to the title of an alert judged without its body.
+BODY_UNAVAILABLE_MARK = "(正文不可用)"
+UNAVAILABLE_ROUTE = "title_gate_unavailable"
 
 logger = get_logger(__name__)
 
@@ -117,6 +123,8 @@ class AlertItem:
     triggers: tuple[str, ...] = ()
     published_at: str | None = None
     published_at_source: str | None = None
+    # Why the body could not be fetched, for a title-gate keep behind a paywall.
+    body_unavailable: str | None = None
 
 
 @dataclass(frozen=True)
@@ -232,6 +240,11 @@ or when the matched alert word is merely ambiguous, hypothetical, generic advice
 a survey called an investigation, historical background, or an event outside the
 client's monitored business.
 
+Sometimes the message says BODY: not obtainable. Then the headline passed a
+relevance gate but the article text sits behind a paywall, and no own-brand name or
+alert concept was matched. Judge on the title and source alone, with the same
+preference for recall.
+
 The message gives TODAY and the article's PUBLISHED date, which is often unknown.
 When it is unknown, use a date the article states for itself, such as a press
 release dateline. Answer false when the article is clearly more than
@@ -292,9 +305,12 @@ def render_item(item: AlertItem, today: str,
                 body_chars: int = BODY_GATE_BODY_CHARS) -> str:
     # The date lives here rather than in the system prompt, whose hash is the
     # prompt version: a daily-changing prompt would version every day's decisions.
-    return (f"TODAY: {today}\nPUBLISHED: {published_label(item)}\n"
-            f"SOURCE: {item.source_slug}\nTITLE: {item.title}\nURL: {item.url}\n"
-            f"MATCHED: {', '.join(item.triggers)}\n\n{item.body[:body_chars]}")
+    head = (f"TODAY: {today}\nPUBLISHED: {published_label(item)}\n"
+            f"SOURCE: {item.source_slug}\nTITLE: {item.title}\nURL: {item.url}\n")
+    if item.body_unavailable is not None:
+        return (head + f"MATCHED: {', '.join(item.triggers) or 'none'}\n\n"
+                f"BODY: not obtainable ({item.body_unavailable}); judge on the title alone.")
+    return head + f"MATCHED: {', '.join(item.triggers)}\n\n{item.body[:body_chars]}"
 
 
 def _decide(system: str, item: AlertItem, caller: Caller, today: str,
@@ -394,16 +410,36 @@ def eligible_news_items(db_path: Path, profile: ClientProfile, since: str,
                 published_at_source=payload.get("published_at_source"),
             )
 
-        for fetch in conn.execute("SELECT * FROM body_fetch WHERE status='ok'"):
+        for fetch in conn.execute(
+                "SELECT * FROM body_fetch WHERE status IN ('ok','unavailable')"):
             key = (fetch["source_slug"], fetch["external_id"])
             raw = latest.get(key)
             if not raw:
                 continue
             hint = _payload(fetch["hint_payload"])
+            # Only a title-gate keep qualifies: a full-text source whose body is
+            # unavailable never passed any gate.
             route = (hint.get("title_gate_routes") or {}).get(profile.slug)
             if not isinstance(route, dict):
                 continue
             payload = _payload(raw["payload"])
+            if fetch["status"] == "unavailable":
+                # Eligible from the moment the fetch gave up, so only keeps that
+                # become unavailable from now on are offered.
+                if key in items or not _in_window(fetch["attempted_at"] or "", since, until):
+                    continue
+                items[key] = AlertItem(
+                    raw_item_id=raw["id"], source_slug=raw["source_slug"],
+                    external_id=raw["external_id"], url=raw["url"] or key[1],
+                    title=(raw["title"] or payload.get("title") or route.get("label")
+                           or raw["url"] or key[1]),
+                    body="", route=UNAVAILABLE_ROUTE, eligible_at=fetch["attempted_at"],
+                    selector_reasons=tuple(route.get("reasons") or ()),
+                    published_at=raw["published_at"],
+                    published_at_source=payload.get("published_at_source"),
+                    body_unavailable=fetch["error"] or "unavailable",
+                )
+                continue
             body = (payload.get("body_text") or "").strip()
             if not body or not _in_window(raw["fetched_at"], since, until):
                 continue
@@ -473,6 +509,9 @@ def _store_decision(conn, decision: AlertDecision, profile: ClientProfile,
         "fail_open": decision.fail_open, "error": decision.error,
         "tokens": {"in": decision.input_tokens, "out": decision.output_tokens},
     }
+    if item.body_unavailable is not None:
+        payload["body"] = "unavailable"
+        payload["body_unavailable_reason"] = item.body_unavailable
     conn.execute(
         "INSERT OR IGNORE INTO alert_decision "
         "(raw_item_id,source_slug,external_id,client_slug,prompt_version,profile_version,"
@@ -500,12 +539,15 @@ def pending_alerts(db_path: Path, profile: ClientProfile) -> list[PendingAlert]:
         key = (row["source_slug"], row["external_id"])
         previous = grouped.get(key)
         ids = (*previous.decision_ids, row["id"]) if previous else (row["id"],)
+        payload = _payload(row["payload"])
+        title = row["title"] or row["url"] or row["external_id"]
+        if payload.get("body") == "unavailable":
+            title = f"{title} {BODY_UNAVAILABLE_MARK}"
         grouped[key] = PendingAlert(
             decision_ids=ids, source_slug=row["source_slug"],
             external_id=row["external_id"], url=row["url"] or row["external_id"],
-            title=row["title"] or row["url"] or row["external_id"],
-            summary_zh=row["summary_zh"], client_name=profile.name,
-            published_label=_payload(row["payload"]).get("published_label") or "unknown",
+            title=title, summary_zh=row["summary_zh"], client_name=profile.name,
+            published_label=payload.get("published_label") or "unknown",
         )
     return list(grouped.values())
 
@@ -723,6 +765,8 @@ def run_alert_gate(profile: ClientProfile, *, db_path: Path = DB_PATH,
         triggered = with_triggers(item, profile, taxonomy)
         if triggered:
             offered.append(triggered)
+        elif item.body_unavailable is not None:
+            offered.append(item)
 
     result = AlertGateResult(version, since, end, eligible=len(eligible),
                              offered=offered, dry_run=dry_run)
