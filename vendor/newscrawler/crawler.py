@@ -21,7 +21,7 @@ import time, random
 from datetime import datetime, timedelta, timezone
 
 from src.config import CRAWLER_VERBOSE as _VERBOSE
-from typing import Iterable, List, Optional, Tuple, Dict, Set
+from typing import Any, Iterable, List, Optional, Tuple, Dict, Set
 from urllib.parse import urljoin, urlparse, urlunparse, urlsplit, urlunsplit, parse_qsl, urlencode
 import tldextract
 import xml.etree.ElementTree as ET
@@ -461,7 +461,7 @@ def fetch_sitemap_urls(session: requests.Session, sitemap_url: str) -> Tuple[
 
     return (url_entries, nested)
 
-def collect_from_sitemaps(session: requests.Session, site_url: str, start: datetime, end: datetime, *, max_per_source: int=5000) -> List[ArticleHint]:
+def collect_from_sitemaps(session: requests.Session, site_url: str, start: datetime, end: datetime, *, max_per_source: int=5000, report: Optional[Dict[str, Any]] = None) -> List[ArticleHint]:
     hints: List[ArticleHint] = []
     seen_sitemaps: Set[str] = set()
 
@@ -554,9 +554,21 @@ def collect_from_sitemaps(session: requests.Session, site_url: str, start: datet
     position: Dict[str, int] = {}
     max_sitemap_fetches = 100  # guards against broken/infinite sitemap trees; skips don't count
     sitemap_fetch_count = 0
+    # Either cap stops the traversal silently, and a truncated source still reads
+    # as ok. ``report`` receives which cap was hit so the caller can say so.
+    dropped_at_cap = 0
+
+    def unread() -> int:
+        return len({sm for sm, _ in queue
+                    if sm not in seen_sitemaps and "sitemap-category" not in sm})
+
     while queue:
         if sitemap_fetch_count >= max_sitemap_fetches:
             if _VERBOSE: logger.info(f"[sitemap] reached max_sitemap_fetches={max_sitemap_fetches}, stopping traversal")
+            if report is not None and unread():
+                report["cap"] = "fetch_cap"
+                report["note"] = (f"fetch cap {max_sitemap_fetches} reached, "
+                                  f"{unread()} sitemaps unread")
             break
         sm, sm_lastmod = queue.pop(0)
         if sm in seen_sitemaps:
@@ -607,6 +619,8 @@ def collect_from_sitemaps(session: requests.Session, site_url: str, start: datet
                     position[hint.url] = len(hints)
                     hints.append(hint)
                     per_source_counts["sitemap"] += 1
+                else:
+                    dropped_at_cap += 1
 
         # News sitemaps first, then newest-first. Both orderings exist to spend a
         # bounded max_per_source on the right entries: sites with massive archives
@@ -628,6 +642,9 @@ def collect_from_sitemaps(session: requests.Session, site_url: str, start: datet
 
         if per_source_counts["sitemap"] >= max_per_source:
             if _VERBOSE: logger.info(f"[sitemap] reached max_per_source={max_per_source}, stopping traversal")
+            if report is not None and (dropped_at_cap or unread()):
+                report["cap"] = "url_cap"
+                report["note"] = f"url cap {max_per_source} reached, {unread()} sitemaps unread"
             break
 
     if _VERBOSE: logger.info(f"[sitemap] total hints: {len(hints)}")

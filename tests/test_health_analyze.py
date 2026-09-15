@@ -275,6 +275,22 @@ def test_collector_without_a_recent_run_is_missing(tmp_path):
     assert incident["check"] == "missing_collection_run"
 
 
+def test_truncated_sitemap_is_a_warning_on_an_ok_source(tmp_path):
+    db = tmp_path / "db.sqlite3"
+    migrate(db)
+    run_id = _add_news_run(db, 11, 12)
+    with session(db) as conn:
+        conn.execute("UPDATE run_source SET error = ? WHERE run_id = ?",
+                     ("truncated: url cap 2000 reached, 4 sitemaps unread", run_id))
+
+    result = _analyze(tmp_path, db, run_id)
+
+    incident = next(item for item in result["incidents"] if item["check"] == "sitemap_truncated")
+    assert incident["severity"] == "warning"
+    assert incident["message"].endswith("early: url cap 2000 reached, 4 sitemaps unread")
+    assert not any(item["check"] == "source_failed" for item in result["incidents"])
+
+
 def test_missing_source_result_is_detected_without_changing_database(tmp_path):
     db = tmp_path / "db.sqlite3"
     migrate(db)

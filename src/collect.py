@@ -272,6 +272,7 @@ def _dedupe_hints(hints: List[ArticleHint]) -> List[ArticleHint]:
 def collect_source(entry: Dict[str, Any], start: datetime,
                    end: datetime, max_per_source: int, *,
                    overlap: timedelta = timedelta(hours=COLLECTION_OVERLAP_HOURS),
+                   truncation: Optional[Dict[str, Any]] = None,
                    ) -> Tuple[List[ArticleHint], Optional[str]]:
     """Run every enabled discovery method for one source.
 
@@ -287,6 +288,10 @@ def collect_source(entry: Dict[str, Any], start: datetime,
     reported ok. Re-found URLs cost nothing - store_hints skips them - so the
     overlap re-reads without re-storing. Frontpage results are not date-filtered
     and keep the unshifted start.
+
+    When ``truncation`` is given, it receives ``cap`` ("url_cap" or "fetch_cap")
+    and ``note`` if the sitemap traversal stopped at a cap. That is not an error:
+    what was found is kept, but the source may have more.
     """
     since = start - overlap
     hints: List[ArticleHint] = []
@@ -307,7 +312,10 @@ def collect_source(entry: Dict[str, Any], start: datetime,
         sm.headers.update(SITEMAP_HEADERS)
         try:
             hints += collect_from_sitemaps(sm, entry["url"], since, end,
-                                           max_per_source=max_per_source)
+                                           max_per_source=max_per_source, report=truncation)
+            if truncation:
+                logger.warning("[collect] %s: sitemap truncated: %s",
+                               slug_for(entry), truncation["note"])
         except Exception as exc:
             errors.append(f"sitemap: {type(exc).__name__}: {exc}")
 
@@ -470,11 +478,13 @@ def run_collection(sources_path: Optional[Path] = None, *, days: Optional[float]
 
     def work(plan):
         entry = plan["entry"]
+        truncation: Dict[str, Any] = {}
         try:
-            hints, error = collect_source(entry, plan["start"], end, max_per_source)
+            hints, error = collect_source(entry, plan["start"], end, max_per_source,
+                                          truncation=truncation)
         except Exception as exc:  # noqa: BLE001 - one source must not end the run
             hints, error = [], f"{type(exc).__name__}: {exc}"
-        return plan, hints, error
+        return plan, hints, error, truncation
 
     summary = {"kind": kind, "sources": len(entries), "ok": 0, "zero": 0,
                "failed": 0, "found": 0, "stored": 0,
@@ -486,8 +496,11 @@ def run_collection(sources_path: Optional[Path] = None, *, days: Optional[float]
     with ThreadPoolExecutor(max_workers=workers or CRAWLER_WORKERS) as ex:
         futures = [ex.submit(work, plan) for plan in plans]
         for future in as_completed(futures):
-            plan, hints, error = future.result()
+            plan, hints, error, truncation = future.result()
             entry, slug = plan["entry"], plan["slug"]
+            # A truncated traversal stays ok; the note rides in the error column,
+            # prefixed so readers can tell it from a failure without a migration.
+            note = error or (f"truncated: {truncation['note']}" if truncation else None)
             with session(db_path) as conn:
                 # Store whatever was collected even when a method failed. Discarding
                 # a successful sitemap sweep because its feed timed out loses data.
@@ -510,10 +523,10 @@ def run_collection(sources_path: Optional[Path] = None, *, days: Optional[float]
                      "status": status, "found": len(hints), "stored": stored,
                      "start": plan["start"].isoformat(),
                      "watermark_advanced": not error and not plan["leaves_gap"],
-                     "error": error})
+                     "error": note})
                 record_source_result(conn, run_id, slug, status,
                                      items_found=len(hints), items_stored=stored,
-                                     error=error)
+                                     error=note)
 
     gaps = sum(1 for plan in plans if plan["leaves_gap"])
     with session(db_path) as conn:

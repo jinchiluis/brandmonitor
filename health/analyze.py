@@ -242,6 +242,12 @@ def _source_metrics(
                     f"latest {kind} run failed for this source: {current['error'] or 'no error recorded'}",
                 ))
             elif current["status"] in {"ok", "zero"}:
+                if (current["error"] or "").startswith("truncated:"):
+                    incidents.append(_incident(
+                        slug, "sitemap_truncated", "warning",
+                        f"latest {kind} run {latest_run['id']} stopped the sitemap traversal "
+                        f"early: {current['error'].removeprefix('truncated:').strip()}",
+                    ))
                 scope = f"collection:{kind}:{slug}"
                 mark = watermarks.get(scope)
                 mark_position = _parse_time(mark["position"]) if mark else None

@@ -269,7 +269,7 @@ def test_batch_limit_and_old_failures_do_not_starve_pending_items(project, monke
 
 
 def test_collection_runs_bodies_and_keeps_discovery_watermark_independent(project, monkeypatch):
-    monkeypatch.setattr("src.collect.collect_source", lambda entry, *args: ([ArticleHint(
+    monkeypatch.setattr("src.collect.collect_source", lambda entry, *args, **kwargs: ([ArticleHint(
         entry["url"] + "article", None, "Headline", "rss")], None))
     monkeypatch.setattr("src.bodies.fetch_body", lambda url: BodyResult("failed", error="timeout"))
     summary = run_collection(project[1], db_path=project[0], workers=1)
@@ -278,7 +278,7 @@ def test_collection_runs_bodies_and_keeps_discovery_watermark_independent(projec
     with session(project[0]) as conn:
         assert get_watermark(conn, "collection:news") == summary["end"]
     # The feed may no longer carry that article: the saved body task survives.
-    monkeypatch.setattr("src.collect.collect_source", lambda *args: ([], None))
+    monkeypatch.setattr("src.collect.collect_source", lambda *args, **kwargs: ([], None))
     monkeypatch.setattr("src.bodies.fetch_body", lambda url: success())
     again = run_collection(project[1], db_path=project[0], workers=1)
     assert again["found"] == 0

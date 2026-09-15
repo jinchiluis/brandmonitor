@@ -179,6 +179,14 @@ articles. After the change the same window yields 1,223 distinct URLs with none 
 the recent ones missing. Nothing downstream changes, since storage already
 de-duplicated; the reported "found" counts for such sources fall to distinct URLs.
 
+**2026-09-15 — a capped sitemap traversal says so.** `collect_from_sitemaps` takes
+an optional `report` dict and fills `cap` (`url_cap` or `fetch_cap`) and `note`
+when `max_per_source` dropped an in-window URL or left sitemaps unread, or when
+`max_sitemap_fetches` stopped it with sitemaps still queued. Both caps used to stop
+silently while the source reported ok. The return type is unchanged, so `probe.py`
+and `crawl_site` need nothing; `src/collect.py` stores the note as
+`truncated: ...` in `run_source.error` with status still `ok` (crawl_tasks.md T5).
+
 **2026-09-13 — `proxy.py` added, then unwired.** A Bright Data ISP-proxy fallback
 ported from rewriter was hooked into `crawler_html_utils.fetch_html` and
 `scraper_fetch_html.fetch_html`, then removed the same day. Neither hook reached the

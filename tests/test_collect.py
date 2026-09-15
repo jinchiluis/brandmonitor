@@ -5,6 +5,7 @@ decides whether one broken discovery method costs a source its other methods. Bo
 were previously proven only by a manual re-run.
 """
 
+import json
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -222,7 +223,7 @@ class TestWindowOverlap:
         monkeypatch.setattr("src.collect.pick_accessible_origin",
                             lambda s, u: "https://x.de")
 
-        def sitemaps(_session, _url, start, _end, max_per_source):
+        def sitemaps(_session, _url, start, _end, max_per_source, report=None):
             seen["sitemap"] = start
             return []
 
@@ -546,6 +547,72 @@ class TestNewsSitemapPriority:
 
         assert [(h.url, h.title) for h in hints] == [
             ("https://x.de/one", "One"), ("https://x.de/two", None)]
+
+
+class TestSitemapCaps:
+    """A capped traversal stays ok but says it stopped early."""
+
+    WHEN = datetime(2026, 9, 10, tzinfo=BERLIN_TZ)
+
+    def _collect(self, monkeypatch, roots, listings, max_per_source):
+        from vendor.newscrawler import crawler
+
+        monkeypatch.setattr(crawler.sources, "get_site_rules", lambda url: {})
+        monkeypatch.setattr(crawler, "discover_sitemaps",
+                            lambda session, site_url, extra=None: roots)
+        monkeypatch.setattr(crawler, "fetch_sitemap_urls",
+                            lambda session, url: listings[url])
+        report = {}
+        hints = crawler.collect_from_sitemaps(
+            None, "https://x.de/", self.WHEN - timedelta(days=1),
+            self.WHEN + timedelta(days=1), max_per_source=max_per_source, report=report)
+        return hints, report
+
+    def _urls(self, *paths):
+        return [(f"https://x.de/{p}", self.WHEN, None, "lastmod") for p in paths]
+
+    def test_url_cap(self, monkeypatch):
+        hints, report = self._collect(
+            monkeypatch, ["https://x.de/sitemap.xml"],
+            {"https://x.de/sitemap.xml": (self._urls("a", "b", "c"), [])}, 2)
+        assert len(hints) == 2
+        assert report == {"cap": "url_cap", "note": "url cap 2 reached, 0 sitemaps unread"}
+
+    def test_fetch_cap(self, monkeypatch):
+        children = [(f"https://x.de/sitemap-{i}.xml", None) for i in range(101)]
+        listings = {"https://x.de/sitemap.xml": ([], children)}
+        listings.update({url: (self._urls(f"a-{i}"), []) for i, (url, _) in enumerate(children)})
+        hints, report = self._collect(monkeypatch, ["https://x.de/sitemap.xml"], listings, 2000)
+        assert len(hints) == 99
+        assert report == {"cap": "fetch_cap", "note": "fetch cap 100 reached, 2 sitemaps unread"}
+
+    def test_normal_tree_reports_nothing(self, monkeypatch):
+        hints, report = self._collect(
+            monkeypatch, ["https://x.de/sitemap.xml"],
+            {"https://x.de/sitemap.xml": (self._urls("a", "b"), [])}, 2)
+        assert len(hints) == 2 and report == {}
+
+    def test_collection_keeps_a_truncated_source_ok_and_notes_it(self, monkeypatch, tmp_path):
+        from src.collect import run_collection
+
+        source_file = tmp_path / "sources.json"
+        source_file.write_text(json.dumps([{"url": "https://x.de/", "sitemap": True}]),
+                               encoding="utf-8")
+        db_path = tmp_path / "t.sqlite3"
+        migrate(db_path)
+        monkeypatch.setattr("src.collect.pick_accessible_origin", lambda s, u: "https://x.de")
+
+        def capped(*_args, report=None, **_kwargs):
+            report.update(cap="url_cap", note="url cap 1 reached, 3 sitemaps unread")
+            return [hint("https://x.de/a-one")]
+
+        monkeypatch.setattr("src.collect.collect_from_sitemaps", capped)
+        summary = run_collection(source_file, db_path=db_path, workers=1, body_limit=1)
+        with session(db_path) as conn:
+            row = conn.execute("SELECT status, error FROM run_source").fetchone()
+        assert summary["failed"] == 0
+        assert (row["status"], row["error"]) == (
+            "ok", "truncated: url cap 1 reached, 3 sitemaps unread")
 
 
 class TestExtraSitemapUrls:

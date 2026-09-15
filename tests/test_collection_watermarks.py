@@ -41,7 +41,7 @@ def test_successful_source_advances_while_failed_source_retries_exact_window(
     calls = []
     fail_b = True
 
-    def collect(entry, start, end, _limit):
+    def collect(entry, start, end, _limit, **_kwargs):
         nonlocal fail_b
         slug = entry["url"].split("/")[2]
         calls.append((slug, start, end))
@@ -80,7 +80,7 @@ def test_partial_results_are_stored_without_advancing_that_source(project, monke
     ]), encoding="utf-8")
     calls = []
 
-    def partial(_entry, start, _end, _limit):
+    def partial(_entry, start, _end, _limit, **_kwargs):
         calls.append(start)
         return [ArticleHint("https://a.test/story", start, "Story", "sitemap")], \
             "feed: timeout"
@@ -92,7 +92,7 @@ def test_partial_results_are_stored_without_advancing_that_source(project, monke
 
     monkeypatch.setattr(
         "src.collect.collect_source",
-        lambda _entry, start, _end, _limit: calls.append(start) or ([], None),
+        lambda _entry, start, _end, _limit, **_kwargs: calls.append(start) or ([], None),
     )
     second = run_collection(source_file, db_path=db, workers=1)
     assert calls == [datetime.fromisoformat(first["start"])] * 2
@@ -114,7 +114,7 @@ def test_legacy_source_inherits_global_mark_but_new_source_gets_lookback(
 
     calls = {}
 
-    def collect(entry, start, end, _limit):
+    def collect(entry, start, end, _limit, **_kwargs):
         calls[entry["url"].split("/")[2]] = (start, end)
         return [], None
 
@@ -135,7 +135,7 @@ def test_days_gap_does_not_advance_source_checkpoint(project, monkeypatch):
     with session(db) as conn:
         set_watermark(conn, source_watermark_scope("news", "a.test"), old)
 
-    monkeypatch.setattr("src.collect.collect_source", lambda *_args: ([], None))
+    monkeypatch.setattr("src.collect.collect_source", lambda *_args, **_kwargs: ([], None))
     summary = run_collection(source_file, days=1, db_path=db, workers=1)
 
     assert not summary["watermark_advanced"]
