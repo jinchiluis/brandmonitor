@@ -6,11 +6,21 @@ from lxml import html, etree
 from .crawler_playwright import fetch_html_with_playwright
 from bs4 import BeautifulSoup
 from typing import Optional
+import requests
 from src.logger import get_logger
 
 logger = get_logger(__name__)
 
 from src.config import CRAWLER_VERBOSE as _VERBOSE
+
+
+# A publisher answering 429 or 503 is asking us to stop. Neither a browser nor the
+# next guessed URL is an acceptable answer to that.
+THROTTLE_STATUSES = (429, 503)
+
+
+class HostThrottled(requests.exceptions.RequestException):
+    """Raised instead of sending a request to a host that has throttled this pass."""
 
 # --------------------- flexible date parser ---------------------
 MONTHS = {m.lower(): i for i, m in enumerate(
@@ -248,7 +258,7 @@ def fetch_html(session, url, timeout=(3,5), use_playwright_fallback=True, use_br
 
         # If 403 or other error, try Playwright fallback (unless disabled)
         if r.status_code >= 400:
-            if use_playwright_fallback:
+            if use_playwright_fallback and r.status_code not in THROTTLE_STATUSES:
                 if _VERBOSE: logger.info(f"[fetch_html] trying Playwright fallback for {url}")
                 try:
                     return fetch_html_with_playwright(url, timeout_ms=40000)
@@ -256,6 +266,8 @@ def fetch_html(session, url, timeout=(3,5), use_playwright_fallback=True, use_br
                     if _VERBOSE: logger.info(f"[fetch_html] Playwright fallback failed: {pw_e}")
             return b""
 
+    except HostThrottled:
+        raise
     except Exception as e:
         if _VERBOSE: logger.info(f"[fetch_html] requests failed {url}: {e}")
 

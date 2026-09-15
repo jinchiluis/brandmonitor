@@ -223,7 +223,7 @@ class TestWindowOverlap:
         monkeypatch.setattr("src.collect.pick_accessible_origin",
                             lambda s, u: "https://x.de")
 
-        def sitemaps(_session, _url, start, _end, max_per_source, report=None):
+        def sitemaps(_session, _url, start, _end, max_per_source, report=None, cache=None):
             seen["sitemap"] = start
             return []
 
@@ -233,7 +233,7 @@ class TestWindowOverlap:
 
         monkeypatch.setattr("src.collect.collect_from_sitemaps", sitemaps)
         monkeypatch.setattr("src.collect.collect_from_frontpage", frontpage)
-        monkeypatch.setattr("src.collect.collect_from_feeds", lambda *a: [
+        monkeypatch.setattr("src.collect.collect_from_feeds", lambda *a, **k: [
             hint("https://x.de/date-only", when="2026-09-15T02:00:00+02:00", source="rss"),
             hint("https://x.de/too-old", when="2026-09-13T13:00:00+02:00", source="rss"),
         ])
@@ -528,7 +528,7 @@ class TestNewsSitemapPriority:
             ],
         )
 
-        def fake_fetch(session, url):
+        def fake_fetch(session, url, cache=None):
             fetched.append(url)
             return ([(f"https://x.de/{len(fetched)}", when, url, "news_sitemap")], [])
 
@@ -558,7 +558,7 @@ class TestNewsSitemapPriority:
                                            ("https://x.de/two", when, None, "lastmod")],
         }
         monkeypatch.setattr(crawler, "fetch_sitemap_urls",
-                            lambda session, url: (listings[url], []))
+                            lambda session, url, cache=None: (listings[url], []))
 
         hints = crawler.collect_from_sitemaps(
             None, "https://x.de/", when - timedelta(days=1), when + timedelta(days=1),
@@ -635,7 +635,7 @@ class TestSitemapCaps:
         monkeypatch.setattr(crawler, "discover_sitemaps",
                             lambda session, site_url, extra=None: roots)
         monkeypatch.setattr(crawler, "fetch_sitemap_urls",
-                            lambda session, url: listings[url])
+                            lambda session, url, cache=None: listings[url])
         report = {}
         hints = crawler.collect_from_sitemaps(
             None, "https://x.de/", self.WHEN - timedelta(days=1),
@@ -747,7 +747,7 @@ class TestSitemapDateProvenance:
             def raise_for_status(self):
                 pass
 
-        monkeypatch.setattr(crawler, "polite_get", lambda session, url: Response())
+        monkeypatch.setattr(crawler, "polite_get", lambda session, url, headers=None: Response())
         entries, nested = crawler.fetch_sitemap_urls(None, "https://x.de/sitemap.xml")
         assert nested == []
         assert [(loc, source) for loc, _when, _title, source in entries] == [

@@ -199,6 +199,36 @@ silently while the source reported ok. The return type is unchanged, so `probe.p
 and `crawl_site` need nothing; `src/collect.py` stores the note as
 `truncated: ...` in `run_source.error` with status still `ok` (crawl_tasks.md T5).
 
+**2026-09-15 — polite discovery: conditional requests, throttle stop, no guessing
+past configured roots.** Measured the same day, one news discovery pass sent 601
+requests and 229 MB, nine passes a day; ZEIT had already blocked us for request
+volume. Four changes:
+
+- `fetch_sitemap_urls`, `collect_from_sitemaps` and `collect_from_feeds` take an
+  optional duck-typed `cache` (`src/polite_http.py` `DiscoveryCache`). Requests carry
+  `If-None-Match`/`If-Modified-Since`, and a 304 replays the entries the unchanged
+  file yielded before - with sitemap dates already resolved against the index
+  `<lastmod>` - so the hints equal a full download's. Plain skipping was rejected: an
+  article found by a titled feed and an untitled sitemap would lose its title when
+  only the feed went quiet, and `src/bodies.py` `queue_body` requeues a body fetch on
+  any changed hint. `collect_from_feeds` now calls `session.get` itself instead of
+  `fetch_html(use_playwright_fallback=False)`, which did the same without headers.
+- `crawler_html_utils` defines `HostThrottled` and `THROTTLE_STATUSES` (429, 503).
+  `fetch_html` re-raises the exception and no longer escalates a 429/503 to
+  Playwright; `collect_from_sitemaps` stops its traversal on it. The adapter that
+  raises it lives in `src/polite_http.py`.
+- `discover_sitemaps` skips its path guesses when `extra_sitemap_urls` is configured.
+  faz.net declares no sitemap, so every pass sent 24 HEAD guesses to find the same
+  two files, which are now configured.
+- `polite_get` accepts `headers`.
+
+Measured after, cold cache then an immediate second pass: 475 and 471 requests,
+209 and 180 MB, the same hints per source. The request cut is `feed_urls` and the
+dropped guesses. The byte cut is small because the two largest sitemap trees send no
+validators - faz.net (97 MB, 104 requests) and dvz.de (29 MB, 90) answer every
+conditional request in full; VerkehrsRundschau went 25.6 MB to 0.16 MB, and WELT,
+WiWo and Handelsblatt answered most files 304.
+
 **2026-09-13 — `proxy.py` added, then unwired.** A Bright Data ISP-proxy fallback
 ported from rewriter was hooked into `crawler_html_utils.fetch_html` and
 `scraper_fetch_html.fetch_html`, then removed the same day. Neither hook reached the

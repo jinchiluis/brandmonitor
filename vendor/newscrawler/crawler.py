@@ -29,7 +29,8 @@ import requests
 from lxml import etree
 import feedparser
 from dateutil import parser as dateparser
-from .crawler_html_utils import enrich_dates_light, fetch_html, fetch_title_fallback
+from .crawler_html_utils import (HostThrottled, enrich_dates_light, fetch_html,
+                                 fetch_title_fallback)
 from .crawler_playwright import fetch_html_with_playwright
 from .source_loader import sources
 from src.logger import get_logger
@@ -206,9 +207,10 @@ def url_matches_dirs(url: str, allowed_dirs: Optional[List[str]]) -> bool:
     return False
 
 
-def polite_get(session: requests.Session, url: str) -> requests.Response:
+def polite_get(session: requests.Session, url: str,
+               headers: Optional[Dict[str, str]] = None) -> requests.Response:
     time.sleep(SLEEP_BASE_SEC + random.random()*0.6)
-    resp = session.get(url, timeout=REQ_TIMEOUT)
+    resp = session.get(url, timeout=REQ_TIMEOUT, headers=headers)
     resp.raise_for_status()
     return resp
 
@@ -282,8 +284,10 @@ def discover_sitemaps(session, site_url, extra_sitemap_urls=None):
     except Exception as e:
         if _VERBOSE: logger.info(f"[robots] ignored error {robots_url}: {e}")
     # ---------------------------------------
-    # Fallback guesses ALWAYS attempted (even if robots failed)
-    if not sitemaps:
+    # Fallback guesses when robots declares nothing - unless the source names its
+    # roots. faz.net declares none, so every pass sent it 24 HEAD guesses (most of
+    # them 404) to rediscover the same file; a configured root replaces that.
+    if not sitemaps and not any(extra_sitemap_urls or []):
         guesses = [
             "sitemap.xml", "sitemap_index.xml", "sitemap-news.xml",
             "sitemap/sitemap.xml", "sitemap-index.xml", "wp-sitemap.xml",
@@ -367,7 +371,7 @@ def _is_news_sitemap(sitemap_url: str) -> bool:
     return "news" in urlsplit(sitemap_url).path.rsplit("/", 1)[-1].lower()
 
 
-def fetch_sitemap_urls(session: requests.Session, sitemap_url: str) -> Tuple[
+def fetch_sitemap_urls(session: requests.Session, sitemap_url: str, cache=None) -> Tuple[
     List[Tuple[str, Optional[datetime], Optional[str], Optional[str]]],
     List[Tuple[str, Optional[datetime]]]
 ]:
@@ -377,10 +381,19 @@ def fetch_sitemap_urls(session: requests.Session, sitemap_url: str) -> Tuple[
                  date_source is "news_sitemap" when <news:publication_date> supplied
                  the date, "lastmod" when only <lastmod> did, None when neither.
     nested_sitemaps: list of (sitemap_url, lastmod) found in index
+
+    With a ``cache`` (see src/discovery_cache.py) the request is conditional, and
+    a 304 returns what the unchanged file yielded last time instead of nothing.
     """
     try:
-        r = polite_get(session, sitemap_url)
+        conditional = cache.headers(sitemap_url) if cache is not None else {}
+        r = polite_get(session, sitemap_url, headers=conditional or None)
+        if r.status_code == 304 and conditional:
+            if _VERBOSE: logger.info(f"[sitemap] 304 {sitemap_url}")
+            return cache.replay(sitemap_url)
         r.raise_for_status()
+        if cache is not None:
+            cache.seen(sitemap_url, r)
 
         # gzip handling goes here (still inside this try in fetch_sitemap_urls)
         ct = (r.headers.get("Content-Type") or "").lower()
@@ -396,6 +409,8 @@ def fetch_sitemap_urls(session: requests.Session, sitemap_url: str) -> Tuple[
                     pass
 
         if _VERBOSE: logger.info(f"[sitemap] GET {sitemap_url} -> {r.status_code} {len(r.content)} bytes")
+    except HostThrottled:
+        raise
     except Exception as e:
         if _VERBOSE: logger.info(f"[sitemap] failed {sitemap_url}: {e}")
         return ([], [])
@@ -461,7 +476,7 @@ def fetch_sitemap_urls(session: requests.Session, sitemap_url: str) -> Tuple[
 
     return (url_entries, nested)
 
-def collect_from_sitemaps(session: requests.Session, site_url: str, start: datetime, end: datetime, *, max_per_source: int=5000, report: Optional[Dict[str, Any]] = None) -> List[ArticleHint]:
+def collect_from_sitemaps(session: requests.Session, site_url: str, start: datetime, end: datetime, *, max_per_source: int=5000, report: Optional[Dict[str, Any]] = None, cache=None) -> List[ArticleHint]:
     hints: List[ArticleHint] = []
     seen_sitemaps: Set[str] = set()
 
@@ -594,21 +609,32 @@ def collect_from_sitemaps(session: requests.Session, site_url: str, start: datet
             if _VERBOSE: logger.info(f"[sitemap] prune old index {sm} (url hint {url_hint.isoformat()})")
             continue
 
-        url_entries, nested = fetch_sitemap_urls(session, sm)
+        try:
+            url_entries, nested = fetch_sitemap_urls(session, sm, cache)
+        except HostThrottled:
+            # The host asked us to stop; the rest of the queue would only be
+            # refused locally. The caller reports the source as failed.
+            break
         sitemap_fetch_count += 1
 
+        # Entries with their inherited date resolved, which is what the cache
+        # replays on a 304: an unchanged file then yields exactly these hints.
+        resolved = []
         for loc, dt, title, date_source in url_entries:
             entry_dt = dt or hint_dt
-            if entry_dt and (start <= entry_dt <= end):
+            if not entry_dt:
+                continue
+            # An entry without a date of its own inherits the containing
+            # sitemap's <lastmod> or filename month. That is a change
+            # signal at best, so it is labelled like one.
+            date_label = date_source if dt else "lastmod"
+            resolved.append((loc, entry_dt, title, date_label))
+            if start <= entry_dt <= end:
                 # Filter by allowed_dirs if specified
                 if not url_matches_dirs(loc, allowed_dirs):
                     continue
-                # An entry without a date of its own inherits the containing
-                # sitemap's <lastmod> or filename month. That is a change
-                # signal at best, so it is labelled like one.
                 hint = ArticleHint(url=normalize_url(loc), published_at=entry_dt, title=title,
-                                   source="sitemap",
-                                   date_source=date_source if dt else "lastmod")
+                                   source="sitemap", date_source=date_label)
                 if hint.url in position:
                     kept = hints[position[hint.url]]
                     if (hint.title is not None, hint.published_at is not None) > (
@@ -621,6 +647,9 @@ def collect_from_sitemaps(session: requests.Session, site_url: str, start: datet
                     per_source_counts["sitemap"] += 1
                 else:
                     dropped_at_cap += 1
+
+        if cache is not None:
+            cache.remember(sm, resolved, nested)
 
         # News sitemaps first, then newest-first. Both orderings exist to spend a
         # bounded max_per_source on the right entries: sites with massive archives
@@ -679,7 +708,7 @@ def discover_declared_feeds(session, base: str) -> List[str]:
     return found
 
 
-def collect_from_feeds(session, site_url):
+def collect_from_feeds(session, site_url, cache=None):
     """
     Discover article URLs via RSS/Atom.
       - Reads the feeds the homepage advertises via <link rel="alternate">
@@ -723,11 +752,25 @@ def collect_from_feeds(session, site_url):
     # Fetch & parse feeds (RSS = XML, not HTML - no Playwright needed)
     for fu in feed_urls:
         try:
-            raw = fetch_html(session, fu, timeout=(5, 8), use_playwright_fallback=False)
-            if not raw:
-                if _VERBOSE: logger.info(f"[rss] miss {fu}: empty")
+            # What fetch_html does without a browser fallback, plus a conditional
+            # request: a 304 replays the unchanged feed's entries from the cache.
+            conditional = cache.headers(fu) if cache is not None else {}
+            r = session.get(fu, timeout=(5, 8), allow_redirects=True,
+                            headers=conditional or None)
+            if r.status_code == 304 and conditional:
+                if _VERBOSE: logger.info(f"[rss] 304 {fu}")
+                hints += [ArticleHint(url=url, published_at=published, title=title,
+                                      source="rss", date_source=label)
+                          for url, published, title, label in cache.replay(fu)[0]]
                 continue
+            raw = r.content if r.status_code < 400 else b""
+            if not raw:
+                if _VERBOSE: logger.info(f"[rss] miss {fu}: status={r.status_code} empty")
+                continue
+            if cache is not None:
+                cache.seen(fu, r)
 
+            feed_hints: List[ArticleHint] = []
             parsed = feedparser.parse(raw)
             entries = getattr(parsed, "entries", []) or []
             if _VERBOSE: logger.info(f"[rss] {fu} entries={len(entries)}")
@@ -771,13 +814,18 @@ def collect_from_feeds(session, site_url):
                                     break
                             except Exception:
                                 continue
-                hints.append(ArticleHint(
+                feed_hints.append(ArticleHint(
                     url=url,
                     published_at=published,
                     title=title,
                     source="rss",
                     date_source="feed" if published else None,
                 ))
+
+            hints += feed_hints
+            if cache is not None:
+                cache.remember(fu, [(h.url, h.published_at, h.title, h.date_source)
+                                    for h in feed_hints], [])
 
         except Exception as ex:
             if _VERBOSE: logger.info(f"[rss] error {fu}: {ex}")

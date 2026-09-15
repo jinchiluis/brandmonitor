@@ -33,6 +33,8 @@ from src.db import (
     start_run, utcnow,
 )
 from src.logger import get_logger
+from src.polite_http import (DiscoveryCache, PoliteAdapter, load_discovery_cache,
+                             save_discovery_cache)
 from vendor.newscrawler.crawler import (
     BERLIN_TZ, HTML_HEADERS, SITEMAP_HEADERS, ArticleHint,
     collect_from_feeds, collect_from_frontpage, collect_from_sitemaps,
@@ -287,6 +289,8 @@ def collect_source(entry: Dict[str, Any], start: datetime,
                    end: datetime, max_per_source: int, *,
                    overlap: timedelta = timedelta(hours=COLLECTION_OVERLAP_HOURS),
                    truncation: Optional[Dict[str, Any]] = None,
+                   cache_rows: Optional[Dict[str, Any]] = None,
+                   http: Optional[Dict[str, Any]] = None,
                    ) -> Tuple[List[ArticleHint], Optional[str]]:
     """Run every enabled discovery method for one source.
 
@@ -306,48 +310,74 @@ def collect_source(entry: Dict[str, Any], start: datetime,
     When ``truncation`` is given, it receives ``cap`` ("url_cap" or "fetch_cap")
     and ``note`` if the sitemap traversal stopped at a cap. That is not an error:
     what was found is kept, but the source may have more.
+
+    ``cache_rows`` are the source's stored sitemap and feed files
+    (``load_discovery_cache``). When ``http`` is given it receives the pass's
+    ``requests``, ``not_modified``, ``replayed`` and ``bytes`` counts and the
+    ``cache_updates`` to save once the hints are stored. A host that throttles
+    the pass (see ``PoliteAdapter``) makes the source an error, keeping what was
+    found before it did.
     """
     since = start - overlap
     hints: List[ArticleHint] = []
     errors: List[str] = []
+    adapter = PoliteAdapter()
+    cache = DiscoveryCache(cache_rows or {}, since)
     session_html = requests.Session()
     session_html.headers.update(HTML_HEADERS)
+    sm = requests.Session()
+    sm.headers.update(SITEMAP_HEADERS)
+    for s in (session_html, sm):
+        s.mount("https://", adapter)
+        s.mount("http://", adapter)
+
+    def report() -> None:
+        if http is not None:
+            http.update(requests=adapter.requests, not_modified=adapter.not_modified,
+                        replayed=cache.replayed, bytes=adapter.bytes,
+                        cache_updates=cache.updates)
+
     try:
         origin = pick_accessible_origin(session_html, entry["url"])
         session_html.headers["Referer"] = origin + "/"
     except Exception as exc:
         # Nothing can run without an origin, so this one is genuinely fatal.
+        report()
         return [], f"origin probe failed: {type(exc).__name__}: {exc}"
 
     # Each method runs independently. A failing sitemap must not cost us the feed:
-    # the methods are alternative routes to the same site, not a pipeline.
-    if entry.get("sitemap"):
-        sm = requests.Session()
-        sm.headers.update(SITEMAP_HEADERS)
+    # the methods are alternative routes to the same site, not a pipeline. A
+    # throttled host is the exception - nothing more is sent to it this pass.
+    if entry.get("sitemap") and not adapter.tripped:
         try:
             hints += collect_from_sitemaps(sm, entry["url"], since, end,
-                                           max_per_source=max_per_source, report=truncation)
+                                           max_per_source=max_per_source, report=truncation,
+                                           cache=cache)
             if truncation:
                 logger.warning("[collect] %s: sitemap truncated: %s",
                                slug_for(entry), truncation["note"])
         except Exception as exc:
             errors.append(f"sitemap: {type(exc).__name__}: {exc}")
 
-    if entry.get("feeds"):
+    if entry.get("feeds") and not adapter.tripped:
         try:
-            feed_hints = collect_from_feeds(session_html, origin)
+            feed_hints = collect_from_feeds(session_html, origin, cache=cache)
             # Feeds are not window-limited by the collector, so filter here.
             hints += [h for h in feed_hints
                       if h.published_at is None or in_range(h.published_at, since, end)]
         except Exception as exc:
             errors.append(f"feeds: {type(exc).__name__}: {exc}")
 
-    if entry.get("frontpage"):
+    if entry.get("frontpage") and not adapter.tripped:
         try:
             hints += collect_from_frontpage(session_html, origin,
                                             start_date=start, cap=300)
         except Exception as exc:
             errors.append(f"frontpage: {type(exc).__name__}: {exc}")
+
+    if adapter.tripped:
+        errors.append(f"throttled: {adapter.tripped}")
+    report()
 
     unique = _dedupe_hints([on_configured_host(hint, entry) for hint in hints])
     kept = [hint for hint in unique
@@ -482,7 +512,8 @@ def run_collection(sources_path: Optional[Path] = None, *, days: Optional[float]
                     "history would be skipped, so its watermark will not advance",
                     slug, start.isoformat(), mark, start - checkpoint)
             plans.append({"entry": entry, "slug": slug, "start": start,
-                          "scope": source_scope, "leaves_gap": leaves_gap})
+                          "scope": source_scope, "leaves_gap": leaves_gap,
+                          "cache_rows": load_discovery_cache(conn, slug)})
 
         earliest = min(plan["start"] for plan in plans)
         run_id = start_run(conn, kind, earliest.isoformat(), end_iso)
@@ -493,12 +524,14 @@ def run_collection(sources_path: Optional[Path] = None, *, days: Optional[float]
     def work(plan):
         entry = plan["entry"]
         truncation: Dict[str, Any] = {}
+        http: Dict[str, Any] = {}
         try:
             hints, error = collect_source(entry, plan["start"], end, max_per_source,
-                                          truncation=truncation)
+                                          truncation=truncation,
+                                          cache_rows=plan["cache_rows"], http=http)
         except Exception as exc:  # noqa: BLE001 - one source must not end the run
             hints, error = [], f"{type(exc).__name__}: {exc}"
-        return plan, hints, error, truncation
+        return plan, hints, error, truncation, http
 
     summary = {"kind": kind, "sources": len(entries), "ok": 0, "zero": 0,
                "failed": 0, "found": 0, "stored": 0,
@@ -510,8 +543,12 @@ def run_collection(sources_path: Optional[Path] = None, *, days: Optional[float]
     with ThreadPoolExecutor(max_workers=workers or CRAWLER_WORKERS) as ex:
         futures = [ex.submit(work, plan) for plan in plans]
         for future in as_completed(futures):
-            plan, hints, error, truncation = future.result()
+            plan, hints, error, truncation, http = future.result()
             entry, slug = plan["entry"], plan["slug"]
+            if http:
+                logger.info("[collect] %s: %d request(s), %d not modified, %d file(s) "
+                            "replayed, %.2f MB", slug, http["requests"],
+                            http["not_modified"], http["replayed"], http["bytes"] / 1e6)
             # A truncated traversal stays ok; the note rides in the error column,
             # prefixed so readers can tell it from a failure without a migration.
             note = error or (f"truncated: {truncation['note']}" if truncation else None)
@@ -520,6 +557,9 @@ def run_collection(sources_path: Optional[Path] = None, *, days: Optional[float]
                 # a successful sitemap sweep because its feed timed out loses data.
                 stored = store_hints(conn, run_id, slug, hints, source_kind=kind,
                                      full_text=modes[slug] == "full_text")
+                # Saved whatever the source's status: a row holds what its file
+                # yielded, so replaying it is right even after a failed pass.
+                save_discovery_cache(conn, slug, http.get("cache_updates") or {})
                 if error:
                     status = "failed"
                     summary["failed"] += 1
@@ -537,7 +577,9 @@ def run_collection(sources_path: Optional[Path] = None, *, days: Optional[float]
                      "status": status, "found": len(hints), "stored": stored,
                      "start": plan["start"].isoformat(),
                      "watermark_advanced": not error and not plan["leaves_gap"],
-                     "error": note})
+                     "error": note,
+                     "http": {k: http[k] for k in ("requests", "not_modified",
+                                                   "replayed", "bytes") if k in http}})
                 record_source_result(conn, run_id, slug, status,
                                      items_found=len(hints), items_stored=stored,
                                      error=note)

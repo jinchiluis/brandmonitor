@@ -730,3 +730,5 @@ that they alert.
 
 **Question for the customer.** Should customs, de-minimis and parcel-tax measures
 affecting a key customer or the parcel sector be alert types?
+
+**blocking issues** Zeit blocked because we frequented it too often. this can potentially happen with others too. temporarely: removed zeit from source, removed intraday runs of laptop... until we fix the politeness...

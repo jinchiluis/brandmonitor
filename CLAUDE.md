@@ -371,7 +371,16 @@ bundesnetzagentur.de is energy auctions rather than press releases.
 with anything declared in `robots.txt`; unlike guessed paths, they are used even
 when robots already declares a different sitemap. Use this for a verified omission,
 not to turn common-path guessing on for every source. DVZ needs it because its
-two-day Google News sitemap is not declared in `robots.txt`.
+two-day Google News sitemap is not declared in `robots.txt`. A configured root also
+switches the guesses off, which is why faz.net (no robots sitemap) lists its two.
+
+Collection runs nine times a day, so a request that finds nothing is sent nine
+times a day. Once the probe has shown which feeds a source really has, write them
+into `feed_urls` rather than leaving autodiscovery and `COMMON_FEED_PATHS` to find
+them again on every pass. Discovery is polite by construction (`src/polite_http.py`):
+sitemap and feed requests are conditional and a 304 replays the stored entries, and
+a host answering 429/503 twice stops that source for the pass, which reports it
+failed so its window is re-covered.
 
 `allowed_dirs` means something different to each method, which is the sharpest edge
 in this config format:
