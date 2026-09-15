@@ -62,6 +62,97 @@
       "minimum_database_coverage": 0.7,
       "failure_severity": "critical",
       "coverage_severity": "warning"
+    },
+    {
+      "id": "verkehrsrundschau-news-sitemap",
+      "source_slug": "verkehrsrundschau.de",
+      "kind": "sitemap",
+      "url": "https://www.verkehrsrundschau.de/sitemap.news.xml",
+      "include_path_prefixes": ["/nachrichten/"],
+      "minimum_entries": 100,
+      "entry_count_severity": "warning",
+      "reconcile_recent": 10,
+      "ignore_newer_than_hours": 3,
+      "minimum_database_coverage": 0.7,
+      "failure_severity": "warning",
+      "coverage_severity": "warning"
+    },
+    {
+      "id": "haendlerbund-sitemap",
+      "source_slug": "haendlerbund.de",
+      "kind": "sitemap",
+      "url": "https://www.haendlerbund.de/sitemap.xml",
+      "include_path_prefixes": ["/de/news"],
+      "exclude_path_prefixes": [
+        "/de/news/termine",
+        "/de/news/presse/erwaehnungen",
+        "/de/news/presse/haendlerbund-studien"
+      ],
+      "minimum_entries": 50,
+      "entry_count_severity": "warning",
+      "reconcile_recent": 10,
+      "ignore_newer_than_hours": 3,
+      "minimum_database_coverage": 0.7,
+      "failure_severity": "warning",
+      "coverage_severity": "warning"
+    },
+    {
+      "id": "bvdw-artikel-sitemap",
+      "source_slug": "bvdw.org",
+      "kind": "sitemap",
+      "url": "https://www.bvdw.org/artikel-sitemap.xml",
+      "include_path_prefixes": ["/news-und-publikationen", "/presse"],
+      "minimum_entries": 50,
+      "entry_count_severity": "warning",
+      "reconcile_recent": 10,
+      "ignore_newer_than_hours": 3,
+      "minimum_database_coverage": 0.7,
+      "failure_severity": "warning",
+      "coverage_severity": "warning"
+    },
+    {
+      "id": "e-commerce-magazin-feed",
+      "source_slug": "e-commerce-magazin.de",
+      "kind": "feed",
+      "url": "https://www.e-commerce-magazin.de/rss/news.xml",
+      "minimum_entries": 10,
+      "entry_count_severity": "warning",
+      "reconcile_recent": 10,
+      "ignore_newer_than_hours": 3,
+      "minimum_database_coverage": 0.7,
+      "failure_severity": "warning",
+      "coverage_severity": "warning"
+    },
+    {
+      "id": "t3n-news-sitemap",
+      "source_slug": "t3n.de",
+      "kind": "sitemap",
+      "url": "https://t3n.de/sitemap_news.xml",
+      "minimum_entries": 10,
+      "entry_count_severity": "warning",
+      "reconcile_recent": 10,
+      "ignore_newer_than_hours": 3,
+      "minimum_database_coverage": 0.7,
+      "failure_severity": "warning",
+      "coverage_severity": "warning"
+    },
+    {
+      "id": "verbraucherzentrale-sitemap",
+      "source_slug": "verbraucherzentrale.de",
+      "kind": "sitemap",
+      "url": "https://www.verbraucherzentrale.de/sitemap.xml",
+      "include_path_prefixes": [
+        "/verbandsklagen",
+        "/urteile",
+        "/wissen/vertraege-reklamation/abzocke"
+      ],
+      "minimum_entries": 100,
+      "entry_count_severity": "warning",
+      "reconcile_recent": 10,
+      "ignore_newer_than_hours": 3,
+      "minimum_database_coverage": 0.7,
+      "failure_severity": "warning",
+      "coverage_severity": "warning"
     }
   ]
 }

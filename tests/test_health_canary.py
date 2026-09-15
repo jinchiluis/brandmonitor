@@ -90,6 +90,39 @@ def test_sitemap_index_uses_highest_page_and_reconciles_database(tmp_path):
     assert (tmp_path / "output" / "history" / f"2026-09-13-news-{run_id}.json").exists()
 
 
+def test_entries_newer_than_the_grace_window_are_not_reconciled(tmp_path):
+    stored = "https://news.test/stored"
+    db, _ = _db(tmp_path, [stored])
+    config = _config(tmp_path, {
+        "id": "news-feed",
+        "source_slug": "news.test",
+        "kind": "feed",
+        "url": "https://news.test/rss.xml",
+        "reconcile_recent": 10,
+        "minimum_database_coverage": 1.0,
+        "ignore_newer_than_hours": 3,
+    })
+    feed = b"""<?xml version='1.0'?><rss><channel>
+      <item><link>https://news.test/scheduled</link><pubDate>Sun, 13 Sep 2026 09:00:00 +0000</pubDate></item>
+      <item><link>https://news.test/just-now</link><pubDate>Sun, 13 Sep 2026 04:30:00 +0000</pubDate></item>
+      <item><link>https://news.test/stored</link><pubDate>Sat, 12 Sep 2026 20:00:00 +0000</pubDate></item>
+    </channel></rss>"""
+
+    result = run_canaries(
+        db_path=db,
+        config_path=config,
+        output_dir=tmp_path / "output",
+        cycle_date="2026-09-13",
+        generated_at=datetime(2026, 9, 13, 5, tzinfo=UTC),
+        fetcher=lambda url, timeout, maximum: Fetched(url, 200, "application/rss+xml", feed),
+    )
+
+    check = result["checks"][0]
+    assert check["eligible_entries"] == 3
+    assert (check["recent_considered"], check["recent_in_database"]) == (1, 1)
+    assert result["status"] == "healthy"
+
+
 def test_access_challenge_is_a_structural_incident_not_a_script_failure(tmp_path):
     db, _ = _db(tmp_path)
     config = _config(tmp_path, {

@@ -15,7 +15,7 @@ import sqlite3
 import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -296,9 +296,22 @@ def _issue(check: dict[str, Any], kind: str, severity: str, message: str) -> dic
     }
 
 
+def _settled(items: list[ObservedItem], check: dict[str, Any], now: datetime) -> list[ObservedItem]:
+    """Drop entries dated within ``ignore_newer_than_hours`` of now, or in the future.
+
+    An article listed an hour ago may simply not have been collected yet, and a
+    scheduled article can carry a publication date hours ahead.
+    """
+    hours = check.get("ignore_newer_than_hours")
+    if not hours:
+        return items
+    cutoff = now - timedelta(hours=float(hours))
+    return [item for item in items if item.sort_time is None or item.sort_time <= cutoff]
+
+
 def run_check(
     check: dict[str, Any], conn: sqlite3.Connection, *, fetcher: Fetcher,
-    timeout: int, maximum: int,
+    timeout: int, maximum: int, now: datetime | None = None,
 ) -> dict[str, Any]:
     issues: list[dict[str, str]] = []
     try:
@@ -312,7 +325,8 @@ def run_check(
                 check.get("entry_count_severity", "warning"),
                 f"parsed {len(eligible)} eligible entries; expected at least {minimum}",
             ))
-        recent = _recent(eligible, int(check.get("reconcile_recent", 10)))
+        recent = _recent(_settled(eligible, check, now or now_utc()),
+                         int(check.get("reconcile_recent", 10)))
         stored = _stored_urls(conn, check["source_slug"])
         present = [item for item in recent if canonical_url(item.url) in stored]
         missing = [item.url for item in recent if canonical_url(item.url) not in stored]
@@ -404,7 +418,8 @@ def load_config(path: Path) -> dict[str, Any]:
         minimum = int(check.get("minimum_entries", 1))
         recent = int(check.get("reconcile_recent", 10))
         coverage = float(check.get("minimum_database_coverage", 0.8))
-        if minimum < 0 or recent < 1 or not 0 <= coverage <= 1:
+        grace = float(check.get("ignore_newer_than_hours", 0))
+        if minimum < 0 or recent < 1 or not 0 <= coverage <= 1 or grace < 0:
             raise CanaryError(f"canary {check['id']} has invalid numeric thresholds")
     return raw
 
@@ -425,6 +440,7 @@ def run_canaries(
                 fetcher=fetcher,
                 timeout=int(config.get("timeout_seconds", 20)),
                 maximum=int(config.get("max_response_bytes", 12 * 1024 * 1024)),
+                now=generated,
             )
             for check in config["checks"]
         ]
