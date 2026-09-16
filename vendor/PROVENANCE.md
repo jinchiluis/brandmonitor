@@ -288,6 +288,16 @@ setting; the discriminator is whether the file could be read, never whether it w
 full. `src/discovery.py` is the only caller, and `collect_from_sitemaps` is
 untouched.
 
+**2026-09-16 — the probe reports per file, without a crawler change.**
+`collect_from_sitemaps` already offers every fetched file to an optional duck-typed
+`cache`, which is the per-file hook the probe needed: `src/probe.py` `FileRecorder`
+implements `headers`/`seen`/`remember`, returns no conditional headers (a probe
+wants the real file), and keeps each file's entries and validators. `file_yield`
+then counts what each file would actually contribute - window, `allowed_dirs`, the
+source's exclusion rules, furniture, malformed - and `pin_suggestion` runs a greedy
+set cover over those sets to print the `sitemap_urls` block to paste. Nothing in
+the vendored crawler changed for any of it.
+
 ## googlesearch
 
 | Field | Value |

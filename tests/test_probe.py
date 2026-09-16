@@ -7,6 +7,7 @@ hints into the numbers a source entry gets written from.
 import json
 import sys
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -15,16 +16,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.probe import (  # noqa: E402
     ATTEMPTS,
+    FileRecorder,
     MethodResult,
     _dir_key,
     _looks_like_article,
     _run_method,
     directory_table,
     draft_entry,
+    file_yield,
+    pin_suggestion,
     suggest_dirs,
+    token_hints,
     unreachable_feeds,
 )
-from vendor.newscrawler.crawler import ArticleHint  # noqa: E402
+from vendor.newscrawler.crawler import BERLIN_TZ, ArticleHint  # noqa: E402
 
 
 def hint(url, source="sitemap"):
@@ -255,3 +260,119 @@ class TestDraftEntry:
     def test_allowed_dirs_are_carried_through(self):
         entry = draft_entry(self._report(True, True, False), ["politik", "wirtschaft"])
         assert entry["allowed_dirs"] == ["politik", "wirtschaft"]
+
+
+WINDOW_START = datetime(2026, 9, 14, tzinfo=BERLIN_TZ)
+WINDOW_END = datetime(2026, 9, 16, 12, 0, tzinfo=BERLIN_TZ)
+IN_WINDOW = datetime(2026, 9, 16, 8, 0, tzinfo=BERLIN_TZ)
+TOO_OLD = datetime(2026, 3, 1, tzinfo=BERLIN_TZ)
+
+
+class Recorded:
+    """Feeds FileRecorder the way collect_from_sitemaps does."""
+
+    class Response:
+        def __init__(self, headers):
+            self.headers = headers
+
+    @staticmethod
+    def build(files, validators=()):
+        recorder = FileRecorder()
+        for url, entries in files.items():
+            if url in validators:
+                recorder.seen(url, Recorded.Response({"ETag": '"abc"'}))
+            recorder.remember(url, entries, [])
+        return recorder
+
+
+def sm_entry(loc, when=IN_WINDOW, title=None, date_source="lastmod"):
+    return (loc, when, title, date_source)
+
+
+class TestFileYield:
+    """What a sitemap file would really contribute, not how many URLs it lists."""
+
+    def test_only_urls_that_survive_every_collection_filter_are_counted(self):
+        recorder = Recorded.build({
+            "https://x.de/news.xml": [
+                sm_entry("https://x.de/politik/real-article-here"),
+                sm_entry("https://x.de/politik/too-old-article", when=TOO_OLD),
+                sm_entry("https://x.de/sport/wrong-section-here"),
+                sm_entry("https://x.de/politik/blocked-article", ),
+            ],
+        })
+        entry = {"url": "https://x.de/", "allowed_dirs": ["politik"],
+                 "excluded_url_substrings": ["blocked"]}
+        per_file = file_yield(recorder, entry, WINDOW_START, WINDOW_END)
+
+        assert per_file["https://x.de/news.xml"]["kept"] == \
+            {"https://x.de/politik/real-article-here"}
+        assert per_file["https://x.de/news.xml"]["entries"] == 4
+
+    def test_news_dates_titles_and_validators_are_reported(self):
+        recorder = Recorded.build(
+            {"https://x.de/news.xml": [
+                sm_entry("https://x.de/one-real-article", title="A",
+                         date_source="news_sitemap"),
+                sm_entry("https://x.de/two-real-article"),
+            ]},
+            validators={"https://x.de/news.xml"},
+        )
+        row = file_yield(recorder, {}, WINDOW_START, WINDOW_END)["https://x.de/news.xml"]
+        assert (row["news_dates"], row["titled"], row["validators"]) == (1, 1, True)
+
+    def test_a_file_without_validators_says_so(self):
+        recorder = Recorded.build(
+            {"https://x.de/news.xml": [sm_entry("https://x.de/one-real-article")]})
+        row = file_yield(recorder, {}, WINDOW_START, WINDOW_END)["https://x.de/news.xml"]
+        assert row["validators"] is False
+
+
+class TestPinSuggestion:
+    """The point of the probe: which files carry the articles."""
+
+    def test_the_fewest_files_that_cover_every_url_are_chosen(self):
+        per_file = {
+            "news.xml": {"kept": {"a", "b", "c"}, "news_dates": 3},
+            "archive-1.xml": {"kept": {"a"}, "news_dates": 0},
+            "archive-2.xml": {"kept": set(), "news_dates": 0},
+            "wirtschaft.xml": {"kept": {"d"}, "news_dates": 0},
+        }
+        chosen, uncovered = pin_suggestion(per_file)
+        assert set(chosen) == {"news.xml", "wirtschaft.xml"}
+        assert uncovered == set()
+
+    def test_a_news_sitemap_wins_a_tie_against_a_plain_one(self):
+        per_file = {
+            "plain.xml": {"kept": {"a", "b"}, "news_dates": 0},
+            "news.xml": {"kept": {"a", "b"}, "news_dates": 2},
+        }
+        chosen, _ = pin_suggestion(per_file)
+        assert chosen == ["news.xml"]
+
+    def test_nothing_kept_suggests_nothing(self):
+        assert pin_suggestion({"a.xml": {"kept": set(), "news_dates": 0}}) == ([], set())
+
+
+class TestTokenHints:
+    """A pin naming this month breaks at the next one unless it carries a token."""
+
+    def test_a_dated_path_is_templated(self):
+        [hint_line] = token_hints(
+            ["https://www.welt.de/sitemaps/sitemap/2026/09/sitemap.xml.gz"],
+            {}, WINDOW_END)
+        assert "{YYYY}/{MM}" in hint_line
+
+    def test_a_dated_and_numbered_file_gets_both_tokens(self):
+        url = "https://www.spiegel.de/sitemaps/article/sitemap-2026-09_3.xml"
+        per_file = {url: {}, "https://www.spiegel.de/sitemaps/article/sitemap-2026-09_1.xml": {}}
+        [hint_line] = token_hints([url], per_file, WINDOW_END)
+        assert "sitemap-{YYYY}-{MM}_{LATEST}.xml" in hint_line
+        assert '"index"' in hint_line
+
+    def test_a_stable_name_gets_no_hint(self):
+        assert token_hints(["https://x.de/news-sitemap.xml"], {}, WINDOW_END) == []
+
+    def test_a_number_that_is_not_a_date_is_not_templated_as_one(self):
+        """0916 is not this month; only a four-digit year anchors a date."""
+        assert token_hints(["https://x.de/sitemap-0916.xml"], {}, WINDOW_END) == []

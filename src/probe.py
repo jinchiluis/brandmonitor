@@ -14,6 +14,7 @@ which is how a drafted entry gets verified.
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections import Counter
 from dataclasses import dataclass, field
@@ -24,6 +25,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 import tldextract
 
+from src.collect import is_furniture, is_malformed, url_is_excluded
 from src.logger import get_logger
 from vendor.newscrawler.crawler import (
     BERLIN_TZ,
@@ -38,6 +40,7 @@ from vendor.newscrawler.crawler import (
     in_range,
     normalize_url,
     pick_accessible_origin,
+    url_matches_dirs,
 )
 from vendor.newscrawler.crawler_html_utils import fetch_html
 from vendor.newscrawler.source_loader import sources
@@ -76,6 +79,128 @@ class MethodResult:
         if self.error:
             return "ERROR"
         return "ok" if self.hints else "empty"
+
+
+class FileRecorder:
+    """Records what each sitemap file gave, by duck-typing the discovery cache.
+
+    ``collect_from_sitemaps`` already offers every fetched file to an optional
+    ``cache`` (``src/polite_http.DiscoveryCache``), which is exactly the per-file
+    hook the probe needs, so nothing in the crawler has to change to report this.
+    ``headers`` returns nothing: a probe wants the real file, never a 304.
+    """
+
+    def __init__(self) -> None:
+        self.files: Dict[str, Dict] = {}
+
+    def _row(self, url: str) -> Dict:
+        return self.files.setdefault(url, {"entries": [], "validators": (None, None)})
+
+    def headers(self, url: str) -> Dict[str, str]:
+        return {}
+
+    def replay(self, url: str):  # pragma: no cover - headers() never asks for one
+        raise AssertionError("the probe sends no conditional requests")
+
+    def seen(self, url: str, response) -> None:
+        self._row(url)["validators"] = (response.headers.get("ETag"),
+                                        response.headers.get("Last-Modified"))
+
+    def remember(self, url: str, entries, children) -> None:
+        self._row(url)["entries"] = entries
+
+
+def file_yield(recorder: "FileRecorder", entry: Dict, start: datetime,
+               end: datetime) -> Dict[str, Dict]:
+    """Per sitemap file: what it would actually contribute to the corpus.
+
+    Counts a URL only if it survives everything a real collection applies -
+    the window, ``allowed_dirs``, the source's exclusion rules, furniture and
+    malformed URLs - because a file holding 4,000 archive URLs contributes
+    nothing and should read as nothing.
+    """
+    allowed_dirs = entry.get("allowed_dirs") or None
+    out: Dict[str, Dict] = {}
+    for url, row in recorder.files.items():
+        kept, news_dates, titled = set(), 0, 0
+        for loc, when, title, date_source in row["entries"]:
+            if when is None or not in_range(when, start, end):
+                continue
+            if not url_matches_dirs(loc, allowed_dirs):
+                continue
+            if url_is_excluded(loc, entry, title) or is_furniture(loc) or is_malformed(loc):
+                continue
+            kept.add(normalize_url(loc))
+            news_dates += date_source == "news_sitemap"
+            titled += bool(title)
+        out[url] = {"entries": len(row["entries"]), "kept": kept,
+                    "news_dates": news_dates, "titled": titled,
+                    "validators": any(row["validators"])}
+    return out
+
+
+def pin_suggestion(per_file: Dict[str, Dict]) -> Tuple[List[str], Set[str]]:
+    """Greedily choose the fewest files that cover every kept URL.
+
+    Returns (chosen files, URLs no file covers - always empty, kept for symmetry
+    with the caller's accounting). Greedy set cover is exactly the question being
+    asked: which files carry the articles, and which are archive the pass reads
+    for nothing.
+    """
+    remaining = set().union(*(f["kept"] for f in per_file.values())) if per_file else set()
+    chosen: List[str] = []
+    while remaining:
+        best = max(per_file, key=lambda u: (len(per_file[u]["kept"] & remaining),
+                                            per_file[u]["news_dates"]))
+        gain = per_file[best]["kept"] & remaining
+        if not gain:
+            break
+        chosen.append(best)
+        remaining -= gain
+    return chosen, remaining
+
+
+# A date inside a sitemap URL, anchored on a four-digit year followed by a real
+# month. Matching "09" or "16" on their own would template an id or a section
+# number and suggest a pin that fetches nothing.
+_URL_DATE = re.compile(r"(?P<y>20\d{2})(?P<s1>[-_/]?)(?P<m>0[1-9]|1[0-2])"
+                       r"(?:(?P<s2>[-_/])(?P<d>[0-3]\d))?")
+
+
+def token_hints(chosen: List[str], per_file: Dict[str, Dict], end: datetime) -> List[str]:
+    """Say which chosen files carry a date or a page number that will roll.
+
+    A pin naming this month or this week's page number is a pin that breaks at the
+    next boundary, which is the one failure mode pinning adds; both have a token
+    that survives it, and spiegel.de needs both at once.
+    """
+    hints: List[str] = []
+    for url in chosen:
+        pinned, notes = url, []
+
+        match = _URL_DATE.search(url)
+        if match and match.group("y") == f"{end:%Y}":
+            template = "{YYYY}" + (match.group("s1") or "") + "{MM}"
+            if match.group("d"):
+                template += match.group("s2") + "{DD}"
+            pinned = url[:match.start()] + template + url[match.end():]
+            notes.append("names this month")
+
+        # A number shared with siblings of the same shape is a page number.
+        shape = re.sub(r"\d+", "{N}", url)
+        siblings = [u for u in per_file if u != url and re.sub(r"\d+", "{N}", u) == shape]
+        if siblings:
+            rolled = re.sub(r"(?<=[/=_-])[0-9]+(?=[./]|$)", "{LATEST}", pinned)
+            if rolled != pinned:
+                pinned = rolled
+                notes.append(f"{len(siblings)} sibling(s) of the same shape")
+
+        if not notes:
+            continue
+        spec = (f'{{"url": "{pinned}", "index": "<the index listing them>"}}'
+                if "{LATEST}" in pinned else f'"{pinned}"')
+        hints.append(f"{url}\n    -> {'; '.join(notes)}; pin as {spec}")
+    return hints
 
 
 def _dir_key(url: str, depth: int) -> str:
@@ -178,9 +303,14 @@ def probe_site(
         site_url = "https://" + site_url
 
     mode = "verify"
+    entry: Dict = {}
     if sources_path:
         loaded = sources.load_sources(sources_path)
         logger.info("[probe] loaded %d sources from %s", len(loaded), sources_path)
+        # get_site_rules returns only the crawl switches; the exclusion rules that
+        # decide what a file really contributes live on the entry itself.
+        entry = next((e for e in loaded
+                      if domain_of(e.get("url", "")) == domain_of(site_url)), {})
         if sources.get_site_rules(site_url) is None:
             logger.warning(
                 "[probe] %s is not in %s - probing it as an unknown domain",
@@ -201,10 +331,12 @@ def probe_site(
     sitemap_session = requests.Session()
     sitemap_session.headers.update(SITEMAP_HEADERS)
 
+    recorder = FileRecorder()
     results = [
         # Sitemap hints arrive already window- and dir-filtered by the crawler.
         _run_method("sitemap", lambda: collect_from_sitemaps(
-            sitemap_session, site_url, start, end, max_per_source=max_per_source
+            sitemap_session, site_url, start, end, max_per_source=max_per_source,
+            cache=recorder
         ), cap=max_per_source),
         # Feeds return whatever the feed holds; the window filter is applied on report.
         _run_method("feeds", lambda: collect_from_feeds(session, origin)),
@@ -224,6 +356,8 @@ def probe_site(
         "end": end,
         "days": days,
         "results": results,
+        "entry": entry,
+        "per_file": file_yield(recorder, entry, start, end),
     }
 
 
@@ -395,6 +529,8 @@ def format_report(report: Dict, depth: int = 1, samples: int = 2) -> str:
                     break
         lines.append("")
 
+    lines.extend(sitemap_file_section(report))
+
     allowed = suggest_dirs(order, per_dir)
     lines.append("--- draft entry (review before use) ---")
     lines.append(json.dumps(draft_entry(report, allowed), indent=2, ensure_ascii=False))
@@ -402,3 +538,51 @@ def format_report(report: Dict, depth: int = 1, samples: int = 2) -> str:
     lines.append("Trim allowed_dirs to the sections worth monitoring, then re-run with")
     lines.append("--sources <file> to confirm the entry behaves as intended.")
     return "\n".join(lines)
+
+
+def sitemap_file_section(report: Dict) -> List[str]:
+    """Per-file yield and the sitemap_urls block to paste.
+
+    Collection runs nine times a day; every file listed here with nothing in the
+    window is read on every one of those passes for nothing. ``validators`` says
+    whether the server sends an ETag or Last-Modified: without them a conditional
+    request cannot help either, so those rows are the expensive ones.
+    """
+    per_file: Dict[str, Dict] = report.get("per_file") or {}
+    if not per_file:
+        return []
+    lines = ["--- sitemap files read (what each contributed) ---"]
+    chosen, _uncovered = pin_suggestion(per_file)
+    order = sorted(per_file, key=lambda u: (-len(per_file[u]["kept"]), u))
+    others = {u: per_file[u]["kept"] for u in per_file}
+    header = (f"{'kept':>6}{'unique':>8}{'entries':>9}{'news':>7}{'titled':>8}"
+              f"{'valid':>7}  file")
+    lines.append(header)
+    lines.append("-" * min(len(header) + 40, 110))
+    empty = 0
+    for url in order[:40]:
+        row = per_file[url]
+        if not row["kept"]:
+            empty += 1
+            continue
+        unique = row["kept"] - set().union(*(v for u, v in others.items() if u != url)) \
+            if len(others) > 1 else row["kept"]
+        mark = "*" if url in chosen else " "
+        lines.append(f"{len(row['kept']):>6}{len(unique):>8}{row['entries']:>9}"
+                     f"{row['news_dates']:>7}{row['titled']:>8}"
+                     f"{'yes' if row['validators'] else 'no':>7} {mark}{url}")
+    if empty:
+        lines.append(f"{empty} further file(s) contributed nothing in this window "
+                     f"and are read on every pass for nothing.")
+    lines.append("")
+    if chosen:
+        lines.append("--- suggested sitemap_urls (verify before committing) ---")
+        lines.append(json.dumps({"sitemap_urls": chosen}, indent=2, ensure_ascii=False))
+        covered = len(set().union(*(per_file[u]["kept"] for u in chosen)))
+        total = len(set().union(*(f["kept"] for f in per_file.values())))
+        lines.append(f"{len(chosen)} of {len(per_file)} file(s) cover {covered}/{total} "
+                     f"of this window's URLs.")
+        for hint in token_hints(chosen, per_file, report["end"]):
+            lines.append(f"  {hint}")
+        lines.append("")
+    return lines
