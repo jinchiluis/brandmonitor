@@ -271,6 +271,23 @@ day, by the owner's decision: `crawl_site` was their only caller,
 `excluded_url_substrings`, `excluded_title_substrings`), which is configured per
 source rather than as one global URL list.
 
+**2026-09-16 — `fetch_sitemap_urls(strict=True)`, for pinned files.** The
+function answers `([], [])` for every failure: a bad status, markup instead of
+XML, unparseable XML, a recover parse that salvages nothing. That is right for a
+traversal, where one unreadable file among a hundred guesses is normal and the
+walk continues, and wrong for a *pinned* file, which is the only place that
+source's articles come from - an unreadable one there is indistinguishable from a
+quiet day, which is exactly how DVZ and VerkehrsRundschau lost days unnoticed.
+
+`strict` raises instead, adding two checks that only matter when a single file is
+load-bearing: the final response URL must still be on the requested host (compared
+without `www.`), and the parsed root must be `<urlset>` or `<sitemapindex>`, since
+the recover parser will otherwise hand back the first element of whatever a
+reorganised URL now serves. An empty but well-formed sitemap raises under neither
+setting; the discriminator is whether the file could be read, never whether it was
+full. `src/discovery.py` is the only caller, and `collect_from_sitemaps` is
+untouched.
+
 ## googlesearch
 
 | Field | Value |

@@ -33,6 +33,7 @@ from src.db import (
     start_run, utcnow,
 )
 from src.logger import get_logger
+from src.discovery import PinnedSitemapError, collect_from_pinned, has_pins
 from src.polite_http import (DiscoveryCache, PoliteAdapter, load_discovery_cache,
                              save_discovery_cache)
 from vendor.newscrawler.crawler import (
@@ -311,6 +312,10 @@ def collect_source(entry: Dict[str, Any], start: datetime,
     and ``note`` if the sitemap traversal stopped at a cap. That is not an error:
     what was found is kept, but the source may have more.
 
+    A source with ``sitemap_urls`` takes the pinned path in ``src/discovery.py``
+    instead of walking its sitemap index; an unreadable pinned file is an error for
+    the source, which is the point of pinning at all (see that module).
+
     ``cache_rows`` are the source's stored sitemap and feed files
     (``load_discovery_cache``). When ``http`` is given it receives the pass's
     ``requests``, ``not_modified``, ``replayed`` and ``bytes`` counts and the
@@ -337,25 +342,38 @@ def collect_source(entry: Dict[str, Any], start: datetime,
                         replayed=cache.replayed, bytes=adapter.bytes,
                         cache_updates=cache.updates)
 
-    try:
-        origin = pick_accessible_origin(session_html, entry["url"])
+    # Only feeds and the frontpage need a homepage: pinned sitemap URLs are
+    # absolute and answer for themselves. Probing anyway cost a request per source
+    # per pass for nothing, nine times a day.
+    origin = (entry.get("origin") or "").rstrip("/") or None
+    if origin is None and not (has_pins(entry) and not entry.get("feeds")
+                               and not entry.get("frontpage")):
+        try:
+            origin = pick_accessible_origin(session_html, entry["url"])
+        except Exception as exc:
+            # Nothing can run without an origin, so this one is genuinely fatal.
+            report()
+            return [], f"origin probe failed: {type(exc).__name__}: {exc}"
+    if origin:
         session_html.headers["Referer"] = origin + "/"
-    except Exception as exc:
-        # Nothing can run without an origin, so this one is genuinely fatal.
-        report()
-        return [], f"origin probe failed: {type(exc).__name__}: {exc}"
 
     # Each method runs independently. A failing sitemap must not cost us the feed:
     # the methods are alternative routes to the same site, not a pipeline. A
     # throttled host is the exception - nothing more is sent to it this pass.
     if entry.get("sitemap") and not adapter.tripped:
         try:
-            hints += collect_from_sitemaps(sm, entry["url"], since, end,
-                                           max_per_source=max_per_source, report=truncation,
-                                           cache=cache)
-            if truncation:
-                logger.warning("[collect] %s: sitemap truncated: %s",
-                               slug_for(entry), truncation["note"])
+            if has_pins(entry):
+                hints += collect_from_pinned(entry, since, end, session=sm, cache=cache)
+            else:
+                hints += collect_from_sitemaps(sm, entry["url"], since, end,
+                                               max_per_source=max_per_source,
+                                               report=truncation, cache=cache)
+                if truncation:
+                    logger.warning("[collect] %s: sitemap truncated: %s",
+                                   slug_for(entry), truncation["note"])
+        except PinnedSitemapError as exc:
+            # Already names the file and the reason; a type name adds nothing.
+            errors.append(str(exc))
         except Exception as exc:
             errors.append(f"sitemap: {type(exc).__name__}: {exc}")
 

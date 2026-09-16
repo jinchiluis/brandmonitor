@@ -338,6 +338,19 @@ def discover_sitemaps(session, site_url, extra_sitemap_urls=None):
     if _VERBOSE: logger.info(f"[robots] found {len(unique)} sitemap entries")
     return unique
 
+class SitemapUnreadable(Exception):
+    """A sitemap answered, but with something that is not a sitemap.
+
+    Raised only under ``fetch_sitemap_urls(strict=True)``. Transport failures raise
+    whatever ``requests`` raised; this covers the cases where the request itself
+    succeeded.
+    """
+
+
+def _host_key(url: str) -> str:
+    return urlsplit(url).netloc.lower().removeprefix("www.")
+
+
 def _is_news_sitemap(sitemap_url: str) -> bool:
     """True for a Google News sitemap, judged by its filename.
 
@@ -347,7 +360,8 @@ def _is_news_sitemap(sitemap_url: str) -> bool:
     return "news" in urlsplit(sitemap_url).path.rsplit("/", 1)[-1].lower()
 
 
-def fetch_sitemap_urls(session: requests.Session, sitemap_url: str, cache=None) -> Tuple[
+def fetch_sitemap_urls(session: requests.Session, sitemap_url: str, cache=None, *,
+                       strict: bool = False) -> Tuple[
     List[Tuple[str, Optional[datetime], Optional[str], Optional[str]]],
     List[Tuple[str, Optional[datetime]]]
 ]:
@@ -358,8 +372,17 @@ def fetch_sitemap_urls(session: requests.Session, sitemap_url: str, cache=None) 
                  the date, "lastmod" when only <lastmod> did, None when neither.
     nested_sitemaps: list of (sitemap_url, lastmod) found in index
 
-    With a ``cache`` (see src/discovery_cache.py) the request is conditional, and
+    With a ``cache`` (see src/polite_http.py) the request is conditional, and
     a 304 returns what the unchanged file yielded last time instead of nothing.
+
+    ``strict`` raises instead of returning an empty result when the file cannot be
+    read: a bad status, a redirect to another host, markup where XML was promised,
+    or XML that will not parse even with the recover parser. A traversal wants the
+    quiet default - one unreadable file among a hundred guesses is normal and the
+    walk continues. A *pinned* file is the opposite case: it is the only place that
+    source's articles come from, so an unreadable one has to stop the source
+    (src/discovery.py). An empty but well-formed sitemap is not an error under
+    either setting - that is a quiet Sunday, not a broken pin.
     """
     try:
         conditional = cache.headers(sitemap_url) if cache is not None else {}
@@ -388,12 +411,23 @@ def fetch_sitemap_urls(session: requests.Session, sitemap_url: str, cache=None) 
     except HostThrottled:
         raise
     except Exception as e:
+        if strict:
+            raise
         if _VERBOSE: logger.info(f"[sitemap] failed {sitemap_url}: {e}")
         return ([], [])
+
+    # A pinned URL that now redirects to another host is not this source's file any
+    # more, however well-formed the XML it answers with. Compared without "www."
+    # because a publisher moving between the two is routine and harmless.
+    if strict and _host_key(r.url) != _host_key(sitemap_url):
+        raise SitemapUnreadable(f"{sitemap_url}: redirected off host to {r.url}")
 
     # --- ONLY NEW GUARD: skip HTML pretending to be sitemap ---
     ctype = (r.headers.get("Content-Type") or "").lower()
     if "text/html" in ctype or (r.content[:200].lower().find(b"<html") != -1):
+        if strict:
+            raise SitemapUnreadable(f"{sitemap_url}: HTML where a sitemap was expected "
+                                    f"(content-type {ctype!r})")
         if _VERBOSE: logger.info(f"[sitemap] looks like HTML/WAF at {sitemap_url} (ctype={ctype}), skipping")
         return ([], [])
     # -----------------------------------------------------------
@@ -408,12 +442,25 @@ def fetch_sitemap_urls(session: requests.Session, sitemap_url: str, cache=None) 
         try:
             root = etree.fromstring(content, parser=parser)
         except Exception as e:
+            if strict:
+                raise SitemapUnreadable(f"{sitemap_url}: XML will not parse: {e}")
             if _VERBOSE: logger.info(f"[sitemap] XML parse error {sitemap_url}: {e}")
             return ([], [])
 
     if root is None:
+        if strict:
+            raise SitemapUnreadable(f"{sitemap_url}: nothing survived the recover parser")
         if _VERBOSE: logger.info(f"[sitemap] XML parse returned None for {sitemap_url}")
         return ([], [])
+
+    # The recover parser will happily hand back the first element of whatever this
+    # is. For a pinned file that is the quiet failure worth catching: a sitemap URL
+    # that has become a page keeps answering 200 and parses to no entries.
+    if strict:
+        localname = etree.QName(root).localname if isinstance(root.tag, str) else None
+        if localname not in ("urlset", "sitemapindex"):
+            raise SitemapUnreadable(
+                f"{sitemap_url}: root element is <{localname or '?'}>, not a sitemap")
 
     # Detect actual namespace from root (some sites use https:// instead of http://)
     root_ns = root.nsmap.get(None, "http://www.sitemaps.org/schemas/sitemap/0.9")

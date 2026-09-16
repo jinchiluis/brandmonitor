@@ -221,6 +221,31 @@ It deliberately omits `StartWhenAvailable`: a missed slot is covered by the next
 one, and catching one up after a night-time restart would run inside the update
 window.
 
+**No internet means no run.** Both batch files call `run.py netcheck` before
+anything else and exit **4** without attempting a stage when this host is offline,
+writing a marker whose only stage is `netcheck`. `health/check.py` reads that back
+as `offline` and says so, instead of reporting the stage codes each collector
+happens to produce when its first request fails — a city outage on 2026-09-16
+arrived as `title_bodies=1, safety_gate=2, dip=1, ep_procedures=2`, which is four
+descriptions of one cause. `src/net.py` probes resolution *and* routing, because
+they fail independently and DNS-only failure is the mode a single ping calls
+healthy.
+
+There is deliberately no wait-and-retry loop: news collection runs nine times a
+day and every stage resumes from a watermark or a durable queue, so a skipped pass
+costs nothing — and a waiter would hold `data/run.lock` and make the next slot
+exit 3 instead of running. After an outage nothing needs repairing by hand, with
+one exception worth knowing: the intraday pass is news-only, so `regulatory`,
+`safety_gate`, `dip`, `ep_procedures`, `backup` and the observers wait for the
+next 06:00 unless `run_daily.bat` is re-run manually.
+
+An outage must also not retire the body queue. A connection-level failure before
+anything in a pass has been fetched is this host's network, not the page, so it
+does not spend the URL's `attempts` (`src/bodies.py`); at nine passes a day
+against `max_attempts: 5`, an offline day would otherwise retire every pending URL
+before lunchtime — silently, since `unavailable` is a legitimate outcome that
+fails no stage. Ten such failures in a row across three hosts stop the pass.
+
 **06:00 means Europe/Berlin, and the host has to agree.** The laptop ran on China
 Standard Time until 2026-09-12, which would have fired the trigger at midnight CEST
 and named `data/log/<date>/` directories by a date rolling over at 18:00 Berlin; the
@@ -373,6 +398,38 @@ when robots already declares a different sitemap. Use this for a verified omissi
 not to turn common-path guessing on for every source. DVZ needs it because its
 two-day Google News sitemap is not declared in `robots.txt`. A configured root also
 switches the guesses off, which is why faz.net (no robots sitemap) lists its two.
+
+`sitemap_urls` **pins** discovery rather than supplementing it: an exact list of
+the files that carry a source's articles, used in place of `robots.txt`, the
+guessed paths, the index walk and `extra_sitemap_urls`. Measured over a live
+50-hour window on 2026-09-16, faz.net answered 100 sitemap files of which 95 held
+nothing in the window, and dvz.de 88 of which 87 did; neither host sends `ETag` or
+`Last-Modified`, so conditional requests cannot help them either. Pin what the
+probe shows carries articles, never what the site looks like it should have.
+
+A pinned URL may carry `{YYYY}`, `{MM}` or `{DD}`, resolved against the collection
+window — so a run inside the 48-hour overlap at a month boundary reads both months
+— or `{LATEST}` for a page number that rolls, which needs the object form naming
+the index that lists the numbered files:
+
+```json
+{"url": ".../sitemap.xml?page={LATEST}", "index": ".../sitemap.xml", "latest_count": 1}
+```
+
+A pinned file that **cannot be read** fails the source and holds its watermark: a
+404 or 5xx, a redirect to another host, markup where XML was promised, XML that
+will not parse, or a root element that is not `<urlset>`/`<sitemapindex>`. A
+pinned file that is **readable and empty** does not — that is a Sunday, and a rule
+failing on it would fire about a hundred times a year. When a pin expands to
+several URLs, the group fails only if none of them could be read, because the file
+for a month that has just begun may not exist yet. What pinning cannot see is a
+file that still parses but has quietly stopped carrying a section; the independent
+canaries in `health/canary.py` and `tools/rediscover.py` cover that, which is why
+a canary must not share the crawler's parser.
+
+`origin` skips the homepage probe for a pinned host. A source whose sitemaps are
+pinned and which enables neither `feeds` nor `frontpage` needs no homepage at all
+and is not probed.
 
 Collection runs nine times a day, so a request that finds nothing is sent nine
 times a day. Once the probe has shown which feeds a source really has, write them
