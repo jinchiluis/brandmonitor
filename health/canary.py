@@ -4,6 +4,40 @@
 This is an observer, not another collector. It never writes the database and it
 does not reuse the crawler's discovery parsers. Findings are data in the emitted
 snapshot; exit 2 is reserved for the observer itself being unable to run.
+
+Switched off since 2026-09-16: ``"enabled": false`` in ``health/canaries.json``.
+That flag is the whole switch. This script exits 0 without sending a request, and
+``health/analyze.py`` reads the same file and stops expecting a snapshot - a
+snapshot left over from when it ran would otherwise mismatch the current cycle and
+be a critical finding every day from now on. ``run_daily.bat`` still calls the
+stage so the switch stays in one file rather than two.
+
+It is too early for a canary. The collection config is still moving week to week -
+sources added, discovery pinned, directories excluded, gates retuned - so a URL the
+publisher lists and the corpus lacks is far more likely to be our own churn than a
+publisher change. Four of the ten checks are configured to page at critical, and a
+check that mostly reports on our own edits is one you learn to ignore. A canary
+earns its place when a coverage gap is news rather than a diff.
+
+It also is not polite, and the gap widened when ``src/polite_http.py`` made
+collection's discovery conditional. Before it comes back it must:
+
+- keep its own ETag/Last-Modified per endpoint and treat 304 as "unchanged since
+  our last observation", replaying its own stored parse. That stays independent of
+  the crawler's cache - which is the point of a canary - without being the only
+  thing still pulling these sitemaps and feeds in full. It never reuses
+  ``DiscoveryCache``; independence is exactly what it is for.
+- treat 429/503 as throttled rather than as a coverage failure: record it at
+  warning, skip the observation, honour ``Retry-After``, and never retry inside the
+  same run. ``raise_for_status`` below turns a rate limit into a critical page for
+  the wrong reason.
+- stay at one request per endpoint per day, follow a sitemap index only when the
+  child is the thing being measured, and hold a byte budget it reports.
+- settle its identity deliberately. It declares ``BrandMonitorHealth/1.0`` while
+  the crawler's sitemap session sends a browser UA on purpose (some hosts reject
+  sitemap fetches from a bot UA - see ``vendor/newscrawler/crawler.py``). One
+  address showing two identities is a correlation handle, and a canary that does
+  not reproduce the crawler's request does not measure the crawler's fate.
 """
 
 from __future__ import annotations
@@ -480,6 +514,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    try:
+        enabled = load_config(args.config).get("enabled", True)
+    except Exception as exc:
+        print(f"ERROR: canary observer failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
+    if not enabled:
+        # Checked before anything else: no request, and no snapshot, which is what
+        # health/analyze.py expects while the same flag is false. See the module
+        # docstring for why it is off and what it owes before it comes back.
+        print(f"[canary] disabled in {args.config}: no publisher request sent")
+        return 0
     try:
         result = run_canaries(
             db_path=args.db,

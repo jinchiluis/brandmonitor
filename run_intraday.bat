@@ -16,6 +16,7 @@ rem   0  every stage completed
 rem   1  a stage produced nothing usable
 rem   2  a stage aborted, or this script could not start one
 rem   3  another run holds the lock; nothing was attempted and no marker is written
+rem   4  this host has no internet; nothing was attempted
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -47,6 +48,38 @@ if errorlevel 1 (
 set "LOGDIR=%~dp0data\log\%DAY%"
 if not exist "%LOGDIR%" mkdir "%LOGDIR%"
 set "OUT=%LOGDIR%\run_intraday.txt"
+
+echo.>> "%OUT%"
+echo ======== brandmonitor intraday %DATE% %TIME% ========>> "%OUT%"
+
+rem Preflight, for the reasons in run_daily.bat and src/net.py. This slot does not
+rem wait for the network: seven more follow it, and a waiter would hold the
+rem run lock, which would make the next one exit 3 instead of running.
+echo.>> "%OUT%"
+echo -------- netcheck -------->> "%OUT%"
+"%PY%" run.py netcheck >> "%OUT%" 2>&1
+if errorlevel 4 (
+    "%PY%" -c "import datetime;print(datetime.datetime.now(datetime.timezone.utc).isoformat()[:19])" > "%TMPVAL%" 2>nul
+    set /p FINISHED=<"%TMPVAL%"
+    del "%TMPVAL%" "%TMPVAL%.err" 2>nul
+    rem Unlike the lock collision above this does write a marker. A whole day of
+    rem skipped slots would otherwise be invisible: the VPS cannot reach the laptop
+    rem while it is offline, so the marker is what tells it, once, what happened.
+    set "MARKER=%~dp0data\last_intraday_run.json"
+    > "!MARKER!.tmp" (
+        echo {
+        echo   "kind": "intraday",
+        echo   "finished_utc": "!FINISHED!Z",
+        echo   "worst_exit": 4,
+        echo   "cycle_date": "%DAY%",
+        echo   "stages": { "netcheck": 4 },
+        echo   "log": "data/log/%DAY%/run_intraday.txt"
+        echo }
+    )
+    move /y "!MARKER!.tmp" "!MARKER!" >nul
+    echo [brandmonitor] offline - intraday slot skipped  log: %OUT%
+    exit /b 4
+)
 
 set "WORST=0"
 set "CODE_news=2"
@@ -88,8 +121,6 @@ exit /b %WORST%
 
 
 :stages
-echo.>> "%OUT%"
-echo ======== brandmonitor intraday %DATE% %TIME% ========>> "%OUT%"
 call :stage news collect --kind news
 call :stage title_gate gate
 call :stage title_bodies fetch-bodies --kind news --title-gate-client jt-express

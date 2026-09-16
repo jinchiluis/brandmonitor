@@ -47,6 +47,11 @@ DEFAULT_SENDER = "jinchilu@googlemail.com"
 DEFAULT_RECIPIENT = "jinchilu@hotmail.com"
 UTC = timezone.utc
 BERLIN = ZoneInfo("Europe/Berlin")
+# The laptop's "offline, nothing attempted" exit, written into the marker as a
+# single netcheck pseudo-stage. Restated rather than imported: this checker runs
+# on the VPS and deliberately knows nothing about the project (health/README.md);
+# src/net.py owns the definition.
+OFFLINE_EXIT = 4
 
 
 class HealthCheckError(RuntimeError):
@@ -157,8 +162,8 @@ def parse_marker(payload: str) -> Marker:
         raise MarkerError("marker root must be an object")
 
     worst = raw.get("worst_exit")
-    if isinstance(worst, bool) or not isinstance(worst, int) or worst not in range(4):
-        raise MarkerError("worst_exit must be an integer from 0 through 3")
+    if isinstance(worst, bool) or not isinstance(worst, int) or worst not in range(5):
+        raise MarkerError("worst_exit must be an integer from 0 through 4")
 
     stages_raw = raw.get("stages")
     if not isinstance(stages_raw, dict) or not stages_raw:
@@ -167,7 +172,7 @@ def parse_marker(payload: str) -> Marker:
     for name, code in stages_raw.items():
         if not isinstance(name, str) or not name:
             raise MarkerError("every stage needs a non-empty string name")
-        if isinstance(code, bool) or not isinstance(code, int) or code not in range(4):
+        if isinstance(code, bool) or not isinstance(code, int) or code not in range(5):
             raise MarkerError(f"stage {name!r} has an invalid exit code")
         stages[name] = code
     if max(stages.values()) != worst:
@@ -424,6 +429,20 @@ def evaluate(
             ),
             True,
         )
+    if marker.worst_exit == OFFLINE_EXIT:
+        return HealthStatus(
+            "offline",
+            "Daily run skipped: the laptop had no internet",
+            (
+                f"Completed: {format_local(marker.finished_utc)}",
+                "No stage ran, so no watermark moved and no retry budget was spent.",
+                "The news path recovers by itself at the next intraday slot. Regulatory "
+                "collection, DIP, EP, backup and the observers run only in the daily "
+                "pass - re-run run_daily.bat by hand to get them for this cycle.",
+                f"Laptop log: {marker.log or '(not recorded)'}",
+            ),
+            True,
+        )
     if marker.worst_exit:
         failed = ", ".join(
             f"{name}={code}" for name, code in marker.stages.items() if code
@@ -486,6 +505,20 @@ def evaluate_intraday(probe: Probe | None, *, daily: Marker) -> HealthStatus | N
     marker = probe.marker
     if marker.finished_utc <= daily.finished_utc or not marker.worst_exit:
         return None
+    if marker.worst_exit == OFFLINE_EXIT:
+        # Worth saying once - a whole day of skipped slots is otherwise invisible,
+        # because the VPS cannot reach the laptop while it is offline - but it
+        # needs no action: the next slot resumes from the same watermarks.
+        return HealthStatus(
+            "intraday_offline",
+            "Intraday news pass skipped: the laptop had no internet",
+            (
+                f"Completed: {format_local(marker.finished_utc)}",
+                "No stage ran. The next slot resumes the same windows; nothing to do.",
+                f"Laptop log: {marker.log or '(not recorded)'}",
+            ),
+            True,
+        )
     failed = ", ".join(f"{name}={code}" for name, code in marker.stages.items() if code)
     return HealthStatus(
         "intraday_failed",

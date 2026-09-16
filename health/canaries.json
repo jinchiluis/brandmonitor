@@ -1,5 +1,6 @@
 {
   "schema_version": 1,
+  "enabled": false,
   "timeout_seconds": 20,
   "max_response_bytes": 12582912,
   "checks": [

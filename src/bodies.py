@@ -53,6 +53,14 @@ logger = get_logger(__name__)
 NO_ARTICLE_TEXT = "no usable article text (empty, short, or JS-only page)"
 PAYWALL_DECLARED = "publisher declares a paywall"
 
+# When this many connection failures run consecutively across this many distinct
+# hosts without a single success, the pass stops: that is this machine's network,
+# not that many publishers at once. interleave_by_source already round-robins the
+# queue, so a streak spans different hosts by construction - the host count is
+# the guard for the case where only one or two sources have pending work.
+TRANSPORT_BREAKER_FAILURES = 10
+TRANSPORT_BREAKER_HOSTS = 3
+
 
 def interleave_by_source(tasks: list[Any]) -> list[Any]:
     """Round-robin tasks across their source, preserving order within each source.
@@ -171,6 +179,10 @@ class BodyResult:
     published_at: str | None = None
     published_at_raw: str | None = None
     error: str | None = None
+    # Nothing answered at all - no socket, no name. That is this host's network
+    # until something else in the same pass succeeds, so it must not spend the
+    # URL's attempt budget. See the breaker in run_body_fetch.
+    transport: bool = False
 
 
 def _page_published_value(soup: BeautifulSoup) -> str | None:
@@ -493,7 +505,14 @@ def _fetch_public(url: str) -> BodyResult:
                                   error=f"unsupported content type: {media}")
             return _extract_article(body, response.url)
     except requests.RequestException as exc:
-        return BodyResult("failed", error=f"{type(exc).__name__}: {exc}")
+        # ConnectionError means no socket and no name: a dead host, or our own
+        # network. ReadTimeout and HTTPError mean the host answered, so they are
+        # the publisher's problem and always count toward the attempt cap. An
+        # SSLError is a certificate, which is per-host and stays countable too.
+        transport = (isinstance(exc, requests.ConnectionError)
+                     and not isinstance(exc, requests.exceptions.SSLError))
+        return BodyResult("failed", error=f"{type(exc).__name__}: {exc}",
+                          transport=transport)
 
 
 def _fetch_rendered(url: str) -> BodyResult:
@@ -811,7 +830,8 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
     queued = len(tasks)
     tasks = tasks[:limit]
     summary = {"attempted": 0, "ok": 0, "failed": 0, "unavailable": 0,
-               "stored": 0, "deferred": queued - len(tasks), "per_source": []}
+               "stored": 0, "deferred": queued - len(tasks), "per_source": [],
+               "stopped": None}
     counts = {slug: {"attempted": 0, "ok": 0, "failed": 0, "unavailable": 0,
                      "stored": 0, "errors": []} for slug in by_slug}
     now = utcnow()
@@ -821,6 +841,11 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
         run_id = start_run(conn, run_kind, now, now)
     summary["run_id"] = run_id
     host_seen: dict[str, float] = {}
+    # Until something in this pass succeeds there is no way to tell a dead host
+    # from a dead network, so connection failures get the benefit of the doubt:
+    # they cost no attempt, and enough of them in a row end the pass.
+    transport_streak = 0
+    transport_hosts: set[str] = set()
     for task in tasks:
         logger.info("[bodies] %d/%d %s", summary["attempted"] + 1, len(tasks), task["external_id"])
         pace_host(task["external_id"], host_seen)
@@ -835,7 +860,22 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
         # which is how a URL retired under a broken extractor gets recovered
         # once the extractor is fixed.
         attempts = task["attempts"] + 1
-        if result.status == "failed" and attempts >= BODY_FETCH_MAX_ATTEMPTS:
+        # A connection failure before this pass has fetched anything is not
+        # evidence about the URL, so it must not spend the URL's budget. An
+        # outage otherwise retires the whole queue: nine passes a day against a
+        # cap of five retires everything pending before lunchtime, silently,
+        # because ``unavailable`` is a legitimate outcome that fails no stage.
+        # Once anything succeeds the network is up and a connection failure is
+        # the host's own, so it counts again from here to the end of the pass.
+        untried = result.status == "failed" and result.transport and summary["ok"] == 0
+        if untried:
+            attempts = task["attempts"]
+            transport_streak += 1
+            transport_hosts.add(urlsplit(task["external_id"]).netloc)
+        else:
+            transport_streak = 0
+            transport_hosts.clear()
+        if result.status == "failed" and not untried and attempts >= BODY_FETCH_MAX_ATTEMPTS:
             result = BodyResult("unavailable", url=result.url,
                                 error=f"gave up after {attempts} attempts: {result.error}")
         # Commit each outcome before fetching another URL. A stopped run keeps
@@ -858,6 +898,14 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
         if result.error:
             source["errors"].append(f"{task['external_id']}: {result.error}")
             logger.warning("[bodies] %s %s: %s", result.status, task["external_id"], result.error)
+        if (transport_streak >= TRANSPORT_BREAKER_FAILURES
+                and len(transport_hosts) >= TRANSPORT_BREAKER_HOSTS):
+            summary["stopped"] = (
+                f"{transport_streak} consecutive connection failures across "
+                f"{len(transport_hosts)} hosts with nothing fetched - this host has no "
+                "network; the queue is untouched and the next pass resumes it")
+            logger.warning("[bodies] stopping the pass: %s", summary["stopped"])
+            break
 
     with session(db_path) as conn:
         for slug, counts_for_source in counts.items():

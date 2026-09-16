@@ -425,6 +425,28 @@ def test_timeout_is_retryable(monkeypatch):
     assert result.status == "failed" and "Timeout" in result.error
 
 
+@pytest.mark.parametrize("exc,transport", [
+    (requests.ConnectionError("name resolution failed"), True),
+    (requests.ConnectTimeout("no route"), True),
+    (requests.exceptions.SSLError("certificate expired"), False),
+    (requests.ReadTimeout("slow site"), False),
+    (requests.TooManyRedirects("loop"), False),
+])
+def test_only_a_failure_to_connect_at_all_is_our_network(monkeypatch, exc, transport):
+    """The flag that decides whether an outage may spend a URL's attempt budget.
+
+    A ReadTimeout or a bad certificate means the host answered, so it is the
+    publisher's problem and always counts. Nothing answering could be either a
+    dead host or a dead network, which run_body_fetch resolves with the rest of
+    the pass rather than here.
+    """
+    def raise_it(*args, **kwargs):
+        raise exc
+    monkeypatch.setattr("src.bodies.requests.get", raise_it)
+    result = fetch_body("https://trade.test/article")
+    assert (result.status, result.transport) == ("failed", transport)
+
+
 def test_homepages_are_not_fetched_as_articles(monkeypatch):
     def unexpected(*args, **kwargs):
         pytest.fail("homepage should be rejected before fetching")
@@ -689,6 +711,85 @@ def test_failures_are_retired_after_the_attempt_cap_and_reopened_explicitly(proj
     assert run(project, retry_unavailable=True)["ok"] == 1
     with session(project[0]) as conn:
         assert conn.execute("SELECT attempts FROM body_fetch").fetchone()[0] == 0
+
+
+def outage(error="ConnectionError: [Errno 11001] getaddrinfo failed"):
+    return BodyResult("failed", error=error, transport=True)
+
+
+def test_an_outage_never_spends_the_body_attempt_budget(project, monkeypatch):
+    """The failure mode that made this rule: a day offline retiring the queue.
+
+    Body fetch runs nine times a day against a cap of five, so an outage used to
+    retire every pending URL before lunchtime - silently, because `unavailable`
+    is a legitimate outcome that fails no stage and reaches no health check.
+    """
+    monkeypatch.setattr("src.bodies.BODY_FETCH_MAX_ATTEMPTS", 3)
+    discover(project)
+    monkeypatch.setattr("src.bodies.fetch_body", lambda url: outage())
+    for _ in range(5):
+        assert run(project)["failed"] == 1
+    with session(project[0]) as conn:
+        task = conn.execute("SELECT status, attempts FROM body_fetch").fetchone()
+    assert (task["status"], task["attempts"]) == ("failed", 0)
+    monkeypatch.setattr("src.bodies.fetch_body", lambda url: success())
+    assert run(project)["ok"] == 1, "still queued once the network is back"
+
+
+def test_a_refusal_counts_once_the_pass_has_fetched_something(project, monkeypatch):
+    """One success proves the network, so later refusals are the host's own."""
+    monkeypatch.setattr("src.bodies.BODY_FETCH_MAX_ATTEMPTS", 3)
+    discover(project, url="https://trade.test/one")
+    discover(project, url="https://trade.test/two")
+    outcomes = {"https://trade.test/one": success(),
+                "https://trade.test/two": outage("ConnectionError: refused")}
+    monkeypatch.setattr("src.bodies.fetch_body", lambda url: outcomes[url])
+    assert run(project)["ok"] == 1
+    with session(project[0]) as conn:
+        task = conn.execute(
+            "SELECT attempts FROM body_fetch WHERE external_id LIKE '%two'").fetchone()
+    assert task["attempts"] == 1
+
+
+def test_enough_connection_failures_across_hosts_stop_the_pass(tmp_path, monkeypatch):
+    """Ten publishers do not go down together; this machine's network does.
+
+    Stopping also keeps an outage inside the intraday task's 90-minute limit
+    instead of spending it on a thousand connection timeouts.
+    """
+    db = tmp_path / "test.sqlite3"
+    migrate(db)
+    sources = tmp_path / "sources.json"
+    sources.write_text(json.dumps([
+        {"url": f"https://p{n}.test/", "organization": f"P{n}",
+         "content_mode": "full_text", "sitemap": True} for n in range(4)
+    ]), encoding="utf-8")
+    project = (db, sources)
+    monkeypatch.setattr("src.bodies.pace_host", lambda *a, **kw: 0.0)
+    for host in range(4):
+        for item in range(3):
+            discover(project, url=f"https://p{host}.test/{item}")
+    monkeypatch.setattr("src.bodies.fetch_body", lambda url: outage())
+
+    summary = run(project)
+    assert summary["attempted"] == 10, "stopped at the breaker, not after all 12"
+    assert "no network" in summary["stopped"]
+    with session(db) as conn:
+        spent = conn.execute("SELECT COUNT(*) FROM body_fetch WHERE attempts > 0").fetchone()[0]
+        untouched = conn.execute(
+            "SELECT COUNT(*) FROM body_fetch WHERE status = 'pending'").fetchone()[0]
+    assert spent == 0, "an outage costs no URL its budget"
+    assert untouched == 2, "the tasks after the break were never dequeued"
+
+
+def test_one_dead_host_alone_cannot_trip_the_breaker(project, monkeypatch):
+    """The queue is round-robined, but a single source with work is not."""
+    monkeypatch.setattr("src.bodies.pace_host", lambda *a, **kw: 0.0)
+    for item in range(12):
+        discover(project, url=f"https://trade.test/{item}")
+    monkeypatch.setattr("src.bodies.fetch_body", lambda url: outage())
+    summary = run(project)
+    assert summary["attempted"] == 12 and summary["stopped"] is None
 
 
 def test_a_changed_hint_reopens_a_retired_url_with_a_fresh_budget(project, monkeypatch):

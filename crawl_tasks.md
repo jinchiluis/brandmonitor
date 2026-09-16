@@ -375,6 +375,177 @@ Short recommendations so each takes minutes, not a session.
 
 ---
 
+## T10 — Pin the sitemaps and feeds; stop discovering on every pass (M)
+
+**Status 2026-09-16.** The mechanism is committed: `src/discovery.py`, the token
+resolver, the failure rules, `fetch_sitemap_urls(strict=True)`, the probe's
+per-file report and `sitemap_urls` block, and `tools/rediscover.py`. **No pins are
+configured yet** - what remains is the live half: probe each source, write its
+`sitemap_urls`, re-measure the pass, and record the per-source pins and yields in
+`docs/source_coverage.md`. T4's canaries should land before the pins go live.
+
+**Files.** `src/discovery.py` (new), `src/collect.py` (`collect_source`),
+`input/germany_medias.json`, `src/probe.py`, `tools/rediscover.py` (new),
+`tests/test_discovery.py` (new), `tests/test_collect.py`,
+`docs/source_coverage.md`, `vendor/PROVENANCE.md`. `vendor/newscrawler/crawler.py`
+is **not** rewritten; it takes one new optional argument (see Shape).
+
+**Problem.** Collection runs nine times a day and rediscovers the same sitemap tree
+every time: read `robots.txt`, walk the index, fetch up to 100 files, and throw the
+archive away again. Measured 2026-09-16 over a live 50-hour window (all sources
+except zeit.de, which had blocked us for request volume), per file, counting the
+URLs each file contributed that survive `allowed_dirs`, `excluded_*`, furniture and
+malformed filtering:
+
+| Source | Files read | Wasted | Where the articles are |
+|---|---|---|---|
+| faz.net | 100 | 84.7 MB, 95 files with nothing | `sitemap-news.xml` alone gives 201 of 208; 4 section files and the feed add 5 |
+| dvz.de | 88 | 28.6 MB, 87 files with nothing | `news-sitemap.xml` gives **all 22**, and costs 0.01 MB |
+| verkehrsrundschau.de | 12 | 19.4 MB | `sitemap.news.xml` gives all 27 |
+| ohn.haendlerbund.de | 33 | 9.8 MB | the newest page of the paged article sitemap gives 17 of 19 |
+| etailment.de | 8 | 4.4 MB | `sitemap/5.xml` (newest chunk) plus `news-sitemap.xml` |
+| e-commerce-magazin.de | 52 | 1.0 MB | the feed alone gives all 17 |
+| handelsblatt.com / wiwo.de | 10 each | 1.6 / 0.7 MB | 3 `sitemapExternal/*news.xml` files, each with unique articles |
+| spiegel.de | 35 | 2.6 MB | `news-de.xml` (112 of 123) plus this month's `sitemap-{YYYY}-{MM}_{n}.xml` pages |
+| welt.de | 9 | 0.3 MB | `sitemaps/sitemap/{YYYY}/{MM}/sitemap.xml.gz` plus `today.xml` |
+| bvdw.org | 16 | 0.1 MB | `artikel-sitemap.xml` |
+
+Pinning every source to the files that carry articles takes a pass from 471
+requests / 180 MB to roughly 90 requests / 30 MB, with no articles lost. What
+remains is genuinely needed: logistik-heute publishes one 8.5 MB sitemap and has no
+news sitemap, VerkehrsRundschau's news file is 6 MB, SZ is frontpage-only.
+
+**Feeds beside sitemaps are mostly redundant**, which answers a standing question:
+FAZ's feed gave 1 URL its news sitemap lacked, e-commerce Magazin's feed exactly
+duplicated `sitemap_contents1.xml`, BGL's and Wettbewerbszentrale's feeds added
+nothing. Feeds are indispensable only where a source has no usable sitemap
+(t3n, Tagesschau, HDE). Do not drop a feed on this single sample - re-measure at a
+different hour first, since a feed can list an article before the sitemap does.
+
+**Shape (decided 2026-09-16).** Two paths chosen by config, not one path with a
+flag. A pinned source and a walked source have almost nothing in common at run
+time, and merging them is what produced the cost in the table above.
+
+- **`src/discovery.py` `collect_from_pinned(entry, since, end, *, session, cache)`**
+  — new, and short. Resolve each pinned URL's tokens, fetch it through
+  `vendor.newscrawler.crawler.fetch_sitemap_urls` **unchanged** (conditional GET,
+  304 replay, gzip, `<news:publication_date>`, the recover-parser and the HTML/WAF
+  guard are all worth keeping and none of them need to change), filter by window,
+  `allowed_dirs` and the exclusion rules, dedupe, return hints. No `robots.txt`, no
+  guessed paths, no index walk, no `extra_sitemap_urls`, no caps, no ordering
+  heuristics — there is nothing to order in a list of three files.
+- **`collect_from_sitemaps` is not modified, and a pinned source never calls it.**
+  It is demoted to probe-time code: it stays the engine behind `run.py probe` and
+  `tools/rediscover.py`. Every heuristic in it — `_sitemap_date_hint`,
+  news-sitemap-first ordering, newest-first ordering, archive pruning,
+  `max_per_source`, `max_sitemap_fetches` — exists to survive a blind walk of an
+  unknown tree, and each encodes a measured failure: dvz.de's lying TYPO3
+  `lastmod`, etailment's news sitemap listed behind six archive files sharing one
+  timestamp, WELT's 111 URLs arriving as 307 entries. Discovery is what the probe
+  is *for*, and that is where this code now lives. Do not reimplement it, and do
+  not delete it.
+- **Take the entry, not the URL.** `collect_from_pinned` receives the source entry
+  `collect_source` is already holding. Do not add `sitemap_urls` to the
+  `sources.get_site_rules(site_url)` lookups inside the vendored crawler:
+  `collect_from_sitemaps` already reaches back into that global singleton for
+  `allowed_dirs` and `extra_sitemap_urls`, and a third such lookup deepens a
+  boundary the vendored code should not be crossing. Letting
+  `collect_from_sitemaps` accept the entry as an optional argument is the one edit
+  `crawler.py` needs.
+
+**Change.**
+
+1. `sitemap_urls`: an exact list, replacing discovery entirely, the way `feed_urls`
+   already replaces feed autodiscovery. When it is set the source takes the pinned
+   path: no `robots.txt`, no guessed paths, no index walk, no `extra_sitemap_urls`.
+2. Two token forms inside a pinned URL, resolved against the run's end date, so a
+   rolling filename does not need discovery:
+   - `{YYYY}`, `{MM}`, `{DD}` - e.g. `sitemaps/sitemap/{YYYY}/{MM}/sitemap.xml.gz`.
+     Also resolve the previous month within the first 48 hours of a month, or the
+     overlap loses articles at every month boundary.
+   - `{LATEST}` for a page number - e.g. `sitemap.xml?page={LATEST}`. Fetch the
+     named index once, take the highest-numbered matching child, and fetch that one.
+     Costs one extra request and keeps ohn.haendlerbund, bevh, etailment and
+     Wettbewerbszentrale pinned despite rolling page numbers.
+3. **A pinned URL that breaks must fail loudly, and an empty one must not.** The
+   discriminator is whether the file was *readable*, never whether it was full.
+   - `failed`, with `pinned sitemap unavailable: <url>`, on: 404/410/5xx, a
+     redirect whose final host is not the configured host, a body that does not
+     parse as a sitemap (HTML, a WAF page, truncated XML), or a `{LATEST}` index
+     that cannot be read. The watermark holds and the health check sees it. This is
+     the DVZ and VerkehrsRundschau failure — a real loss that read as a quiet
+     zero-yield day — and it is the whole reason pinning needs a loud path.
+   - **`ok`** on: HTTP 200, valid sitemap, zero entries in the window. That is
+     Sunday. A pinned news sitemap is legitimately empty most weekends, and a rule
+     that failed on it would fire about 104 times a year until nobody read the
+     mail. A 304 replay is likewise readable and healthy.
+4. Optional `origin`: skip the homepage probe (`pick_accessible_origin`) when the
+   host is pinned. Frontpage sources still need it.
+5. `probe` reports, per discovered file: in-window articles, articles no other file
+   has, whether entries carry `<news:publication_date>` and titles, and whether the
+   server answers 304. It prints a `sitemap_urls` block to paste. The scratch script
+   from this measurement is the starting point.
+6. **`tools/rediscover.py` belongs to this task, not to a follow-up.** It is what
+   makes the pins safe to leave alone. Per source, on demand: run the full walker
+   (`collect_from_sitemaps`, unpinned) over the same window the pins covered, diff
+   the two URL sets, and report any sitemap file that contributed an in-window
+   article no pinned file returned. Read-only, no database writes, no schedule yet
+   — a command the owner runs monthly.
+
+**The failure pinning cannot see.** A pinned file keeps returning 200 and valid XML
+but has quietly stopped carrying a section: a CMS reorganisation, a renamed path, a
+publisher splitting one news sitemap in two. Nothing 404s, so rule 3 never fires,
+and unlike today there is no second file that happens to list the article anyway.
+Two independent things cover it, and **T4 must land before the pins go live**:
+
+- T4's canaries read each source's own endpoint with their own parser and reconcile
+  it against the database, so they cannot reproduce the pins' blind spot. That is
+  exactly why T4 forbids importing `vendor.newscrawler` into `canary.py`.
+- `tools/rediscover.py` above catches the slower version of the same drift.
+
+**Pins to write** (verify each with the probe before committing it):
+
+- dvz.de `news-sitemap.xml?sitemap=news&cHash=...`; verkehrsrundschau.de
+  `sitemap.news.xml`; bvdw.org `artikel-sitemap.xml`; haendlerbund.de `sitemap.xml`
+- faz.net `sitemap-news.xml` + `sitemap-{wirtschaft,politik,finanzen,digitalwirtschaft}-artikel-1.xml`
+- handelsblatt.com and wiwo.de: `sitemapExternal/{news,agentur-news,premium-news}.xml`
+- welt.de `sitemaps/sitemap/{YYYY}/{MM}/sitemap.xml.gz` + `sitemaps/sitemap/today.xml`
+- spiegel.de `sitemaps/news-de.xml` + `sitemaps/article/sitemap-{YYYY}-{MM}_{LATEST}.xml`
+  (its pages 1-7 are ~10 KB each; pinning the newest 3 covered everything measured)
+- ohn.haendlerbund.de, bevh.org, etailment.de, wettbewerbszentrale.de: `{LATEST}` page
+  plus, for etailment, `news-sitemap.xml`
+- e-commerce-magazin.de: feed plus `sitemap_news1.xml`; drop the 50 content files
+- **Check before pinning:** BGL's 3 articles came from `category-sitemap.xml` and
+  Wettbewerbszentrale's single item from `page-sitemap.xml`. Both look like index
+  pages that furniture filtering missed rather than articles.
+
+**Tests.** A source with `sitemap_urls` fetches exactly those URLs and never calls
+`discover_sitemaps`; `{YYYY}`/`{MM}` resolve against the window end and include the
+previous month inside the boundary window; `{LATEST}` picks the highest-numbered
+child from an index; a pinned URL answering 404 makes the source `failed` and leaves
+its watermark; **a pinned URL answering 200 with a valid but empty sitemap leaves the
+source `ok`**, and so does a 304 replay; a redirect to another host fails it; an
+unpinned source still walks and behaves exactly as before; `feed_urls` behaviour is
+unchanged.
+
+**Done when** `python -m pytest -q` passes and one live pass over the pinned source
+list, run with the scratch counter, meets all three:
+
+- **under 120 requests**, from 471. This is the number that matters — zeit.de
+  blocked us for request volume, and no amount of caching moves a request count.
+- **under 40 MB**, measured against the **warm-cache** baseline of 180 MB, not
+  229 MB. PROVENANCE 2026-09-15 measured 475 requests / 209 MB cold and 471 / 180 MB
+  warm, so the `DiscoveryCache` saving is already spent and pinning's is on top of
+  it. faz.net and dvz.de send no validators at all and answer every conditional
+  request in full, which is why they dominate both the warm-cache bytes and the
+  table above.
+- each source's kept-URL count **within a couple of articles** of the table.
+
+Record the per-source pins and their measured yield in `docs/source_coverage.md`,
+and the decision above in `vendor/PROVENANCE.md`.
+
+---
+
 ## Not doing before go-live, and why
 
 - Rewriting identities (W10 full), passage search in bills, EP documents

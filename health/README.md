@@ -3,8 +3,9 @@
 There are two deliberately separate halves:
 
 - On the laptop, `canary.py` reconciles a few critical publisher endpoints with
-  stored URLs and `analyze.py` reads the database's existing run accounting. Both
-  are observers: they never write SQLite or change collection decisions.
+  stored URLs (**off since 2026-09-16**, see below) and `analyze.py` reads the
+  database's existing run accounting. Both are observers: they never write SQLite
+  or change collection decisions.
 - On the Contabo VPS, `check.py` reads the laptop's structured
   `data/last_run.json` and `data/health/latest.json` over Tailscale SSH. It never
   runs collection, reads SQLite, or classifies free-form logs.
@@ -17,12 +18,25 @@ itself failed.
 
 ## Laptop observations
 
-`health/canary.py` currently checks four deliberately small independent routes:
-etailment's news sitemap, Onlinehändler-News' newest article-sitemap page,
-LOGISTIK HEUTE's RSS feed, and DVZ's rolling news sitemap. It validates the XML,
-rejects common access-challenge pages, and compares the ten newest eligible URLs
-with `raw_item`. Configuration lives in `health/canaries.json`; Bright Data and
-automatic remediation are not part of this path.
+`health/canary.py` checks small independent publisher routes - a news sitemap, an
+RSS feed - by validating the XML, rejecting common access-challenge pages, and
+comparing the ten newest eligible URLs with `raw_item`. Configuration lives in
+`health/canaries.json`; Bright Data and automatic remediation are not part of this
+path.
+
+**It is switched off since 2026-09-16**, by `"enabled": false` in
+`health/canaries.json`. That flag is the whole switch: the script exits 0 without
+sending a request, and `analyze.py` reads the same file and stops expecting a
+snapshot, so a stale one does not become a daily critical. The stage stays in
+`run_daily.bat` rather than being commented out, so the two halves cannot disagree.
+It is off for two reasons: the collection config still changes week to week, so a
+URL the publisher lists and the corpus lacks is more often our own churn than a
+publisher change; and the canary itself is not on the polite path that
+`src/polite_http.py` put collection on. `health/canary.py`'s module docstring holds
+the reasons and the conditions it has to meet before it is turned back on -
+conditional requests against its own validators, a throttle recorded as a throttle
+rather than as a coverage failure, a stated request and byte budget, and a
+deliberate decision about the User-Agent it sends.
 
 `health/analyze.py` reads `run`, `run_source`, per-source collection watermarks and
 the current `body_fetch` queue. It detects missing source accounting, individual

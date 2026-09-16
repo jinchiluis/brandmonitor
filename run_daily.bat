@@ -19,6 +19,7 @@ rem   0  every stage completed
 rem   1  a stage produced nothing usable (every source in it failed)
 rem   2  a stage aborted, or this script could not start one
 rem   3  another run holds the lock; nothing was attempted
+rem   4  this host has no internet; nothing was attempted
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -53,6 +54,38 @@ if errorlevel 1 (
 set "LOGDIR=%~dp0data\log\%DAY%"
 if not exist "%LOGDIR%" mkdir "%LOGDIR%"
 set "OUT=%LOGDIR%\run_daily.txt"
+
+echo.>> "%OUT%"
+echo ======== brandmonitor daily %DATE% %TIME% ========>> "%OUT%"
+
+rem Preflight. A run that starts during an outage stores a partial day, spends
+rem every stage's timeouts, and leaves a marker whose stage codes say where each
+rem stage's first request happened to fail rather than naming the one cause.
+rem Nothing is lost by skipping: every collector resumes from its own watermark
+rem and every queue is durable. There is deliberately no wait-and-retry loop -
+rem see src/net.py. netcheck exits 4 for offline and 2 only if it broke itself,
+rem in which case the run proceeds as it did before this check existed.
+echo.>> "%OUT%"
+echo -------- netcheck -------->> "%OUT%"
+"%PY%" run.py netcheck >> "%OUT%" 2>&1
+if errorlevel 4 (
+    "%PY%" -c "import datetime;print(datetime.datetime.now(datetime.timezone.utc).isoformat()[:19])" > "%TMPVAL%" 2>nul
+    set /p FINISHED=<"%TMPVAL%"
+    del "%TMPVAL%" "%TMPVAL%.err" 2>nul
+    rem One pseudo-stage, so the marker keeps its "worst_exit equals the highest
+    rem stage code" invariant and health/check.py reads 4 back as `offline`.
+    > "%~dp0data\last_run.json" (
+        echo {
+        echo   "finished_utc": "!FINISHED!Z",
+        echo   "worst_exit": 4,
+        echo   "cycle_date": "%DAY%",
+        echo   "stages": { "netcheck": 4 },
+        echo   "log": "data/log/%DAY%/run_daily.txt"
+        echo }
+    )
+    echo [brandmonitor] offline - no stage attempted  log: %OUT%
+    exit /b 4
+)
 
 set "WORST=0"
 set "CODE_news=2"
@@ -98,8 +131,6 @@ exit /b %WORST%
 :stages
 rem Always returns 0 so the lock block above can tell "did not start" from "ran
 rem badly"; the outcome travels in WORST.
-echo.>> "%OUT%"
-echo ======== brandmonitor daily %DATE% %TIME% ========>> "%OUT%"
 call :stage news collect --kind news
 rem Not chained on news succeeding: a crawl that aborted half way still stored
 rem items worth gating, and when no crawl ran today the gate finds its run too old
@@ -129,9 +160,15 @@ rem every collection and enrichment stage has finished, then sends at most one
 rem combined email directly from this laptop.
 call :stage alert_gate alert-gate
 rem Backup is the last stage that handles the corpus, so the snapshot carries the
-rem day's collection rather than yesterday's. The two observers after it read the
+rem day's collection rather than yesterday's. The observers after it read the
 rem final database without modifying it and publish their own atomic JSON files.
 call :stage backup backup
+rem The publisher canary is switched off in health\canaries.json ("enabled": false)
+rem while the collection config is still moving: a URL we lack is more likely to be
+rem our own churn than a publisher change, and it is not on the polite path that
+rem src\polite_http.py put collection on. health\canary.py carries the reasons and
+rem what it must do before it comes back. The stage stays here and exits 0 without
+rem sending a request, so the switch lives in one file rather than two.
 call :observer canary health\canary.py --cycle-date "%DAY%"
 call :observer quality_health health\analyze.py --cycle-date "%DAY%"
 exit /b 0

@@ -91,6 +91,20 @@ def cmd_migrate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_netcheck(args: argparse.Namespace) -> int:
+    """Report whether this host has internet. Exit 4 means it does not.
+
+    The scheduled batch files run this before anything else and skip the whole
+    pass on 4, so an outage produces one clear marker instead of every stage
+    failing separately in whichever way its first request happens to fail.
+    """
+    from src.net import DEFAULT_TIMEOUT, OFFLINE_EXIT, check_online
+
+    status = check_online(args.timeout if args.timeout is not None else DEFAULT_TIMEOUT)
+    print(f"{'online' if status.online else 'OFFLINE'}: {status.detail}")
+    return 0 if status.online else OFFLINE_EXIT
+
+
 def cmd_collect(args: argparse.Namespace) -> int:
     from src.collect import DEFAULT_NEWS_SOURCES, DEFAULT_REGULATORY_SOURCES, run_collection
     from src.db import migrate
@@ -135,6 +149,8 @@ def print_body_summary(summary: dict) -> None:
     remaining = summary["remaining"]
     print(f"Backlog: {remaining['pending']} pending, {remaining['failed']} retryable, "
           f"{remaining['unavailable']} unavailable; {summary['deferred']} deferred by limit")
+    if summary.get("stopped"):
+        print(f"Stopped early: {summary['stopped']}")
 
 
 def cmd_fetch_bodies(args: argparse.Namespace) -> int:
@@ -798,6 +814,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     migrate = sub.add_parser("migrate", help="apply pending SQLite migrations")
     migrate.set_defaults(func=cmd_migrate)
+
+    netcheck = sub.add_parser(
+        "netcheck",
+        help="is this host on the internet? exit 0 yes, 4 no",
+        description="Preflight for the scheduled batch files. Resolves and connects to "
+                    "a few independent endpoints that are not sources we crawl, and "
+                    "reports whether resolution or routing is what failed.",
+    )
+    netcheck.add_argument("--timeout", type=float, default=None,
+                          help="seconds per connection attempt (default: 5)")
+    netcheck.set_defaults(func=cmd_netcheck)
 
     collect = sub.add_parser(
         "collect",

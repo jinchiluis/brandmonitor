@@ -358,3 +358,30 @@ def test_repeated_body_failure_incident_names_the_url(tmp_path):
         "error": "HTTP 403",
         "last_run_id": run_id,
     }]
+
+
+def test_disabled_canary_is_not_a_missing_snapshot(tmp_path):
+    db = tmp_path / "db.sqlite3"
+    migrate(db)
+    run_id = _add_news_run(db, 0, 12)
+    news, regulatory, canary_config = _inputs(tmp_path)
+    raw = json.loads(canary_config.read_text(encoding="utf-8"))
+    raw["enabled"] = False
+    _json(canary_config, raw)
+    # A snapshot from when it still ran, for a different cycle: while the canary is
+    # off this is neither read nor a mismatch, it is simply a leftover file.
+    stale = _canary(tmp_path / "canary.json", run_id + 99)
+
+    result = analyze(
+        db_path=db,
+        news_sources=news,
+        regulatory_sources=regulatory,
+        canary_config=canary_config,
+        canary_file=stale,
+        output_dir=tmp_path / "health",
+        cycle_date="2026-09-13",
+        generated_at=datetime(2026, 9, 13, 5, 1, tzinfo=UTC),
+    )
+
+    assert result["canaries"] is None
+    assert not [item for item in result["incidents"] if "canary" in item["check"]]

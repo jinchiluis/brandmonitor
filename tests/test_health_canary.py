@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timezone
 
-from health.canary import Fetched, run_canaries
+from health.canary import Fetched, main, run_canaries
 from src.db import finish_run, migrate, session, start_run
 
 
@@ -148,3 +148,28 @@ def test_access_challenge_is_a_structural_incident_not_a_script_failure(tmp_path
     assert result["status"] == "critical"
     assert result["checks"][0]["status"] == "critical"
     assert "access-challenge" in result["incidents"][0]["message"]
+
+
+def test_disabled_config_sends_nothing_and_publishes_nothing(tmp_path):
+    db, _ = _db(tmp_path)
+    config = _config(tmp_path, {
+        "id": "news-sitemap",
+        "source_slug": "news.test",
+        "kind": "sitemap",
+        "url": "https://news.test/sitemap.xml",
+        "failure_severity": "critical",
+    })
+    raw = json.loads(config.read_text(encoding="utf-8"))
+    raw["enabled"] = False
+    config.write_text(json.dumps(raw), encoding="utf-8")
+    output = tmp_path / "output"
+
+    code = main([
+        "--db", str(db), "--config", str(config),
+        "--output-dir", str(output), "--cycle-date", "2026-09-13",
+    ])
+
+    # No snapshot is the point: health/analyze.py stops expecting one while the
+    # same flag is false, so a snapshot here would be the stale file it ignores.
+    assert code == 0
+    assert not output.exists()

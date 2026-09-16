@@ -204,6 +204,13 @@ Cheap recurring checks that only pay off once real cycles run.
   each a new version.
 - Review the retained Verbraucherzentrale event sections once real assessment data
   exists.
+- Decide when the publisher canary comes back. It is off since 2026-09-16
+  (`"enabled": false` in `health/canaries.json`): while the collection config still
+  changes weekly, a URL it reports as missing is more often our own churn than a
+  publisher change, and it is the one thing left fetching those sitemaps and feeds
+  unconditionally. `health/canary.py`'s docstring holds what it owes first — its
+  own conditional requests, a throttle recorded as throttled rather than as a
+  coverage failure, a stated request and byte budget, and a decided User-Agent.
 
 ## 3. Body and source quality
 

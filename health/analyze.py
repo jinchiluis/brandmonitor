@@ -143,7 +143,13 @@ def _incident(source: str, check: str, severity: str, message: str) -> dict[str,
     return {"source": source, "check": check, "severity": severity, "message": message}
 
 
-def _load_canary_sources(path: Path) -> tuple[set[str], bytes]:
+def _load_canary_sources(path: Path) -> tuple[set[str], bool, bytes]:
+    """The canary's own config: its critical sources, and whether it still runs.
+
+    The critical set is read even while the canary is disabled. It says which
+    sources matter enough to escalate a volume finding, which is a judgement about
+    the sources and not about whether anything fetches their endpoints.
+    """
     raw_bytes = path.read_bytes()
     raw = json.loads(raw_bytes.decode("utf-8"))
     checks = raw.get("checks", []) if isinstance(raw, dict) else []
@@ -154,7 +160,8 @@ def _load_canary_sources(path: Path) -> tuple[set[str], bytes]:
         and check.get("failure_severity") == "critical"
         and isinstance(check.get("source_slug"), str)
     }
-    return critical, raw_bytes
+    enabled = bool(raw.get("enabled", True)) if isinstance(raw, dict) else True
+    return critical, enabled, raw_bytes
 
 
 def _latest_runs(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
@@ -480,7 +487,7 @@ def analyze(
         for entry in _source_entries(path, include_collectors=True)
         if entry.get("collector")
     ]
-    critical_sources, canary_config_raw = _load_canary_sources(canary_config)
+    critical_sources, canary_enabled, canary_config_raw = _load_canary_sources(canary_config)
     with _connect_readonly(db_path) as conn:
         latest_runs = _latest_runs(conn)
         rows = _run_source_rows(conn)
@@ -502,12 +509,18 @@ def analyze(
     incidents.extend(collector_incidents)
     incidents.extend(body_incidents)
     news_run = latest_runs.get("news")
-    canary, canary_incidents = _load_canary(
-        canary_file,
-        cycle_date=cycle_date,
-        expected_news_run=news_run["id"] if news_run else None,
-    )
-    incidents.extend(canary_incidents)
+    if canary_enabled:
+        canary, canary_incidents = _load_canary(
+            canary_file,
+            cycle_date=cycle_date,
+            expected_news_run=news_run["id"] if news_run else None,
+        )
+        incidents.extend(canary_incidents)
+    else:
+        # The canary is off (health/canary.py). Absence of a snapshot is then the
+        # expected state rather than a critical finding, and the snapshot left over
+        # from its last run would mismatch this cycle every day from now on.
+        canary = None
 
     incidents.sort(key=lambda item: (-SEVERITY_RANK[item["severity"]], item["source"], item["check"]))
     if any(item["severity"] == "critical" for item in incidents):

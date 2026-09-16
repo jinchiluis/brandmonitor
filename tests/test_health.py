@@ -175,6 +175,64 @@ def test_invalid_worst_exit_is_rejected():
         parse_marker(marker_payload(finished=NOW, worst=0, news=1))
 
 
+def offline_payload(*, finished: datetime, log: str = "data/log/2026-09-12/run_daily.txt") -> str:
+    """What the batch files write when netcheck says this host has no internet.
+
+    One pseudo-stage, so the marker keeps the invariant that worst_exit equals
+    the highest stage code.
+    """
+    return json.dumps({
+        "finished_utc": finished.isoformat().replace("+00:00", "Z"),
+        "worst_exit": 4,
+        "cycle_date": "2026-09-12",
+        "stages": {"netcheck": 4},
+        "log": log,
+    })
+
+
+def test_an_offline_run_is_its_own_condition_not_a_stage_failure():
+    """The email that started this: four stage codes describing one outage.
+
+    Each said where that stage's first request happened to fail, which is an
+    implementation detail of the stage rather than the cause.
+    """
+    probe = Probe(parse_marker(offline_payload(finished=NOW - timedelta(hours=6))))
+
+    status = evaluate(probe, checked_at=NOW, stale_after=timedelta(hours=26))
+
+    assert status.kind == "offline"
+    assert status.alert
+    assert "no internet" in status.title
+    assert any("run_daily.bat" in detail for detail in status.details),         "the regulatory half does not self-heal, so the email has to say so"
+
+
+def test_an_offline_intraday_slot_says_there_is_nothing_to_do():
+    daily = Probe(parse_marker(marker_payload(finished=NOW - timedelta(hours=6))))
+    intraday = Probe(parse_marker(offline_payload(finished=NOW - timedelta(hours=2))))
+
+    status = evaluate(daily, checked_at=NOW, stale_after=timedelta(hours=26),
+                      intraday_probe=intraday)
+
+    assert status.kind == "intraday_offline"
+    assert any("nothing to do" in detail for detail in status.details)
+
+
+def test_offline_and_run_failed_latch_separately():
+    """An outage during an ongoing incident is news, not a repeat of it."""
+    offline = HealthStatus("offline", "offline", (), True)
+
+    assert notification_action(offline, {"notified_kind": "run_failed"}) == "alert"
+    assert notification_action(offline, {"notified_kind": "offline"}) is None
+
+
+def test_a_stage_exit_above_the_contract_is_still_rejected():
+    payload = json.loads(offline_payload(finished=NOW))
+    payload["stages"] = {"netcheck": 5}
+    payload["worst_exit"] = 5
+    with pytest.raises(MarkerError, match="worst_exit"):
+        parse_marker(json.dumps(payload))
+
+
 def test_notifications_are_latched_and_recover_once():
     alert = HealthStatus("stale", "stale", (), True)
     healthy = HealthStatus("healthy", "healthy", (), False)
