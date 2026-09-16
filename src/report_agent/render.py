@@ -221,7 +221,9 @@ def _coverage_markdown(bundle: Bundle) -> str:
     coverage = bundle.maybe("coverage.json", [])
     runs = bundle.maybe("collection_runs.json", [])
     zero = [row["source"] for row in coverage if row["latest_status"] == "zero"]
-    failed = [row for row in coverage if row["latest_status"] not in ("ok", "zero")]
+    paused = [row["source"] for row in coverage if row["latest_status"] == "paused"]
+    failed = [row for row in coverage
+              if row["latest_status"] not in ("ok", "zero", "paused")]
     lines = ["# Source coverage", "",
              f"Every source that ran during {bundle.manifest['display_window']}, "
              f"including the ones that found nothing. {len(runs)} collection runs, "
@@ -239,6 +241,11 @@ def _coverage_markdown(bundle: Bundle) -> str:
               (", ".join(zero) or "none") + ".",
               "", "These returned zero in their latest stored discovery run during the "
               "window, which is not the same as returning zero throughout it.", ""]
+    if paused:
+        lines += ["## Paused in the latest stored run", "",
+                  ", ".join(paused) + ".", "",
+                  "Switched off in the source list: nothing was requested, so these "
+                  "say nothing about what the source published.", ""]
     if failed:
         lines += ["## Sources whose latest run did not succeed", ""]
         lines += [f"- {row['source']} ({row['kind']}): {row['latest_status']} — "

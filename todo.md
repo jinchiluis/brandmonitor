@@ -6,13 +6,21 @@ below, and a decision recorded there is not re-litigated here.
 
 Authoritative references:
 
-- `mvp_plan.md` — current pilot scope and completion criteria
+- `docs/Designs/mvp_plan.md` — current pilot scope and completion criteria
+- [crawl_tasks.md](crawl_tasks.md) — remaining crawl launch work, validation and monitoring
+- [weaknesses.md](weaknesses.md) — current evidence and unresolved failure paths
 - `docs/source_coverage.md` — source audits, measured yield, and paywall evidence
 - `docs/body_collection.md` — body-fetch commands, storage, page dates, retries
 - `docs/selection_and_assessment.md` — selection rationale and assessment funnel
 - `docs/source_audit_prompt.md` — repeatable source-audit method
 
 ## Current state
+
+**Checked 2026-09-16:** production laptop and VPS run `9cb3ea4`; checkout
+`637603f` adds the not-yet-deployed sitemap pins and outage handling. Daily is
+enabled, intraday is paused. Canaries are disabled in the checkout but still ran
+in production's last daily cycle. See the crawl plan for deployment/recovery and
+the remaining failure cases; the old T1–T10 briefs are replaced by C1–C7.
 
 Built and running daily: news and regulatory discovery, SQLite storage and
 versioning, the durable body queue, public/PDF/browser extraction, source path
@@ -31,14 +39,15 @@ measurement; see §1.3.
 
 Alert decisions live in `alert_decision`, not `assessment`: alerting is an action
 on top of weekly eligibility and must not overwrite a relevance decision. Delivery
-is internal-review only for the pilot. The live laptop still needs its SMTP values
-and one real end-to-end email test before this path is operationally proven.
+is internal-review only for the pilot. The September 16 database contains two
+positive decisions with `sent_at` populated. Unavailable-body routing, unsent
+decisions and reviewer receipt remain part of launch validation.
 
 Outside the current build: customer complaints and service-quality monitoring from
 reviews and comments. That needs a separate social/review collection path and must
 not be implied by the news-monitoring deliverable.
 
-## 1. The analysis path — the whole remaining MVP
+## 1. The analysis path — remaining validation and decisions
 
 ### 1.1 Assessment cadence and windowing — decided 2026-09-12
 
@@ -151,8 +160,8 @@ Built, and not yet trusted. In priority order:
   anything else. Confirm on a real cycle that the grouped block the customer
   needs — key-customer items named individually, the rest by product class and
   risk — actually comes out of clustering rather than needing its own rule.
-- Run `python run.py alert-gate --dry-run` on the live laptop, configure its SMTP
-  values, then prove one real combined email. No customer receives this directly.
+- Verify the unavailable-body alert path and reviewer receipt on a real cycle;
+  ordinary alert delivery has recorded sent decisions. No customer receives this directly.
 - Run one fixed pilot window end to end twice. Verify no duplicate raw items or
   assessments, complete source accounting, stable versions, runtime and LLM cost.
 
@@ -272,7 +281,7 @@ why htmldate is not used for stored dates.
 - Surface undated records for human review in weekly reports rather than dropping
   them silently: BNetzA and BPEX carry real signal without usable dates — 67 and 47
   undated body rows, and for BPEX that is frontpage discovery, which carries no
-  date by construction.
+  trusted publication date by construction.
 - Rows collected before 2026-09-11 carry `published_at_source = discovery`; readers
   resolve it from `discovered_via`, but a sitemap row's flavour (news sitemap or
   `lastmod`) is unrecoverable. It corrects itself as rows are refetched; a one-off
@@ -322,23 +331,16 @@ count, lag from the busiest day — belongs here rather than in a one-off query.
 
 ## 5. Scheduling and operations
 
-- `health/analyze.py`'s coverage baseline has no day-of-week awareness: the
-  rolling median (`_source_metrics`, `BASELINE_RUNS = 7`) blends weekday and
-  weekend daily counts, and `zero_streak >= 2` fires on any two consecutive
-  zero days — which is exactly a normal Sat+Sun for weekday-only trade press
-  (BGL, HDE, Haendlerbund, DSLV, BVDW, Wettbewerbszentrale, bevh, DVZ, LOGISTIK
-  HEUTE, e-commerce Magazin all zeroed on 2026-09-13, a Sunday). No incidents
-  have fired yet because `baseline_state` is still `"learning"`
-  (`comparable_baseline_runs` < 7 for every source as of 2026-09-13); once it
-  reaches "ready" this will produce a recurring false-positive `zero_streak`
-  warning most Mondays, reaching the VPS health emailer. Fix before that: make
-  the baseline/zero-streak logic day-of-week aware, or exclude Sat/Sun from the
-  streak count for sources with an established weekday-only pattern.
-- Verify laptop-to-VPS backups. A fresh heartbeat says the pipeline ran, not that
-  the database is recoverable; check those separately.
-- Send one `health/check.py --test-email` from the VPS. The checker is live and its
-  healthy path is proven, but no alert has ever been delivered, so the SMTP leg is
-  the one link a real incident would discover.
+- Complete crawl launch tasks C1–C7 and monitor the first stable weekday/weekend
+  cycle. Weekend exclusion is implemented; low-volume/learning sources and paused
+  independent canaries still need coverage checks (weaknesses.md W16/W22).
+- Prove a restore from off-host storage, including a matching database snapshot
+  and state archive. September 16 backup logs show both copied into the local
+  OneDrive sync directory; remote availability and restoration were not verified.
+- Verify operator receipt of health incidents and recovery through the intended
+  channels. The VPS recorded a notification on September 16; its latch means
+  email or push delivered, not necessarily both. Keep unrepaired gaps open even
+  if a later run is green.
 - Add only the paywall credentials justified by the subscription audit, and the LLM
   keys chosen for assessment.
 - Record runtime and variable cost for the complete pilot cycle.
@@ -348,11 +350,10 @@ count, lag from the busiest day — belongs here rather than in a one-off query.
 
 ## Execution order
 
-1. Sketch the report, then lock the assessment schema (§1.2).
-2. Implement the full assessment against that schema, windowed per §1.1 (§1.3).
-3. Render the Chinese report and validate one repeatable pilot window twice.
-4. Body and source quality sampling (§3) — in parallel; none of it blocks the
-   assessor.
+1. Complete crawl launch work and start the stable observation period (`crawl_tasks.md`).
+2. Validate the existing report stack on repeatable and consecutive weekly windows (§1.3).
+3. Sample body/source quality and pre-gate rejects during those cycles (§2–§3).
+4. Resolve customer alert scope, publication-date and undated/duplicate report decisions.
 5. Audit subscriptions before purchasing or integrating another account (§3).
 
 My own comments (not written by claude):

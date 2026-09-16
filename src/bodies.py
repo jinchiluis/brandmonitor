@@ -44,6 +44,7 @@ from src.config import (BODY_FETCH_BROWSER, BODY_FETCH_DELAY, BODY_FETCH_LIMIT,
                         ROOT)
 from src.db import finish_run, record_source_result, session, start_run, utcnow
 from src.logger import get_logger
+from src.monitoring import record_body_attempt
 from vendor.newscrawler.crawler import HTML_HEADERS, url_matches_dirs
 
 logger = get_logger(__name__)
@@ -745,8 +746,15 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
     wanted_mode = "title_only" if title_gate_client else "full_text"
     entries = [e for e in entries if content_mode(e) == wanted_mode]
     by_slug = {slug_for(e): e for e in entries}
+    # A source that was switched off must not be fetched from the durable queue
+    # either. discovery_enabled gates the keeps that create tasks, but tasks
+    # created before the switch survive in body_fetch and were still being
+    # retried: zeit.de kept being requested nine times a day after its discovery
+    # methods were set to false, against a publisher already answering 403.
+    # Skipped, not deleted - re-enabling the source resumes its queue intact.
+    enabled = {slug: entry for slug, entry in by_slug.items() if discovery_enabled(entry)}
     tasks = []
-    eligible = {slug: set() for slug in by_slug}
+    eligible = {slug: set() for slug in enabled}
     with session(db_path) as conn:
         if title_gate_client:
             from src.title_gate import logged_keeps
@@ -783,7 +791,14 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
                            only_missing=True, title_gate_route=route)
             for slug, count in sorted(disabled.items()):
                 logger.info("[bodies] %s is disabled; %d keeps ignored", slug, count)
-        for slug, entry in by_slug.items():
+        for slug in by_slug.keys() - enabled.keys():
+            live = conn.execute(
+                "SELECT COUNT(*) FROM body_fetch WHERE source_slug=? "
+                "AND status IN ('pending', 'failed')", (slug,)).fetchone()[0]
+            if live:
+                logger.info("[bodies] %s is disabled; %d queued task(s) left untouched",
+                            slug, live)
+        for slug, entry in enabled.items():
             if title_gate_client:
                 # A title-only body task can only have been created explicitly.
                 # Enumerating the durable queue also keeps retries alive after
@@ -833,7 +848,7 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
                "stored": 0, "deferred": queued - len(tasks), "per_source": [],
                "stopped": None}
     counts = {slug: {"attempted": 0, "ok": 0, "failed": 0, "unavailable": 0,
-                     "stored": 0, "errors": []} for slug in by_slug}
+                     "stored": 0, "errors": []} for slug in enabled}
     now = utcnow()
     with session(db_path) as conn:
         run_kind = (f"bodies:{kind}:title-gate:{title_gate_client}"
@@ -849,10 +864,12 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
     for task in tasks:
         logger.info("[bodies] %d/%d %s", summary["attempted"] + 1, len(tasks), task["external_id"])
         pace_host(task["external_id"], host_seen)
+        attempt_at, attempt_t0 = utcnow(), time.monotonic()
         try:
             result = fetch_body(task["external_id"])
         except Exception as exc:
             result = BodyResult("failed", error=f"{type(exc).__name__}: {exc}")
+        attempt_ms = int((time.monotonic() - attempt_t0) * 1000)
         # ``attempts`` counts consecutive unsuccessful tries; a success resets it
         # and so does a changed hint. Past the cap a failure is retired rather
         # than retried on every run forever. The diagnosis is kept in the error
@@ -890,6 +907,11 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
                  result.error, run_id, task["source_slug"], task["external_id"],
                  task["discovery_hash"]),
             )
+        # After the commit, in its own transaction; see src/monitoring.py.
+        record_body_attempt(db_path, run_id, task, result, at=attempt_at,
+                            elapsed_ms=attempt_ms, counted=not untried,
+                            attempts=0 if result.status == "ok" else attempts,
+                            stored=stored)
         source = counts[task["source_slug"]]
         for counter in (summary, source):
             counter["attempted"] += 1

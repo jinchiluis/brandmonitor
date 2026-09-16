@@ -58,6 +58,12 @@ set "OUT=%LOGDIR%\run_daily.txt"
 echo.>> "%OUT%"
 echo ======== brandmonitor daily %DATE% %TIME% ========>> "%OUT%"
 
+rem Monitoring only: every exit below records this pass with `run.py record-pass`
+rem (src/monitoring.py), whose exit code is ignored - a pass that could not be
+rem recorded is a missing monitoring row, never a different outcome.
+"%PY%" -c "import datetime;print(datetime.datetime.now(datetime.timezone.utc).isoformat()[:19])" > "%TMPVAL%" 2>nul
+set /p STARTED=<"%TMPVAL%"
+
 rem Preflight. A run that starts during an outage stores a partial day, spends
 rem every stage's timeouts, and leaves a marker whose stage codes say where each
 rem stage's first request happened to fail rather than naming the one cause.
@@ -83,11 +89,13 @@ if errorlevel 4 (
         echo   "log": "data/log/%DAY%/run_daily.txt"
         echo }
     )
+    "%PY%" run.py record-pass --kind daily --outcome offline --started "!STARTED!" --marker "%~dp0data\last_run.json" >> "%OUT%" 2>&1
     echo [brandmonitor] offline - no stage attempted  log: %OUT%
     exit /b 4
 )
 
 set "WORST=0"
+set "CODE_netcheck=0"
 set "CODE_news=2"
 set "CODE_title_gate=2"
 set "CODE_title_bodies=2"
@@ -108,7 +116,24 @@ rem backfill; the handle on the lock file is held for as long as the block runs.
     9>"%~dp0data\run.lock" ( call :stages )
 ) || (
     echo [brandmonitor] another run holds data\run.lock - nothing attempted
+    "%PY%" run.py record-pass --kind daily --outcome lock_skipped --started "!STARTED!" >> "%OUT%" 2>&1
     exit /b 3
+)
+
+rem The network was up when this run started, so a stage failing is normally the
+rem source's problem. Ask once more when anything failed: DNS died five seconds
+rem after news collection finished on 2026-09-16, and the marker then described
+rem where each later stage's first request happened to fail rather than naming
+rem the one cause. Cheap, and it runs after the lock is released.
+if !WORST! GTR 0 (
+    echo.>> "%OUT%"
+    echo -------- netcheck ^(after a non-zero run^) -------->> "%OUT%"
+    "%PY%" run.py netcheck >> "%OUT%" 2>&1
+    if errorlevel 4 (
+        set "CODE_netcheck=4"
+        set "WORST=4"
+        echo [brandmonitor] the network is down now; the stage failures above are one cause
+    )
 )
 
 "%PY%" -c "import datetime;print(datetime.datetime.now(datetime.timezone.utc).isoformat()[:19])" > "%TMPVAL%" 2>nul
@@ -119,10 +144,11 @@ del "%TMPVAL%" "%TMPVAL%.err" 2>nul
     echo   "finished_utc": "!FINISHED!Z",
     echo   "worst_exit": !WORST!,
     echo   "cycle_date": "%DAY%",
-    echo   "stages": { "news": !CODE_news!, "title_gate": !CODE_title_gate!, "title_bodies": !CODE_title_bodies!, "regulatory": !CODE_regulatory!, "safety_gate": !CODE_safety_gate!, "dip": !CODE_dip!, "ep_procedures": !CODE_ep_procedures!, "body_gate": !CODE_body_gate!, "dip_docs": !CODE_dip_docs!, "alert_gate": !CODE_alert_gate!, "backup": !CODE_backup!, "canary": !CODE_canary!, "quality_health": !CODE_quality_health! },
+    echo   "stages": { "netcheck": !CODE_netcheck!, "news": !CODE_news!, "title_gate": !CODE_title_gate!, "title_bodies": !CODE_title_bodies!, "regulatory": !CODE_regulatory!, "safety_gate": !CODE_safety_gate!, "dip": !CODE_dip!, "ep_procedures": !CODE_ep_procedures!, "body_gate": !CODE_body_gate!, "dip_docs": !CODE_dip_docs!, "alert_gate": !CODE_alert_gate!, "backup": !CODE_backup!, "canary": !CODE_canary!, "quality_health": !CODE_quality_health! },
     echo   "log": "data/log/%DAY%/run_daily.txt"
     echo }
 )
+"%PY%" run.py record-pass --kind daily --outcome completed --started "!STARTED!" --marker "%~dp0data\last_run.json" >> "%OUT%" 2>&1
 
 echo [brandmonitor] done, worst exit=!WORST!  log: %OUT%
 exit /b %WORST%

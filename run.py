@@ -4,6 +4,7 @@
 Commands:
     probe     Crawl one site's discovery methods and draft its source JSON entry.
     migrate   Apply pending SQLite migrations.
+    record-pass  Record a scheduled batch pass for monitoring; used by the batch files.
     collect   Run collection over a source list and store raw items.
     collect-dsa   Store DSA Transparency Database daily aggregates per platform.
     collect-safety-gate   Store EU Safety Gate product alerts from weekly XML.
@@ -110,6 +111,27 @@ def cmd_netcheck(args: argparse.Namespace) -> int:
     return 0 if status.online else OFFLINE_EXIT
 
 
+def cmd_record_pass(args: argparse.Namespace) -> int:
+    """Record one batch pass for monitoring (src/monitoring.py).
+
+    Called last by run_daily.bat and run_intraday.bat, which ignore its exit code:
+    a pass that could not be recorded is a missing monitoring row, not a failed
+    pass. It writes no pipeline log of its own; its output goes to the batch log.
+    """
+    from src.db import migrate
+    from src.monitoring import record_pass
+
+    try:
+        migrate()  # an offline pass may be the first command since a deployment
+    except Exception as exc:  # noqa: BLE001 - record_pass reports what follows
+        print(f"[record-pass] migrate failed: {type(exc).__name__}: {exc}")
+    pass_id = record_pass(kind=args.kind, outcome=args.outcome, started=args.started,
+                          marker=Path(args.marker) if args.marker else None)
+    print(f"[record-pass] {args.kind} {args.outcome}: "
+          f"{'pass ' + str(pass_id) if pass_id else 'not recorded'}")
+    return 0 if pass_id else 1
+
+
 def cmd_collect(args: argparse.Namespace) -> int:
     from src.collect import DEFAULT_NEWS_SOURCES, DEFAULT_REGULATORY_SOURCES, run_collection
     from src.db import migrate
@@ -136,7 +158,8 @@ def cmd_collect(args: argparse.Namespace) -> int:
               f"{r['found']:>8}{r['stored']:>8}")
         if r["error"]:
             print(f"    -> {r['error'][:96]}")
-    print(f"\n{s['ok']} ok, {s['zero']} zero yield, {s['failed']} failed")
+    print(f"\n{s['ok']} ok, {s['zero']} zero yield, {s['failed']} failed, "
+          f"{s['paused']} paused")
     print(f"{s['found']} items found, {s['stored']} newly stored")
     if "bodies" in s:
         print_body_summary(s["bodies"])
@@ -834,12 +857,30 @@ def build_parser() -> argparse.ArgumentParser:
                           help="seconds per connection attempt (default: 5)")
     netcheck.set_defaults(func=cmd_netcheck)
 
+    record_pass = sub.add_parser(
+        "record-pass",
+        help="record one scheduled batch pass for monitoring",
+        description="Called by run_daily.bat and run_intraday.bat when a pass ends, "
+                    "including offline and lock-skipped slots. Copies the pass marker's "
+                    "stage codes and adds the deployed commit and config hashes. Changes "
+                    "nothing the pipeline reads.",
+    )
+    record_pass.add_argument("--kind", choices=("daily", "intraday"), required=True)
+    record_pass.add_argument("--outcome", choices=("completed", "offline", "lock_skipped"),
+                             required=True)
+    record_pass.add_argument("--started", default=None,
+                             help="UTC time the batch started, as the batch file prints it")
+    record_pass.add_argument("--marker", default=None,
+                             help="the pass marker the batch file has just written")
+    record_pass.set_defaults(func=cmd_record_pass)
+
     collect = sub.add_parser(
         "collect",
         help="collect a source list into the database",
         description="Run every enabled discovery method for each configured source "
-                    "and store what it finds. Each source reports ok, zero yield, or "
-                    "failed and resumes from its own watermark; a failed source "
+                    "and store what it finds. Each source reports ok, zero yield, "
+                    "failed, or paused (every method off, nothing sent) and resumes "
+                    "from its own watermark; a failed source "
                     "does not make successful sources repeat its older window.",
     )
     collect.add_argument("--kind", choices=("news", "regulatory"), default="news",

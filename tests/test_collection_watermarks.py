@@ -23,8 +23,8 @@ def project(tmp_path):
     migrate(db)
     source_file = tmp_path / "sources.json"
     source_file.write_text(json.dumps([
-        {"url": "https://a.test/", "organization": "A"},
-        {"url": "https://b.test/", "organization": "B"},
+        {"url": "https://a.test/", "organization": "A", "sitemap": True},
+        {"url": "https://b.test/", "organization": "B", "sitemap": True},
     ]), encoding="utf-8")
     return db, source_file
 
@@ -76,7 +76,7 @@ def test_partial_results_are_stored_without_advancing_that_source(project, monke
     db, source_file = project
     # Keep this test to one source so its baseline is also the run's start.
     source_file.write_text(json.dumps([
-        {"url": "https://a.test/", "organization": "A"},
+        {"url": "https://a.test/", "organization": "A", "sitemap": True},
     ]), encoding="utf-8")
     calls = []
 
@@ -103,8 +103,8 @@ def test_legacy_source_inherits_global_mark_but_new_source_gets_lookback(
         project, monkeypatch):
     db, source_file = project
     source_file.write_text(json.dumps([
-        {"url": "https://old.test/", "organization": "Old"},
-        {"url": "https://new.test/", "organization": "New"},
+        {"url": "https://old.test/", "organization": "Old", "sitemap": True},
+        {"url": "https://new.test/", "organization": "New", "sitemap": True},
     ]), encoding="utf-8")
     legacy = "2026-09-01T12:00:00+02:00"
     with session(db) as conn:
@@ -129,7 +129,7 @@ def test_legacy_source_inherits_global_mark_but_new_source_gets_lookback(
 def test_days_gap_does_not_advance_source_checkpoint(project, monkeypatch):
     db, source_file = project
     source_file.write_text(json.dumps([
-        {"url": "https://a.test/", "organization": "A"},
+        {"url": "https://a.test/", "organization": "A", "sitemap": True},
     ]), encoding="utf-8")
     old = (datetime.now().astimezone() - timedelta(days=10)).isoformat()
     with session(db) as conn:

@@ -1,0 +1,875 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>brandmonitor monitor</title>
+<link rel="icon" href="data:,">
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --surface-2: #f1f0ec; --ink: #0b0b0b; --ink-2: #52514e;
+  --muted: #898781; --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,.10);
+  --accent: #2a78d6; --bar: #2a78d6;
+  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+  --good-bg: #e3f3e1; --warning-bg: #fdf1d6; --serious-bg: #fbe6dc; --critical-bg: #f7dfdd;
+  --neutral-bg: #efeee9; --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --surface-2: #232321; --ink: #ffffff; --ink-2: #c3c2b7;
+    --muted: #898781; --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10);
+    --accent: #3987e5; --bar: #3987e5;
+    --good-bg: #17301a; --warning-bg: #3a2f12; --serious-bg: #3b2519; --critical-bg: #3c1d1d;
+    --neutral-bg: #262624;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --surface-2: #232321; --ink: #ffffff; --ink-2: #c3c2b7;
+  --muted: #898781; --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10);
+  --accent: #3987e5; --bar: #3987e5;
+  --good-bg: #17301a; --warning-bg: #3a2f12; --serious-bg: #3b2519; --critical-bg: #3c1d1d;
+  --neutral-bg: #262624;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink);
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+header { position: sticky; top: 0; z-index: 20; background: var(--surface);
+  border-bottom: 1px solid var(--border); padding-inline: 16px; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; min-height: 48px; }
+.brand { font-weight: 650; font-size: 14px; }
+nav { display: flex; flex-wrap: wrap; gap: 2px; }
+nav a { color: var(--ink-2); padding: 6px 10px; border-radius: 6px; }
+nav a.on { background: var(--surface-2); color: var(--ink); font-weight: 600; }
+nav a:hover { text-decoration: none; background: var(--surface-2); }
+.controls { margin-left: auto; display: flex; align-items: center; gap: 10px; color: var(--ink-2); }
+select, input[type=text], button { font: inherit; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; }
+button { cursor: pointer; }
+button:hover { background: var(--surface-2); }
+main { padding: 16px; max-width: 1600px; margin: 0 auto; }
+h1 { font-size: 18px; margin: 4px 0 2px; }
+h2 { font-size: 14px; margin: 24px 0 8px; }
+.sub { color: var(--ink-2); margin-bottom: 12px; }
+.muted { color: var(--muted); }
+.mono { font-family: var(--mono); font-size: 12px; }
+.num { font-variant-numeric: tabular-nums; text-align: right; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.tile { padding: 10px 12px; }
+.tile .label { color: var(--ink-2); font-size: 12px; }
+.tile .value { font-size: 20px; font-weight: 600; margin: 2px 0; display: flex; align-items: center; gap: 8px; }
+.tile .note { color: var(--muted); font-size: 12px; }
+.banner { padding: 8px 12px; border-radius: 8px; margin: 0 0 12px; background: var(--warning-bg);
+  border-left: 3px solid var(--warning); }
+.error { background: var(--critical-bg); border-left-color: var(--critical); }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; background: var(--surface); }
+th, td { padding: 4px 8px; border-bottom: 1px solid var(--grid); text-align: left; vertical-align: top; }
+th { color: var(--ink-2); font-weight: 600; font-size: 12px; position: sticky; top: 0; background: var(--surface); }
+tr:hover td { background: var(--surface-2); }
+td.wrap { max-width: 520px; overflow-wrap: anywhere; }
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 0 7px 0 5px; border-radius: 10px;
+  font-size: 12px; line-height: 20px; white-space: nowrap; background: var(--neutral-bg); color: var(--ink); }
+.g { font-weight: 700; font-size: 12px; width: 12px; text-align: center; display: inline-block; }
+.s-good { background: var(--good-bg); } .s-good .g { color: var(--good); }
+.s-warning { background: var(--warning-bg); } .s-warning .g { color: #b87f00; }
+.s-serious { background: var(--serious-bg); } .s-serious .g { color: var(--serious); }
+.s-critical { background: var(--critical-bg); } .s-critical .g { color: var(--critical); }
+.s-neutral { background: var(--neutral-bg); } .s-neutral .g { color: var(--muted); }
+.s-accent .g { color: var(--accent); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .s-warning .g { color: var(--warning); } }
+:root[data-theme="dark"] .s-warning .g { color: var(--warning); }
+.chip { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 4px; background: var(--surface-2);
+  color: var(--ink-2); margin: 1px 2px 1px 0; white-space: nowrap; }
+.chip.bad { background: var(--critical-bg); color: var(--ink); }
+.chip.warn { background: var(--warning-bg); color: var(--ink); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+/* heatmap */
+table.heat { width: auto; }
+table.heat th, table.heat td { border-bottom: 0; padding: 1px; }
+table.heat th.col { font-weight: 500; font-size: 10px; color: var(--muted); text-align: center;
+  min-width: 34px; line-height: 1.15; padding: 2px 1px 4px; }
+table.heat th.col.day { border-left: 2px solid var(--axis); }
+table.heat td.day { border-left: 2px solid var(--axis); }
+table.heat .name { position: sticky; left: 0; background: var(--surface); z-index: 2; padding: 2px 10px 2px 4px;
+  white-space: nowrap; min-width: 190px; }
+table.heat th.name { z-index: 3; }
+.cell { display: flex; align-items: center; justify-content: center; gap: 2px; height: 24px; min-width: 32px;
+  border-radius: 4px; font-size: 11px; font-variant-numeric: tabular-nums; cursor: pointer; }
+a.cell { color: var(--ink); text-decoration: none; }
+.cell:hover { outline: 2px solid var(--accent); outline-offset: -1px; }
+.cell.none { cursor: default; background: transparent; }
+.cell.none:hover { outline: 0; }
+.cell.derived { outline: 1px dashed var(--axis); outline-offset: -2px; }
+/* schedule strip */
+table.strip td, table.strip th { text-align: center; padding: 3px; }
+table.strip td.dayname { text-align: left; white-space: nowrap; color: var(--ink-2); }
+table.strip .cell { min-width: 44px; height: 30px; }
+.cells { display: flex; gap: 2px; justify-content: center; }
+.tip { position: fixed; z-index: 50; pointer-events: none; max-width: 460px; background: var(--ink); color: var(--surface);
+  padding: 6px 9px; border-radius: 6px; font-size: 12px; white-space: pre-line; box-shadow: 0 4px 16px rgba(0,0,0,.2); }
+.strip-events { display: inline-flex; gap: 1px; vertical-align: middle; }
+.strip-events span { width: 8px; height: 16px; border-radius: 2px; display: inline-block; }
+details > summary { cursor: pointer; color: var(--ink-2); margin: 6px 0; }
+pre.log { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 0;
+  font: 12px/1.45 var(--mono); max-height: 75vh; overflow: auto; margin: 0; }
+pre.log div { padding: 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; border-left: 3px solid transparent; }
+pre.log div.w { background: var(--warning-bg); border-left-color: var(--warning); }
+pre.log div.e { background: var(--critical-bg); border-left-color: var(--critical); }
+pre.log div.h { color: var(--accent); font-weight: 600; }
+.row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+.split { display: grid; grid-template-columns: 220px 1fr; gap: 16px; }
+@media (max-width: 800px) { .split { grid-template-columns: 1fr; } }
+.list a { display: block; padding: 3px 8px; border-radius: 4px; }
+.list a.on { background: var(--surface-2); color: var(--ink); font-weight: 600; }
+svg text { fill: var(--muted); font-size: 10px; }
+.loading { color: var(--muted); padding: 24px 0; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="brand">brandmonitor · monitor</div>
+    <nav id="nav">
+      <a href="#overview" data-r="overview">Overview</a>
+      <a href="#sources/news" data-r="sources">Sources</a>
+      <a href="#bodies" data-r="bodies">Bodies</a>
+      <a href="#funnel" data-r="funnel">Funnel</a>
+      <a href="#logs" data-r="logs">Logs</a>
+    </nav>
+    <div class="controls">
+      <label>range <select id="days">
+        <option value="1">1 day</option><option value="3">3 days</option><option value="7" selected>7 days</option>
+        <option value="14">14 days</option><option value="30">30 days</option></select></label>
+      <label><input type="checkbox" id="auto"> auto-refresh</label>
+      <button id="refresh" type="button">Refresh</button>
+      <span id="updated" class="muted"></span>
+    </div>
+  </div>
+</header>
+<main id="view"><div class="loading">Loading…</div></main>
+<div id="tip" class="tip" hidden></div>
+<script>
+"use strict";
+
+// ── state & helpers ─────────────────────────────────────────────────────
+const store = {
+  get(key, fallback) { try { const v = localStorage.getItem("bm-admin-" + key); return v === null ? fallback : v; } catch (e) { return fallback; } },
+  set(key, value) { try { localStorage.setItem("bm-admin-" + key, value); } catch (e) { /* storage blocked */ } },
+};
+const state = { days: Number(store.get("days", "7")), overview: null };
+const $ = (sel) => document.querySelector(sel);
+
+function h(tag, props, ...children) {
+  const el = document.createElement(tag);
+  for (const [key, value] of Object.entries(props || {})) {
+    if (value === null || value === undefined || value === false) continue;
+    if (key === "class") el.className = value;
+    else if (key === "tip") el.dataset.tip = value;
+    else if (key === "href") el.setAttribute("href", safeHref(value));
+    else if (key.startsWith("on")) el.addEventListener(key.slice(2), value);
+    else if (key === "style") el.setAttribute("style", value);
+    else el.setAttribute(key, value === true ? "" : value);
+  }
+  for (const child of children.flat(Infinity)) {
+    if (child === null || child === undefined || child === false) continue;
+    el.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+  return el;
+}
+function safeHref(value) {
+  const text = String(value);
+  return text.startsWith("#") || /^https?:\/\//i.test(text) ? text : "#";
+}
+const ext = (url, label) => url ? h("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, label || url) : "";
+
+async function api(path, params) {
+  const query = new URLSearchParams(params || {});
+  const response = await fetch(`${path}?${query}`, { cache: "no-store" });
+  const body = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+  if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+  return body;
+}
+
+const TZ = "Europe/Berlin";
+const partsFmt = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, year: "numeric", month: "2-digit",
+  day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, weekday: "short" });
+function parts(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d)) return null;
+  const p = Object.fromEntries(partsFmt.formatToParts(d).map((x) => [x.type, x.value]));
+  p.hour = p.hour === "24" ? "00" : p.hour;
+  return p;
+}
+function fmtTime(iso, seconds) {
+  const p = parts(iso);
+  if (!p) return "—";
+  return `${p.month}-${p.day} ${p.hour}:${p.minute}${seconds ? ":" + p.second : ""}`;
+}
+const berlinDay = (iso) => { const p = parts(iso); return p ? `${p.year}-${p.month}-${p.day}` : null; };
+function age(iso) {
+  if (!iso) return "—";
+  const ms = Date.now() - new Date(iso).getTime();
+  if (isNaN(ms)) return "—";
+  const m = Math.round(ms / 60000);
+  if (Math.abs(m) < 60) return `${m} min ago`;
+  const hrs = Math.round(m / 60);
+  if (Math.abs(hrs) < 48) return `${hrs} h ago`;
+  return `${Math.round(hrs / 24)} d ago`;
+}
+function duration(a, b) {
+  if (!a || !b) return "—";
+  const s = Math.round((new Date(b) - new Date(a)) / 1000);
+  if (isNaN(s)) return "—";
+  return s < 90 ? `${s}s` : s < 5400 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`;
+}
+function bytes(n) {
+  if (n === null || n === undefined) return "—";
+  return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(2)} MB`;
+}
+const n0 = (v) => (v === null || v === undefined ? "—" : String(v));
+const clip = (text, max) => (text && text.length > max ? text.slice(0, max - 1) + "…" : text || "");
+
+// Status vocabulary: every status is a glyph and a word, never colour alone.
+const CLASSES = {
+  new:       ["good", "●", "new items", "answered, and stored something new"],
+  seen:      ["good", "✓", "nothing new", "answered; everything was already stored"],
+  zero:      ["neutral", "○", "zero", "answered; no entries in the window"],
+  blind:     ["critical", "!", "no response", "requests went out and nothing answered — recorded as zero"],
+  partial:   ["warning", "◐", "partial", "some requests failed or were refused, or items came from an unmetered fetch"],
+  truncated: ["warning", "…", "truncated", "traversal stopped at a cap"],
+  failed:    ["critical", "✕", "failed", "the source failed; its watermark holds"],
+  paused:    ["neutral", "‖", "paused", "every discovery method is off; nothing sent"],
+};
+function badge(cls, text) {
+  const spec = CLASSES[cls] || ["neutral", "·", cls || "—", ""];
+  return h("span", { class: `badge s-${spec[0]}`, tip: spec[3] }, h("span", { class: "g", "aria-hidden": "true" }, spec[1]), text || spec[2]);
+}
+function statusBadge(status) {
+  const map = { ok: ["good", "✓"], failed: ["critical", "✕"], running: ["accent", "…"], zero: ["neutral", "○"],
+    paused: ["neutral", "‖"], unavailable: ["serious", "⊘"], pending: ["neutral", "◷"] };
+  const [tone, glyph] = map[status] || ["neutral", "·"];
+  return h("span", { class: `badge s-${tone}` }, h("span", { class: "g", "aria-hidden": "true" }, glyph), status || "—");
+}
+function passTone(p) {
+  if (p.outcome === "running") return ["accent", "…", "running"];
+  if (p.outcome === "offline") return ["serious", "⌁", "offline"];
+  if (p.outcome === "lock_skipped") return ["warning", "⊘", "lock skipped"];
+  if (p.derived) return p.failed_runs.length ? ["critical", "✕", "a run failed"] : ["good", "✓", "runs ok"];
+  if (p.worst_exit === 0) return ["good", "✓", "exit 0"];
+  if (p.worst_exit === 1) return ["warning", "△", "exit 1"];
+  if (p.worst_exit === 4) return ["serious", "⌁", "exit 4 offline"];
+  return ["critical", "✕", `exit ${n0(p.worst_exit)}`];
+}
+function passBadge(p) {
+  const [tone, glyph, word] = passTone(p);
+  return h("span", { class: `badge s-${tone}` }, h("span", { class: "g", "aria-hidden": "true" }, glyph), word);
+}
+function stageChips(stages) {
+  return Object.entries(stages || {}).map(([name, code]) =>
+    h("span", { class: `chip ${code >= 2 ? "bad" : code === 1 ? "warn" : ""}`, tip: `${name} exited ${code}` },
+      code ? `${name} ${code}` : name));
+}
+function tableOf(columns, rows, empty) {
+  if (!rows.length) return h("div", { class: "muted" }, empty || "Nothing in this range.");
+  return h("div", { class: "scroll card" }, h("table", {},
+    h("thead", {}, h("tr", {}, columns.map((c) => h("th", { class: c.num ? "num" : "" }, c.label)))),
+    h("tbody", {}, rows.map((row) => h("tr", {}, columns.map((c) =>
+      h("td", { class: [c.num ? "num" : "", c.wrap ? "wrap" : "", c.mono ? "mono" : ""].join(" ").trim() || null },
+        c.render ? c.render(row) : n0(row[c.key]))))))));
+}
+const tile = (label, value, note) => h("div", { class: "card tile" }, h("div", { class: "label" }, label),
+  h("div", { class: "value" }, value), h("div", { class: "note" }, note || ""));
+const monitoringBanner = (on) => on ? null : h("div", { class: "banner" },
+  "The monitoring tables (migration 007) are not in this database yet, so request, file and body-attempt detail is absent and passes are derived from stage runs.");
+
+// ── tooltip ─────────────────────────────────────────────────────────────
+const tip = $("#tip");
+document.addEventListener("mouseover", (event) => {
+  const target = event.target.closest("[data-tip]");
+  if (!target || !target.dataset.tip) { tip.hidden = true; return; }
+  tip.textContent = target.dataset.tip;
+  tip.hidden = false;
+});
+document.addEventListener("mousemove", (event) => {
+  if (tip.hidden) return;
+  const pad = 14, w = tip.offsetWidth, hgt = tip.offsetHeight;
+  let x = event.clientX + pad, y = event.clientY + pad;
+  if (x + w > window.innerWidth - 8) x = event.clientX - w - pad;
+  if (y + hgt > window.innerHeight - 8) y = event.clientY - hgt - pad;
+  tip.style.left = `${Math.max(8, x)}px`; tip.style.top = `${Math.max(8, y)}px`;
+});
+document.addEventListener("mouseout", (event) => { if (!event.relatedTarget || !event.relatedTarget.closest("[data-tip]")) tip.hidden = true; });
+
+// ── overview ────────────────────────────────────────────────────────────
+const SLOTS = [6, 8, 10, 12, 14, 16, 18, 20, 22];
+function slotOf(iso) {
+  const p = parts(iso);
+  if (!p) return "other";
+  const minutes = Number(p.hour) * 60 + Number(p.minute);
+  for (const slot of SLOTS) if (minutes >= slot * 60 - 10 && minutes < slot * 60 + 50) return slot;
+  return "other";
+}
+function passTip(p) {
+  const lines = [`${p.derived ? "derived " : ""}${p.kind} pass · ${p.outcome}`,
+    `${fmtTime(p.started_at, true)} → ${fmtTime(p.finished_at, true)} (${duration(p.started_at, p.finished_at)})`];
+  if (p.worst_exit !== null && p.worst_exit !== undefined) lines.push(`worst exit ${p.worst_exit}`);
+  const stages = Object.entries(p.stages || {});
+  if (stages.length) lines.push(stages.map(([k, v]) => `${k}=${v}`).join(" "));
+  if (p.runs.length) lines.push(p.runs.map((r) => `#${r.id} ${r.kind} ${r.status}`).join("\n"));
+  if (p.git_commit) lines.push(`commit ${p.git_commit.slice(0, 9)}${p.git_dirty && p.git_dirty.length ? ` + ${p.git_dirty.length} uncommitted` : ""}`);
+  return lines.join("\n");
+}
+
+async function viewOverview() {
+  const data = await api("/api/overview", { days: state.days });
+  state.overview = data;
+  const tasks = Object.fromEntries((data.tasks || []).map((t) => [t.name, t]));
+  const markerTile = (label, m, taskName) => {
+    const t = tasks[taskName];
+    const taskNote = t ? `${t.state}${t.next_run ? ` · next ${fmtTime(t.next_run)}` : ""}` : "";
+    if (!m) return tile(label, h("span", { class: "muted" }, "no marker"), taskNote);
+    return tile(label, passBadge({ worst_exit: m.worst_exit, outcome: m.worst_exit === 4 ? "offline" : "completed", derived: false }),
+      `${age(m.finished_utc)} · ${taskNote}`);
+  };
+  const health = data.health;
+  const healthTone = !health ? ["neutral", "·"] : health.status === "critical" ? ["critical", "✕"]
+    : health.status === "warning" ? ["warning", "△"] : ["good", "✓"];
+  const queue = data.body_queue || {};
+  const passes = data.passes.slice().reverse();
+
+  // schedule strip: days × slots
+  const byDay = new Map();
+  for (const p of data.passes) {
+    const day = berlinDay(p.started_at || p.finished_at);
+    if (!day) continue;
+    if (!byDay.has(day)) byDay.set(day, new Map());
+    const slot = slotOf(p.started_at || p.finished_at);
+    const slots = byDay.get(day);
+    if (!slots.has(slot)) slots.set(slot, []);
+    slots.get(slot).push(p);
+  }
+  const days = [];
+  const today = berlinDay(new Date().toISOString());
+  for (let i = 0; i < data.days; i++) days.push(berlinDay(new Date(Date.now() - i * 864e5).toISOString()));
+  const nowParts = parts(new Date().toISOString());
+  const nowMinutes = Number(nowParts.hour) * 60 + Number(nowParts.minute);
+  const intradayOn = tasks["brandmonitor-intraday"] && tasks["brandmonitor-intraday"].enabled && tasks["brandmonitor-intraday"].state !== "Disabled";
+  const stripCell = (day, slot) => {
+    const found = (byDay.get(day) || new Map()).get(slot) || [];
+    if (found.length) {
+      return h("div", { class: "cells" }, found.map((p) => {
+        const [tone, glyph] = passTone(p);
+        return h("a", { href: `#pass/${p.id}`, class: `cell s-${tone}${p.derived ? " derived" : ""}`, tip: passTip(p) },
+          h("span", { class: "g" }, glyph));
+      }));
+    }
+    if (slot === "other") return "";
+    const past = day < today || (day === today && nowMinutes > slot * 60 + 50);
+    const expected = slot === 6 || intradayOn;
+    if (past && expected) {
+      return h("div", { class: "cell s-serious", tip: `no pass recorded for the ${String(slot).padStart(2, "0")}:00 slot` },
+        h("span", { class: "g" }, "?"));
+    }
+    return h("div", { class: "cell none", tip: expected ? "not due yet" : "not scheduled (intraday task disabled or unknown)" },
+      h("span", { class: "muted" }, "·"));
+  };
+
+  return h("div", {},
+    h("h1", {}, "Overview"),
+    h("div", { class: "sub" }, `Data ${data.db.path} · ${bytes(data.db.bytes)} · checkout ${data.checkout.commit ? data.checkout.commit.slice(0, 9) : "unknown"} · generated ${fmtTime(data.generated_at, true)}`),
+    monitoringBanner(data.db.monitoring),
+    data.running.length ? h("div", { class: "banner" }, `Running now: ${data.running.map((r) => `#${r.id} ${r.kind} since ${fmtTime(r.started_at)}`).join(", ")}`) : null,
+    h("div", { class: "tiles" },
+      markerTile("Last daily pass", data.markers.daily, "brandmonitor-daily"),
+      markerTile("Last intraday pass", data.markers.intraday, "brandmonitor-intraday"),
+      tile("Health verdict", health ? h("span", { class: `badge s-${healthTone[0]}` }, h("span", { class: "g" }, healthTone[1]), health.status) : h("span", { class: "muted" }, "none"),
+        health ? `${health.summary ? `${health.summary.critical} critical · ${health.summary.warnings} warnings · ` : ""}${age(health.generated_utc)}` : ""),
+      tile("Body queue", `${queue.pending || 0} pending`, `${queue.failed || 0} retryable · ${queue.unavailable || 0} unavailable · ${queue.ok || 0} ok`),
+      tile("Unsent potential alerts", n0(data.unsent_alerts), h("a", { href: "#funnel" }, "funnel")),
+    ),
+    h("h2", {}, "Schedule"),
+    h("div", { class: "muted" }, "Each cell is a pass by its start time (Berlin). Dashed = derived from stage runs because no pass was recorded; ? = an expected slot with no pass."),
+    h("div", { class: "scroll card", style: "margin-top:6px" }, h("table", { class: "strip" },
+      h("thead", {}, h("tr", {}, h("th", {}, "day"), SLOTS.map((s) => h("th", {}, `${String(s).padStart(2, "0")}:00`)), h("th", {}, "other"))),
+      h("tbody", {}, days.map((day) => h("tr", {},
+        h("td", { class: "dayname" }, day), SLOTS.map((s) => h("td", {}, stripCell(day, s))), h("td", {}, stripCell(day, "other"))))))),
+    health && health.incidents.length ? [h("h2", {}, `Health incidents (${health.incidents.length})`),
+      tableOf([
+        { label: "severity", render: (r) => h("span", { class: `badge s-${r.severity === "critical" ? "critical" : "warning"}` }, h("span", { class: "g" }, r.severity === "critical" ? "✕" : "△"), r.severity) },
+        { label: "source", key: "source" }, { label: "check", key: "check" }, { label: "message", key: "message", wrap: true },
+      ], health.incidents)] : null,
+    h("h2", {}, "Passes"),
+    tableOf([
+      { label: "started", render: (p) => h("a", { href: `#pass/${p.id}` }, fmtTime(p.started_at || p.finished_at)) },
+      { label: "kind", render: (p) => `${p.kind}${p.derived ? " (derived)" : ""}` },
+      { label: "outcome", render: passBadge },
+      { label: "took", render: (p) => duration(p.started_at, p.finished_at), num: true },
+      { label: "stages", render: (p) => stageChips(p.stages) },
+      { label: "runs", render: (p) => p.runs.map((r) => h("a", { href: `#run/${r.id}`, class: `chip ${r.status === "failed" ? "bad" : ""}`, tip: `${r.kind} ${r.status}` }, `#${r.id} ${r.kind}`)) },
+      { label: "commit", render: (p) => p.git_commit ? h("span", { class: "mono", tip: (p.git_dirty || []).join("\n") || "clean" }, p.git_commit.slice(0, 9) + (p.git_dirty && p.git_dirty.length ? ` +${p.git_dirty.length}` : "")) : "—" },
+    ], passes),
+  );
+}
+
+async function viewPass(id) {
+  if (!state.overview || !state.overview.passes.some((p) => String(p.id) === id)) {
+    state.overview = await api("/api/overview", { days: 30 });
+  }
+  const p = state.overview.passes.find((x) => String(x.id) === id);
+  if (!p) return h("div", { class: "banner error" }, `Pass ${id} is not in the last 30 days.`);
+  return h("div", {},
+    h("div", { class: "muted" }, h("a", { href: "#overview" }, "Overview"), " / pass"),
+    h("h1", {}, `${p.derived ? "Derived " : ""}${p.kind} pass `, passBadge(p)),
+    h("div", { class: "sub" }, `${fmtTime(p.started_at, true)} → ${fmtTime(p.finished_at, true)} · ${duration(p.started_at, p.finished_at)}${p.git_commit ? ` · commit ${p.git_commit.slice(0, 9)}` : ""}${p.config_hash ? ` · config ${p.config_hash.slice(0, 12)}` : ""}${p.host ? ` · ${p.host}` : ""}`),
+    p.derived ? h("div", { class: "banner" }, "No pass was recorded for these runs; they are grouped by time. A manual command shows up this way too.") : null,
+    Object.keys(p.stages || {}).length ? h("div", {}, stageChips(p.stages)) : null,
+    p.log_path ? h("div", { style: "margin-top:6px" }, "log: ", h("a", { href: `#logs/${p.log_path.split("/").slice(-2).join("/")}` }, p.log_path)) : null,
+    p.git_dirty && p.git_dirty.length ? h("details", {}, h("summary", {}, `${p.git_dirty.length} uncommitted file(s) in the deployed checkout`), h("pre", { class: "mono" }, p.git_dirty.join("\n"))) : null,
+    h("h2", {}, "Stage runs"),
+    tableOf([
+      { label: "run", render: (r) => h("a", { href: `#run/${r.id}` }, `#${r.id}`) },
+      { label: "kind", key: "kind" }, { label: "status", render: (r) => statusBadge(r.status) },
+      { label: "started", render: (r) => fmtTime(r.started_at, true) }, { label: "took", render: (r) => duration(r.started_at, r.finished_at), num: true },
+      { label: "sources", key: "sources", num: true }, { label: "ok", key: "ok", num: true }, { label: "zero", key: "zero", num: true },
+      { label: "failed", key: "failed", num: true }, { label: "found", key: "found", num: true }, { label: "stored", key: "stored", num: true },
+      { label: "note", key: "note", wrap: true },
+    ], p.runs, "No stage runs belong to this pass."),
+  );
+}
+
+// ── sources heatmap ─────────────────────────────────────────────────────
+function cellTip(slug, run, c) {
+  const lines = [`${slug} · run #${run.id} · ${fmtTime(run.started_at)}`, `${(CLASSES[c.class] || [0, 0, c.class])[2]} — status ${c.status}`,
+    `found ${n0(c.items_found)} · stored ${n0(c.items_stored)}`];
+  if (c.attempts !== undefined && c.attempts !== null) {
+    lines.push(`requests ${c.attempts} · answered ${n0(c.responses)} · no response ${n0(c.transport_errors)}`);
+    lines.push(`304 ${n0(c.not_modified)} · replayed ${n0(c.replayed)} · ${bytes(c.bytes)} · took ${duration(c.d_started, c.d_finished)}`);
+    if (c.bad_requests) lines.push(`${c.bad_requests} refused/errored request(s)`);
+    if (c.absent_files) lines.push(`${c.absent_files} absent file(s) (404/410)`);
+    if (c.excluded || c.index_pages) lines.push(`dropped: ${n0(c.excluded)} excluded, ${n0(c.index_pages)} index pages`);
+    lines.push(c.watermark_advanced ? "watermark advanced" : "watermark held");
+  }
+  if (c.error) lines.push(clip(c.error, 400));
+  return lines.join("\n");
+}
+
+async function viewSources(kind) {
+  kind = kind === "regulatory" ? "regulatory" : "news";
+  const [grid, structured] = await Promise.all([api("/api/grid", { kind, days: state.days }), api("/api/structured", { days: state.days })]);
+  const runs = grid.runs;
+  const counts = {};
+  for (const by of Object.values(grid.cells)) for (const c of Object.values(by)) counts[c.class] = (counts[c.class] || 0) + 1;
+  const latest = runs.length ? runs[runs.length - 1] : null;
+  const latestBad = latest ? grid.sources.filter((s) => { const c = (grid.cells[s.slug] || {})[latest.id]; return c && ["blind", "failed", "partial"].includes(c.class); }) : [];
+
+  const heat = h("table", { class: "heat" },
+    h("thead", {}, h("tr", {}, h("th", { class: "name" }, `${grid.sources.length} sources · ${runs.length} runs`),
+      runs.map((r, i) => {
+        const day = berlinDay(r.started_at), prev = i ? berlinDay(runs[i - 1].started_at) : null;
+        const p = parts(r.started_at);
+        return h("th", { class: `col${day !== prev ? " day" : ""}`, tip: `run #${r.id} ${r.status}\n${fmtTime(r.started_at, true)} → ${fmtTime(r.finished_at, true)}\n${r.note || ""}` },
+          h("a", { href: `#run/${r.id}` }, day !== prev ? `${p.month}-${p.day}` : "", h("br"), `${p.hour}:${p.minute}`));
+      }))),
+    h("tbody", {}, grid.sources.map((s) => h("tr", {},
+      h("td", { class: "name" },
+        h("a", { href: `#source/${kind}/${s.slug}` }, s.organization || s.slug), " ",
+        h("span", { class: "muted", tip: `${s.slug}\nmethods: ${s.methods.join(", ") || "none"}\npins ${s.pins} · feed_urls ${s.feed_urls} · ${s.content_mode || ""}\nwatermark ${s.watermark ? fmtTime(s.watermark.position) + " (" + age(s.watermark.position) + ")" : "—"}` },
+          s.collector ? `(${s.collector})` : s.methods.length ? s.methods.map((m) => m[0]).join("") : "off")),
+      runs.map((r, i) => {
+        const c = (grid.cells[s.slug] || {})[r.id];
+        const newDay = !i || berlinDay(r.started_at) !== berlinDay(runs[i - 1].started_at);
+        if (!c) return h("td", { class: newDay ? "day" : null }, h("div", { class: "cell none" }));
+        const spec = CLASSES[c.class] || ["neutral", "·"];
+        return h("td", { class: newDay ? "day" : null },
+          h("a", { href: `#run/${r.id}/${s.slug}`, class: `cell s-${spec[0]}`, tip: cellTip(s.slug, r, c), "aria-label": `${s.slug} run ${r.id}: ${spec[2]}` },
+            h("span", { class: "g" }, spec[1]), c.items_stored ? String(c.items_stored) : ""));
+      })))));
+
+  const view = h("div", {},
+    h("h1", {}, "Sources"),
+    h("div", { class: "row", style: "margin-bottom:8px" },
+      h("a", { href: "#sources/news", class: `badge ${kind === "news" ? "s-accent" : ""}` }, "news"),
+      h("a", { href: "#sources/regulatory", class: `badge ${kind === "regulatory" ? "s-accent" : ""}` }, "regulatory"),
+      h("span", { class: "muted" }, "Rows are sources, columns are collection runs (newest right). The number is items stored. Click a cell for that run's requests.")),
+    monitoringBanner(grid.monitoring),
+    latestBad.length ? h("div", { class: "banner error" }, `Latest run #${latest.id} (${fmtTime(latest.started_at)}): ${latestBad.length} source(s) failed, partial or unanswered — `,
+      latestBad.map((s) => h("a", { href: `#run/${latest.id}/${s.slug}`, style: "margin-right:8px" }, s.organization || s.slug))) : null,
+    h("div", { class: "legend" }, Object.keys(CLASSES).map((k) => badge(k, `${CLASSES[k][2]}${counts[k] ? ` (${counts[k]})` : ""}`))),
+    h("div", { class: "scroll card", id: "heatwrap" }, heat),
+    h("h2", {}, "Structured collectors"),
+    tableOf([
+      { label: "collector", key: "kind" },
+      { label: "last ok", render: (r) => structured.latest_ok[r.kind] ? `${fmtTime(structured.latest_ok[r.kind])} (${age(structured.latest_ok[r.kind])})` : "never" },
+      { label: "recent runs", render: (r) => h("span", { class: "strip-events" }, r.runs.map((x) =>
+        h("a", { href: `#run/${x.id}` }, h("span", { class: `s-${x.status === "ok" ? "good" : x.status === "failed" ? "critical" : "accent"}`,
+          style: `background: var(--${x.status === "ok" ? "good" : x.status === "failed" ? "critical" : "accent"})`,
+          tip: `#${x.id} ${x.status} ${fmtTime(x.started_at)}\nfound ${n0(x.found)} stored ${n0(x.stored)}\n${x.sources_detail.map((d) => clip(d.error || "", 300)).join("\n")}` })))) },
+      { label: "latest", render: (r) => { const x = r.runs[r.runs.length - 1]; return h("span", {}, statusBadge(x.status), " ", `found ${n0(x.found)} · stored ${n0(x.stored)}`); } },
+      { label: "latest error", wrap: true, render: (r) => clip(r.runs[r.runs.length - 1].sources_detail.map((d) => d.error).filter(Boolean).join("; "), 300) },
+    ], Object.values(structured.runs.reduce((acc, run) => { (acc[run.kind] = acc[run.kind] || { kind: run.kind, runs: [] }).runs.push(run); return acc; }, {})),
+      "No structured collector ran in this range."),
+  );
+  requestAnimationFrame(() => { const w = $("#heatwrap"); if (w) w.scrollLeft = w.scrollWidth; });
+  return view;
+}
+
+// ── source drill-down ───────────────────────────────────────────────────
+function barChart(rows, key, label) {
+  const width = Math.max(320, rows.length * 22), height = 110, pad = { l: 28, b: 18, t: 8 };
+  const max = Math.max(1, ...rows.map((r) => r[key]));
+  const bw = Math.max(4, Math.min(14, (width - pad.l) / rows.length - 6));
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("width", width); svg.setAttribute("height", height);
+  svg.setAttribute("role", "img"); svg.setAttribute("aria-label", label);
+  const add = (tag, attrs, text) => { const el = document.createElementNS(ns, tag); for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v); if (text !== undefined) el.textContent = text; svg.append(el); return el; };
+  const plotH = height - pad.b - pad.t;
+  add("line", { x1: pad.l, x2: width, y1: height - pad.b, y2: height - pad.b, stroke: "var(--axis)", "stroke-width": 1 });
+  add("text", { x: pad.l - 4, y: pad.t + 8, "text-anchor": "end" }, String(max));
+  add("text", { x: pad.l - 4, y: height - pad.b, "text-anchor": "end" }, "0");
+  rows.forEach((r, i) => {
+    const slot = (width - pad.l) / rows.length, x = pad.l + i * slot + (slot - bw) / 2;
+    const bh = r[key] ? Math.max(2, (r[key] / max) * plotH) : 0;
+    const top = height - pad.b - bh;
+    if (bh) add("path", { d: `M${x},${height - pad.b} V${top + 3} Q${x},${top} ${x + 3},${top} H${x + bw - 3} Q${x + bw},${top} ${x + bw},${top + 3} V${height - pad.b} Z`, fill: "var(--bar)" });
+    const hit = add("rect", { x: pad.l + i * slot, y: pad.t, width: slot, height: plotH, fill: "transparent" });
+    hit.dataset.tip = `${r.day}\n${r.new} new item(s)${r.versions ? `\n${r.versions} new version(s)` : ""}`;
+    if (i % Math.ceil(rows.length / 10) === 0) add("text", { x: x + bw / 2, y: height - 4, "text-anchor": "middle" }, r.day.slice(5));
+  });
+  return svg;
+}
+function eventTone(e) {
+  if (e.error) return ["critical", "no response"];
+  if (e.status >= 400 && ![404, 410].includes(e.status)) return ["critical", `HTTP ${e.status}`];
+  if ([404, 410].includes(e.status)) return ["serious", `HTTP ${e.status} absent`];
+  if (e.status === 304) return ["good", "304 replayed"];
+  if (e.status >= 300) return ["neutral", `HTTP ${e.status} redirect`];
+  if (e.parse === "parsed" && e.entries === 0) return ["warning", "200 but empty"];
+  if (e.parse === null && /html/i.test(e.content_type || "") && /sitemap|rss|feed|atom|\.xml/i.test(e.url)) return ["warning", "HTML where XML expected"];
+  return ["good", `HTTP ${e.status}`];
+}
+function eventTip(e) {
+  const [, word] = eventTone(e);
+  return [`${fmtTime(e.at, true)} · run #${e.run_id} · ${word}`, `${e.method} ${e.url}`,
+    e.redirected_from ? `redirected from ${e.redirected_from}` : null,
+    `${bytes(e.bytes)} · ${n0(e.elapsed_ms)} ms · ${e.content_type || "no content type"}${e.conditional ? " · conditional" : ""}`,
+    e.parse ? `${e.parse}: ${e.entries} entries (${n0(e.dated_entries)} dated, ${n0(e.entries_since)} in window)${e.children ? `, ${e.children} child sitemaps` : ""}` : null,
+    e.newest_entry ? `newest ${fmtTime(e.newest_entry)} (${age(e.newest_entry)}) · oldest ${fmtTime(e.oldest_entry)}` : null,
+    e.error].filter(Boolean).join("\n");
+}
+
+async function viewSource(kind, slug) {
+  const d = await api("/api/source", { kind, slug, days: state.days });
+  const e = d.entry || {};
+  const tg = d.title_gate.counts;
+  return h("div", {},
+    h("div", { class: "muted" }, h("a", { href: `#sources/${kind}` }, "Sources"), ` / ${kind}`),
+    h("h1", {}, e.organization || slug, " ", h("span", { class: "muted mono" }, slug)),
+    h("div", { class: "sub" }, [
+      `methods: ${["sitemap", "feeds", "frontpage", "brightdata"].filter((m) => e[m]).join(", ") || "none"}`,
+      e.sitemap_urls ? `${e.sitemap_urls.length} pinned sitemap(s)` : null,
+      e.feed_urls ? `${e.feed_urls.length} feed url(s)` : null,
+      `content: ${e.content_mode || "title_only"}`,
+      d.watermark ? `watermark ${fmtTime(d.watermark.position)} (${age(d.watermark.position)})` : "no watermark",
+    ].filter(Boolean).join(" · ")),
+    monitoringBanner(d.monitoring),
+    d.entry ? h("details", {}, h("summary", {}, "source entry"), h("pre", { class: "mono card", style: "padding:8px;overflow:auto" }, JSON.stringify(d.entry, null, 2))) : h("div", { class: "banner" }, "Not in the source list."),
+    h("h2", {}, "Items stored per day (Berlin)"),
+    h("div", { class: "card scroll", style: "padding:8px" }, barChart(d.items_per_day, "new", "new items per day")),
+    h("h2", {}, "Collection runs"),
+    tableOf([
+      { label: "run", render: (r) => h("a", { href: `#run/${r.run_id}/${slug}` }, `#${r.run_id}`) },
+      { label: "started", render: (r) => fmtTime(r.started_at) },
+      { label: "outcome", render: (r) => r.class ? badge(r.class) : statusBadge(r.status) },
+      { label: "found", key: "items_found", num: true }, { label: "stored", key: "items_stored", num: true },
+      { label: "req / ans / none", num: true, render: (r) => r.attempts === undefined || r.attempts === null ? "—" : `${r.attempts} / ${n0(r.responses)} / ${n0(r.transport_errors)}` },
+      { label: "304 / replay", num: true, render: (r) => r.not_modified === undefined || r.not_modified === null ? "—" : `${r.not_modified} / ${n0(r.replayed)}` },
+      { label: "bytes", num: true, render: (r) => bytes(r.bytes) },
+      { label: "excluded / index", num: true, render: (r) => r.excluded === undefined || r.excluded === null ? "—" : `${r.excluded} / ${n0(r.index_pages)}` },
+      { label: "took", num: true, render: (r) => duration(r.d_started, r.d_finished) },
+      { label: "watermark", render: (r) => r.watermark_advanced === undefined || r.watermark_advanced === null ? "—" : r.watermark_advanced ? "advanced" : h("span", { class: "chip warn" }, "held") },
+      { label: "error", wrap: true, render: (r) => clip(r.error, 300) },
+    ], d.runs),
+    h("h2", {}, `Files and requests (${d.files.length})`),
+    tableOf([
+      { label: "file", wrap: true, mono: true, render: (f) => ext(f.url) },
+      { label: "history (oldest → newest)", render: (f) => h("span", { class: "strip-events" }, f.events.slice().reverse().map((ev) => {
+        const [tone] = eventTone(ev); return h("span", { style: `background: var(--${tone === "neutral" ? "axis" : tone})`, tip: eventTip(ev) }); })) },
+      { label: "latest", render: (f) => { const ev = f.events[0]; const [tone, word] = eventTone(ev); return h("span", { class: `badge s-${tone}`, tip: eventTip(ev) }, word); } },
+      { label: "entries / in window", num: true, render: (f) => { const ev = f.events.find((x) => x.parse); return ev ? `${ev.entries} / ${n0(ev.entries_since)}` : "—"; } },
+      { label: "newest entry", render: (f) => { const ev = f.events.find((x) => x.newest_entry); return ev ? h("span", { tip: fmtTime(ev.newest_entry, true) }, age(ev.newest_entry)) : "—"; } },
+      { label: "bytes", num: true, render: (f) => bytes(f.events[0].bytes) },
+      { label: "ms", num: true, render: (f) => n0(f.events[0].elapsed_ms) },
+    ], d.files, "No requests recorded for this source in the range."),
+    h("h2", {}, "Title gate"),
+    h("div", { class: "row" }, ["keep", "drop", "fail_open"].map((k) => h("span", { class: "chip" }, `${k} ${tg[k] || 0}`))),
+    d.title_gate.recent.length ? tableOf([
+      { label: "at", render: (x) => fmtTime(x.at) }, { label: "run", render: (x) => x.run_id ? h("a", { href: `#run/${x.run_id}` }, `#${x.run_id}`) : "—" },
+      { label: "decision", render: (x) => h("span", { class: `badge s-${x.fail_open ? "warning" : x.decision === "keep" ? "good" : "neutral"}` }, x.fail_open ? "kept (fail-open)" : x.decision) },
+      { label: "label", wrap: true, render: (x) => ext(x.url, clip(x.label, 160)) }, { label: "reasons", wrap: true, render: (x) => (x.reasons || []).join(", ") },
+    ], d.title_gate.recent) : null,
+    h("h2", {}, "Bodies"),
+    h("div", { class: "row" }, Object.entries(d.bodies.queue || {}).map(([k, v]) => h("span", {}, statusBadge(k), ` ${v}`))),
+    d.bodies.attempts ? [h("h2", {}, "Recent body attempts"), tableOf([
+      { label: "at", render: (x) => fmtTime(x.at, true) }, { label: "run", render: (x) => h("a", { href: `#run/${x.run_id}` }, `#${x.run_id}`) },
+      { label: "result", render: (x) => statusBadge(x.status) }, { label: "ms", key: "elapsed_ms", num: true },
+      { label: "attempts", key: "attempts", num: true }, { label: "counted", render: (x) => x.counted ? "yes" : h("span", { class: "chip warn" }, "no (outage rule)") },
+      { label: "url", wrap: true, render: (x) => ext(x.external_id) }, { label: "error", wrap: true, render: (x) => clip(x.error, 240) },
+    ], d.bodies.attempts)] : null,
+    (d.bodies.problems || []).length ? [h("h2", {}, "Bodies not ok"), tableOf([
+      { label: "status", render: (x) => statusBadge(x.status) }, { label: "attempts", key: "attempts", num: true },
+      { label: "last attempt", render: (x) => fmtTime(x.attempted_at) }, { label: "url", wrap: true, render: (x) => ext(x.external_id) },
+      { label: "error", wrap: true, render: (x) => clip(x.error, 240) },
+    ], d.bodies.problems)] : null,
+    h("h2", {}, "Latest stored items"),
+    tableOf([
+      { label: "id", key: "id", num: true }, { label: "v", key: "version", num: true },
+      { label: "title", wrap: true, render: (x) => ext(x.url, x.title || x.url) },
+      { label: "published", render: (x) => h("span", { tip: x.published_at || "" }, fmtTime(x.published_at)) },
+      { label: "date from", render: (x) => h("span", { class: `chip ${x.date_source === "lastmod" ? "warn" : ""}` }, x.date_source || "none") },
+      { label: "via", key: "discovered_via" }, { label: "fetched", render: (x) => fmtTime(x.fetched_at) },
+    ], d.latest_items),
+  );
+}
+
+// ── run detail ──────────────────────────────────────────────────────────
+async function viewRun(id, onlySource) {
+  const d = await api("/api/run", { id });
+  const r = d.run;
+  const events = onlySource ? d.events.filter((e) => e.source_slug === onlySource) : d.events;
+  const sources = onlySource ? d.sources.filter((s) => s.source_slug === onlySource) : d.sources;
+  const attempts = onlySource ? d.body_attempts.filter((a) => a.source_slug === onlySource) : d.body_attempts;
+  const collection = ["news", "regulatory"].includes(r.kind);
+  const tg = d.title_gate.counts;
+  return h("div", {},
+    h("div", { class: "muted" }, h("a", { href: "#overview" }, "Overview"), collection ? [" / ", h("a", { href: `#sources/${r.kind}` }, "Sources")] : null, ` / run #${r.id}`,
+      onlySource ? [" / ", onlySource, " · ", h("a", { href: `#run/${r.id}` }, "all sources"), " · ", h("a", { href: `#source/${r.kind}/${onlySource}` }, "source page")] : null),
+    h("h1", {}, `Run #${r.id} · ${r.kind} `, statusBadge(r.status)),
+    h("div", { class: "sub" }, `${fmtTime(r.started_at, true)} → ${fmtTime(r.finished_at, true)} · ${duration(r.started_at, r.finished_at)} · window ${fmtTime(r.window_start)} → ${fmtTime(r.window_end)}${r.note ? ` · ${r.note}` : ""}`),
+    monitoringBanner(d.monitoring),
+    h("h2", {}, `Sources (${sources.length})`),
+    tableOf([
+      { label: "source", render: (s) => collection ? h("a", { href: `#run/${r.id}/${s.source_slug}` }, s.source_slug) : s.source_slug },
+      { label: "outcome", render: (s) => s.class ? badge(s.class) : statusBadge(s.status) },
+      { label: "found", key: "items_found", num: true }, { label: "stored", key: "items_stored", num: true },
+      { label: "req / ans / none", num: true, render: (s) => s.attempts === undefined || s.attempts === null ? "—" : `${s.attempts} / ${n0(s.responses)} / ${n0(s.transport_errors)}` },
+      { label: "304 / replay", num: true, render: (s) => s.not_modified === undefined || s.not_modified === null ? "—" : `${s.not_modified} / ${n0(s.replayed)}` },
+      { label: "bytes", num: true, render: (s) => bytes(s.bytes) }, { label: "took", num: true, render: (s) => duration(s.d_started, s.d_finished) },
+      { label: "window from", render: (s) => s.window_start ? h("span", { tip: `since (with overlap) ${fmtTime(s.since)}` }, fmtTime(s.window_start)) : "—" },
+      { label: "watermark", render: (s) => s.watermark_advanced === undefined || s.watermark_advanced === null ? "—" : s.watermark_advanced ? `→ ${fmtTime(s.watermark_after)}` : h("span", { class: "chip warn" }, "held") },
+      { label: "error", wrap: true, render: (s) => clip(s.error, 400) },
+    ], sources),
+    events.length || collection ? [h("h2", {}, `Requests (${events.length})`), tableOf([
+      { label: "source", key: "source_slug" }, { label: "#", key: "seq", num: true }, { label: "at", render: (e) => fmtTime(e.at, true) },
+      { label: "result", render: (e) => { const [tone, word] = eventTone(e); return h("span", { class: `badge s-${tone}`, tip: eventTip(e) }, word); } },
+      { label: "cond", render: (e) => e.conditional ? "yes" : "" }, { label: "ms", key: "elapsed_ms", num: true }, { label: "bytes", num: true, render: (e) => bytes(e.bytes) },
+      { label: "parse", render: (e) => e.parse || "" }, { label: "entries", key: "entries", num: true }, { label: "in window", key: "entries_since", num: true },
+      { label: "newest", render: (e) => e.newest_entry ? h("span", { tip: fmtTime(e.newest_entry, true) }, age(e.newest_entry)) : "" },
+      { label: "url / error", wrap: true, mono: true, render: (e) => [ext(e.url), e.error ? h("div", {}, clip(e.error, 300)) : null] },
+    ], events, "No requests recorded for this run.")] : null,
+    attempts.length ? [h("h2", {}, `Body attempts (${attempts.length})`), tableOf([
+      { label: "source", key: "source_slug" }, { label: "at", render: (a) => fmtTime(a.at, true) }, { label: "result", render: (a) => statusBadge(a.status) },
+      { label: "ms", key: "elapsed_ms", num: true }, { label: "attempts", key: "attempts", num: true },
+      { label: "counted", render: (a) => a.counted ? "yes" : h("span", { class: "chip warn" }, "no") }, { label: "stored", key: "stored", num: true },
+      { label: "url", wrap: true, render: (a) => ext(a.external_id) }, { label: "error", wrap: true, render: (a) => clip(a.error, 240) },
+    ], attempts)] : null,
+    r.kind === "news" ? [h("h2", {}, "Title gate for this run"),
+      h("div", { class: "row" }, ["keep", "drop", "fail_open"].map((k) => h("span", { class: "chip" }, `${k} ${tg[k] || 0}`)),
+        d.title_gate.decisions.length ? null : h("span", { class: "muted" }, "no decisions logged with this run id")),
+      d.title_gate.decisions.length ? tableOf([
+        { label: "source", key: "source" },
+        { label: "decision", render: (x) => h("span", { class: `badge s-${x.fail_open ? "warning" : x.decision === "keep" ? "good" : "neutral"}` }, x.fail_open ? "kept (fail-open)" : x.decision) },
+        { label: "label", wrap: true, render: (x) => ext(x.url, clip(x.label, 160)) }, { label: "error", wrap: true, render: (x) => clip(x.error, 200) },
+      ], onlySource ? d.title_gate.decisions.filter((x) => x.source === onlySource) : d.title_gate.decisions) : null] : null,
+    d.stored_total ? [h("h2", {}, `Items first stored by this run (${d.stored_total}${d.stored_total > d.stored.length ? `, showing ${d.stored.length}` : ""})`), tableOf([
+      { label: "source", key: "source_slug" }, { label: "v", key: "version", num: true },
+      { label: "title", wrap: true, render: (x) => ext(x.url, x.title || x.url) },
+      { label: "published", render: (x) => fmtTime(x.published_at) },
+      { label: "date from", render: (x) => h("span", { class: `chip ${x.date_source === "lastmod" ? "warn" : ""}` }, x.date_source || "none") },
+    ], onlySource ? d.stored.filter((x) => x.source_slug === onlySource) : d.stored,
+      onlySource ? `None from ${onlySource} among those shown.` : undefined)] : null,
+  );
+}
+
+// ── bodies ──────────────────────────────────────────────────────────────
+async function viewBodies() {
+  const d = await api("/api/bodies", { days: state.days });
+  const bySource = {};
+  for (const q of d.queue) {
+    const row = bySource[q.source_slug] || (bySource[q.source_slug] = { source_slug: q.source_slug, max_attempts: 0 });
+    row[q.status] = q.n;
+    if (["pending", "failed"].includes(q.status)) { row.max_attempts = Math.max(row.max_attempts, q.max_attempts || 0); row.oldest_seen = q.oldest_seen; }
+  }
+  return h("div", {},
+    h("h1", {}, "Bodies"),
+    h("div", { class: "sub" }, "The body queue, what each attempt returned, and what was retired as unavailable."),
+    monitoringBanner(d.monitoring),
+    d.attempts_by_day.length ? [h("h2", {}, "Attempts per day"), tableOf([
+      { label: "day", key: "day" }, { label: "ok", key: "ok", num: true }, { label: "failed", key: "failed", num: true },
+      { label: "unavailable", key: "unavailable", num: true }, { label: "no response", key: "transport", num: true },
+      { label: "not counted (outage rule)", key: "uncounted", num: true },
+    ], d.attempts_by_day.slice().reverse())] : null,
+    h("h2", {}, "Queue by source"),
+    tableOf([
+      { label: "source", render: (r) => h("a", { href: `#source/news/${r.source_slug}` }, r.source_slug) },
+      { label: "pending", num: true, render: (r) => r.pending ? h("span", { class: "chip warn" }, r.pending) : "0" },
+      { label: "retryable", num: true, render: (r) => r.failed ? h("span", { class: "chip warn" }, r.failed) : "0" },
+      { label: "unavailable", num: true, render: (r) => n0(r.unavailable || 0) }, { label: "ok", num: true, render: (r) => n0(r.ok || 0) },
+      { label: "max attempts waiting", key: "max_attempts", num: true },
+      { label: "oldest waiting item first seen", render: (r) => r.oldest_seen ? `${fmtTime(r.oldest_seen)} (${age(r.oldest_seen)})` : "—" },
+    ], Object.values(bySource)),
+    h("h2", {}, `Waiting (${d.waiting.length})`),
+    tableOf([
+      { label: "source", key: "source_slug" }, { label: "status", render: (x) => statusBadge(x.status) }, { label: "attempts", key: "attempts", num: true },
+      { label: "last attempt", render: (x) => fmtTime(x.attempted_at) }, { label: "url", wrap: true, render: (x) => ext(x.external_id) },
+      { label: "error", wrap: true, render: (x) => clip(x.error, 240) },
+    ], d.waiting, "Nothing waiting."),
+    h("h2", {}, `Retired as unavailable in range (${d.retired.length})`),
+    tableOf([
+      { label: "when", render: (x) => fmtTime(x.attempted_at) }, { label: "source", key: "source_slug" }, { label: "attempts", key: "attempts", num: true },
+      { label: "url", wrap: true, render: (x) => ext(x.external_id) }, { label: "error", wrap: true, render: (x) => clip(x.error, 240) },
+    ], d.retired),
+    (d.recent_failures || []).length ? [h("h2", {}, "Recent failed attempts"), tableOf([
+      { label: "at", render: (x) => fmtTime(x.at, true) }, { label: "run", render: (x) => h("a", { href: `#run/${x.run_id}` }, `#${x.run_id}`) },
+      { label: "source", key: "source_slug" }, { label: "result", render: (x) => statusBadge(x.status) },
+      { label: "counted", render: (x) => x.counted ? "yes" : h("span", { class: "chip warn" }, "no") },
+      { label: "url", wrap: true, render: (x) => ext(x.external_id) }, { label: "error", wrap: true, render: (x) => clip(x.error, 240) },
+    ], d.recent_failures)] : null,
+    h("h2", {}, "Body fetch runs"),
+    tableOf([
+      { label: "run", render: (r) => h("a", { href: `#run/${r.id}` }, `#${r.id}`) }, { label: "kind", key: "kind" },
+      { label: "status", render: (r) => statusBadge(r.status) }, { label: "started", render: (r) => fmtTime(r.started_at) },
+      { label: "took", num: true, render: (r) => duration(r.started_at, r.finished_at) }, { label: "note", key: "note", wrap: true },
+    ], d.runs.slice().reverse()),
+  );
+}
+
+// ── funnel ──────────────────────────────────────────────────────────────
+async function viewFunnel() {
+  const d = await api("/api/funnel", { days: state.days });
+  const v = (row, key) => row[key] || 0;
+  return h("div", {},
+    h("h1", {}, "Funnel"),
+    h("div", { class: "sub" }, "Per Berlin day: what was collected, what each gate kept, and whether alerts went out. Title-gate figures come from the JSONL decision logs."),
+    tableOf([
+      { label: "day", key: "day" },
+      { label: "news new", num: true, render: (r) => v(r, "news_new") }, { label: "news versions", num: true, render: (r) => v(r, "news_versions") },
+      { label: "regulatory new", num: true, render: (r) => v(r, "regulatory_new") }, { label: "structured new", num: true, render: (r) => v(r, "structured_new") },
+      { label: "title gate keep / drop", num: true, render: (r) => `${v(r, "title_gate_keep")} / ${v(r, "title_gate_drop")}` },
+      { label: "fail-open", num: true, render: (r) => v(r, "title_gate_fail_open") ? h("span", { class: "chip warn" }, v(r, "title_gate_fail_open")) : "0" },
+      { label: "bodies ok / failed / unav.", num: true, render: (r) => ["bodies_ok", "bodies_failed", "bodies_unavailable"].some((k) => k in r)
+        ? `${v(r, "bodies_ok")} / ${v(r, "bodies_failed")} / ${v(r, "bodies_unavailable")}` : h("span", { class: "muted", tip: "no body attempts recorded (body_attempt starts with migration 007)" }, "—") },
+      { label: "body gate rel / unsure / irr", num: true, render: (r) => `${v(r, "body_gate_relevant")} / ${v(r, "body_gate_unsure")} / ${v(r, "body_gate_irrelevant")}` },
+      { label: "body gate fail-open", num: true, render: (r) => v(r, "body_gate_fail_open") ? h("span", { class: "chip warn" }, v(r, "body_gate_fail_open")) : "0" },
+      { label: "alerts decided / potential / sent", num: true, render: (r) => `${v(r, "alert_decided")} / ${v(r, "alert_potential")} / ${v(r, "alert_sent")}` },
+    ], d.by_day),
+    h("h2", {}, "News runs and their title gate"),
+    tableOf([
+      { label: "run", render: (r) => h("a", { href: `#run/${r.id}` }, `#${r.id}`) }, { label: "started", render: (r) => fmtTime(r.started_at) },
+      { label: "status", render: (r) => statusBadge(r.status) }, { label: "stored", key: "stored", num: true },
+      { label: "gate keep", num: true, render: (r) => n0(r.title_gate.keep || 0) }, { label: "drop", num: true, render: (r) => n0(r.title_gate.drop || 0) },
+      { label: "fail-open", num: true, render: (r) => r.title_gate.fail_open ? h("span", { class: "chip warn" }, r.title_gate.fail_open) : "0" },
+      { label: "", render: (r) => r.stored && !Object.keys(r.title_gate).length ? h("span", { class: "muted", tip: "Normal when nothing new matched the keyword selector; check the gate log if the run stored a lot." }, "no gate decisions") : "" },
+    ], d.news_runs),
+    h("h2", {}, `Potential alerts not sent (${d.unsent_alerts.length})`),
+    tableOf([
+      { label: "id", key: "id", num: true }, { label: "decided", render: (x) => fmtTime(x.created_at) }, { label: "source", key: "source_slug" },
+      { label: "title", wrap: true, render: (x) => ext(x.url, x.title || x.url) }, { label: "summary", wrap: true, key: "summary_zh" },
+    ], d.unsent_alerts, "None."),
+  );
+}
+
+// ── logs ────────────────────────────────────────────────────────────────
+async function viewLogs(date, name) {
+  const list = await api("/api/logs", date ? { date } : {});
+  const day = list.date;
+  const logView = h("div", {});
+  const wrap = h("div", {},
+    h("h1", {}, "Logs"),
+    h("div", { class: "split" },
+      h("div", {},
+        h("select", { onchange: (ev) => { location.hash = `#logs/${ev.target.value}`; } },
+          list.dates.map((x) => { const o = h("option", { value: x }, x); if (x === day) o.selected = true; return o; })),
+        h("div", { class: "list card", style: "margin-top:8px;padding:4px" }, list.files.map((f) =>
+          h("a", { href: `#logs/${day}/${f.name}`, class: f.name === name ? "on" : null, tip: `${bytes(f.bytes)} · modified ${fmtTime(f.modified, true)}` }, f.name)))),
+      logView));
+  if (!name) {
+    logView.append(h("div", { class: "muted" }, day ? "Pick a file. run_daily.txt and run_intraday.txt hold every stage of the day's passes." : "No log directories."));
+    return wrap;
+  }
+  const d = await api("/api/log", { date: day, name });
+  const lines = d.text.split(/\r?\n/);
+  const pre = h("pre", { class: "log" });
+  const filter = h("input", { type: "text", placeholder: "filter lines", style: "min-width:260px" });
+  const onlyProblems = h("input", { type: "checkbox" });
+  const draw = () => {
+    const needle = filter.value.toLowerCase();
+    pre.replaceChildren(...lines.filter((line) => {
+      if (needle && !line.toLowerCase().includes(needle)) return false;
+      return !onlyProblems.checked || /WARNING|ERROR|Traceback|FAILED|exit=[1-9]/.test(line);
+    }).map((line) => h("div", { class: /ERROR|Traceback|FAILED|exit=[2-9]/.test(line) ? "e" : /WARNING|exit=1/.test(line) ? "w" : /^(-{4,}|={4,})/.test(line) ? "h" : null }, line || " ")));
+  };
+  filter.addEventListener("input", draw);
+  onlyProblems.addEventListener("change", draw);
+  draw();
+  logView.append(
+    h("div", { class: "row", style: "margin-bottom:8px" }, filter, h("label", {}, onlyProblems, " warnings and errors only"),
+      h("span", { class: "muted" }, `${bytes(d.bytes)}${d.truncated ? " · showing the last 3 MB" : ""}`),
+      h("button", { type: "button", onclick: () => { pre.scrollTop = pre.scrollHeight; } }, "Jump to end")),
+    pre);
+  return wrap;
+}
+
+// ── router ──────────────────────────────────────────────────────────────
+async function render() {
+  const hash = decodeURIComponent(location.hash.replace(/^#/, "")) || "overview";
+  const [route, ...rest] = hash.split("/");
+  document.querySelectorAll("#nav a").forEach((a) => a.classList.toggle("on",
+    a.dataset.r === route || (a.dataset.r === "sources" && ["source", "run"].includes(route)) || (a.dataset.r === "overview" && route === "pass")));
+  const main = $("#view");
+  const scroll = window.scrollY;
+  const isRefresh = render.last === hash;
+  render.last = hash;
+  // A slow view finishing after a newer one must not replace it.
+  const seq = render.seq = (render.seq || 0) + 1;
+  if (!isRefresh) main.replaceChildren(h("div", { class: "loading" }, "Loading…"));
+  try {
+    let view;
+    if (route === "sources") view = await viewSources(rest[0]);
+    else if (route === "source") view = await viewSource(rest[0], rest.slice(1).join("/"));
+    else if (route === "run") view = await viewRun(rest[0], rest[1]);
+    else if (route === "pass") view = await viewPass(rest.join("/"));
+    else if (route === "bodies") view = await viewBodies();
+    else if (route === "funnel") view = await viewFunnel();
+    else if (route === "logs") view = await viewLogs(rest[0], rest[1]);
+    else view = await viewOverview();
+    if (seq !== render.seq) return;
+    main.replaceChildren(view);
+    document.title = `${route} · brandmonitor monitor`;
+    if (isRefresh) window.scrollTo(0, scroll); else window.scrollTo(0, 0);
+    $("#updated").textContent = `updated ${fmtTime(new Date().toISOString(), true)}`;
+  } catch (error) {
+    if (seq !== render.seq) return;
+    main.replaceChildren(h("div", { class: "banner error" }, `Could not load: ${error.message}`));
+  }
+}
+
+$("#days").value = String(state.days);
+$("#days").addEventListener("change", (ev) => { state.days = Number(ev.target.value); store.set("days", ev.target.value); render.last = null; render(); });
+$("#refresh").addEventListener("click", () => render());
+$("#auto").checked = store.get("auto", "0") === "1";
+$("#auto").addEventListener("change", (ev) => store.set("auto", ev.target.checked ? "1" : "0"));
+setInterval(() => { if ($("#auto").checked && !document.hidden) render(); }, 60000);
+window.addEventListener("hashchange", () => render());
+render();
+</script>
+</body>
+</html>

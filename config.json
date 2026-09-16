@@ -68,6 +68,10 @@
     "warn_total_mb": 1024,
     "state_dirs": ["reports", "title_gate"]
   },
+  "monitoring": {
+    "_comment": "Operational monitoring tables (src/monitoring.py, migration 007): pipeline_pass, discovery_source, fetch_event, body_attempt. Rows older than retention_days are pruned once a day when the daily pass is recorded - a rolling window for spotting problems early, not an archive. Runs, run_source and the corpus are never pruned by this.",
+    "retention_days": 30
+  },
   "verbose": {
     "crawler": false
   }

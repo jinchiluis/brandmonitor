@@ -217,6 +217,58 @@ def test_an_offline_intraday_slot_says_there_is_nothing_to_do():
     assert any("nothing to do" in detail for detail in status.details)
 
 
+def lost_network_payload(*, finished: datetime) -> str:
+    """The marker after a run that started online and failed the check afterwards.
+
+    Modelled on 2026-09-16: news collection completed normally, DNS stopped
+    resolving five seconds later, and every stage after it failed on its own
+    first request.
+    """
+    return json.dumps({
+        "finished_utc": finished.isoformat().replace("+00:00", "Z"),
+        "worst_exit": 4,
+        "cycle_date": "2026-09-16",
+        "stages": {"netcheck": 4, "news": 0, "title_gate": 0, "title_bodies": 1,
+                   "safety_gate": 2, "dip": 1, "ep_procedures": 2, "backup": 0},
+        "log": "data/log/2026-09-16/run_daily.txt",
+    })
+
+
+def test_a_run_that_lost_the_network_names_one_cause_not_four():
+    probe = Probe(parse_marker(lost_network_payload(finished=NOW - timedelta(hours=6))))
+
+    status = evaluate(probe, checked_at=NOW, stale_after=timedelta(hours=26))
+
+    assert status.kind == "offline_during_run"
+    assert status.alert
+    assert "lost the network" in status.title
+    detail = " ".join(status.details)
+    assert "safety_gate=2" in detail and "dip=1" in detail
+    assert "netcheck" not in status.details[1], "netcheck is the diagnosis, not a casualty"
+    assert "network failure rather than" in detail
+
+
+def test_a_skipped_run_and_a_lost_network_are_different_alerts():
+    """Both exit 4; only the stage list separates them."""
+    skipped = evaluate(Probe(parse_marker(offline_payload(finished=NOW - timedelta(hours=2)))),
+                       checked_at=NOW, stale_after=timedelta(hours=26))
+    lost = evaluate(Probe(parse_marker(lost_network_payload(finished=NOW - timedelta(hours=2)))),
+                    checked_at=NOW, stale_after=timedelta(hours=26))
+
+    assert skipped.kind != lost.kind
+    assert notification_action(lost, {"notified_kind": skipped.kind}) == "alert"
+
+
+def test_a_clean_run_records_netcheck_without_raising_the_worst_exit():
+    payload = json.loads(marker_payload(finished=NOW - timedelta(hours=2)))
+    payload["stages"]["netcheck"] = 0
+
+    status = evaluate(Probe(parse_marker(json.dumps(payload))),
+                      checked_at=NOW, stale_after=timedelta(hours=26))
+
+    assert status.kind == "healthy"
+
+
 def test_offline_and_run_failed_latch_separately():
     """An outage during an ongoing incident is news, not a repeat of it."""
     offline = HealthStatus("offline", "offline", (), True)

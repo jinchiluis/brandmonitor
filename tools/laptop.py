@@ -17,10 +17,15 @@ beside it) the same commands run locally.
     python tools/laptop.py py scratch/query.py      # script runs in the laptop's repo, venv, cwd
     python tools/laptop.py ps "Get-ScheduledTaskInfo -TaskName brandmonitor-daily"
     python tools/laptop.py status                   # deployed commit, tasks, run markers
+    python tools/laptop.py admin                    # the read-only monitor, tunnelled here
 
 ``sql`` opens the database read-only (``mode=ro`` and ``query_only``), so it is
 safe while the pipeline runs. ``py`` and ``ps`` are not restricted: they are for
 inspection, and anything that writes still needs the owner's confirmation.
+
+``admin`` starts ``tools/admin.py`` on the laptop, bound to its loopback address,
+and forwards the port over the same SSH session: nothing listens on the network,
+no firewall rule is needed, and the server exits when the session ends.
 """
 
 from __future__ import annotations
@@ -29,6 +34,8 @@ import argparse
 import base64
 import subprocess
 import sys
+import threading
+import webbrowser
 from pathlib import Path
 
 HOST = "100.80.13.120"
@@ -121,6 +128,34 @@ def run_powershell(source: str) -> int:
                            "-l", USER, HOST, ps]).returncode
 
 
+def run_admin(port: int, open_browser: bool) -> int:
+    """Serve the read-only monitor from the laptop's data and show it here."""
+    url = f"http://127.0.0.1:{port}/"
+    if ON_LAPTOP:
+        command = [sys.executable, str(LOCAL_ROOT / "tools" / "admin.py"), "--port", str(port)]
+    else:
+        # The server binds the laptop's loopback; -L carries it over this session, and
+        # --exit-on-stdin-eof ends it when the session does.
+        remote = (f"{REMOTE_PYTHON} {REMOTE_ROOT}\\tools\\admin.py --port {port} "
+                  f"--exit-on-stdin-eof")
+        command = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15",
+                   "-o", "ExitOnForwardFailure=yes", "-L", f"{port}:127.0.0.1:{port}",
+                   "-l", USER, HOST, remote]
+    print(f"monitor: {url}  (Ctrl+C to stop)", flush=True)
+    if open_browser:
+        timer = threading.Timer(4.0, webbrowser.open, (url,))
+        timer.daemon = True
+        timer.start()
+    # A pipe of our own, never written: the remote stdin then stays open exactly as
+    # long as this ssh process lives, whatever this script's own stdin is.
+    process = subprocess.Popen(command, stdin=subprocess.PIPE)
+    try:
+        return process.wait()
+    except KeyboardInterrupt:
+        process.terminate()
+        return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding="utf-8")
@@ -141,7 +176,14 @@ def main(argv: list[str] | None = None) -> int:
 
     commands.add_parser("status", help="deployed commit, scheduled tasks, run markers, lock")
 
+    admin = commands.add_parser("admin", help="open the read-only monitor (tools/admin.py) "
+                                              "from the laptop's data")
+    admin.add_argument("--port", type=int, default=8765)
+    admin.add_argument("--no-browser", action="store_true", help="only print the URL")
+
     args = parser.parse_args(argv)
+    if args.command == "admin":
+        return run_admin(args.port, not args.no_browser)
     if args.command == "sql":
         query = sys.stdin.read() if args.query == "-" else args.query
         return run_python(SQL_TEMPLATE.format(sql=query, as_json=args.json,

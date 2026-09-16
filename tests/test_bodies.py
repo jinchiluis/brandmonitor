@@ -792,6 +792,43 @@ def test_one_dead_host_alone_cannot_trip_the_breaker(project, monkeypatch):
     assert summary["attempted"] == 12 and summary["stopped"] is None
 
 
+def test_switching_a_source_off_stops_its_queued_retries(tmp_path, monkeypatch):
+    """zeit.de kept being fetched for a day after every method was set to false.
+
+    discovery_enabled gates the keeps that create tasks; tasks created before the
+    switch survive in body_fetch, and nine passes a day kept requesting a
+    publisher that was already answering 403. The rows stay - they are skipped,
+    not deleted - so re-enabling the source resumes them.
+    """
+    db = tmp_path / "test.sqlite3"
+    migrate(db)
+    sources = tmp_path / "sources.json"
+
+    def write_sources(sitemap: bool):
+        sources.write_text(json.dumps([
+            {"url": "https://trade.test/", "organization": "Trade",
+             "content_mode": "full_text", "sitemap": sitemap},
+        ]), encoding="utf-8")
+
+    write_sources(True)
+    project = (db, sources)
+    discover(project)
+    monkeypatch.setattr("src.bodies.fetch_body",
+                        lambda url: BodyResult("failed", error="HTTPError: 403"))
+    assert run(project)["attempted"] == 1
+
+    write_sources(False)
+    assert run(project)["attempted"] == 0, "a disabled source must not be requested"
+
+    with session(db) as conn:
+        task = conn.execute("SELECT status, attempts FROM body_fetch").fetchone()
+    assert (task["status"], task["attempts"]) == ("failed", 1), "queue kept, not spent"
+
+    write_sources(True)
+    monkeypatch.setattr("src.bodies.fetch_body", lambda url: success())
+    assert run(project)["ok"] == 1, "re-enabling resumes the same queue"
+
+
 def test_a_changed_hint_reopens_a_retired_url_with_a_fresh_budget(project, monkeypatch):
     monkeypatch.setattr("src.bodies.BODY_FETCH_MAX_ATTEMPTS", 2)
     discover(project)

@@ -56,6 +56,11 @@ def index(*children: str) -> bytes:
 
 EMPTY = urlset()
 
+# Undated items pass the feed window whatever the clock says.
+FEED = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>X</title>
+  <item><title>Feed Title</title><link>https://x.de/feed-item</link></item>
+</channel></rss>"""
+
 
 class Server:
     """Stands in for the network under every requests adapter.
@@ -359,6 +364,61 @@ class TestSourceStatus:
 
         assert summary["per_source"][0]["status"] == "ok"
         assert [url for url, _status in srv.log] == ["https://x.de/news.xml"]
+
+    def test_pinned_feeds_send_no_homepage_probe(self, server, tmp_path):
+        """tagesschau downloaded its 1.58 MB homepage every pass to reach two pinned feeds."""
+        srv = server({"https://x.de/rss": FEED})
+        db, source_file = self.project(tmp_path, [], sitemap=False, feeds=True,
+                                       feed_urls=["https://x.de/rss"])
+        summary = run_collection(source_file, db_path=db, workers=1)
+
+        assert summary["per_source"][0]["status"] == "ok"
+        assert [url for url, _status in srv.log] == ["https://x.de/rss"]
+
+    def test_pinned_sitemaps_and_feeds_send_only_those_files(self, server, tmp_path):
+        srv = server({"https://x.de/news.xml": urlset("https://x.de/a"),
+                      "https://x.de/rss": FEED})
+        db, source_file = self.project(tmp_path, ["https://x.de/news.xml"], feeds=True,
+                                       feed_urls=["https://x.de/rss"])
+        summary = run_collection(source_file, db_path=db, workers=1)
+
+        assert summary["per_source"][0]["status"] == "ok"
+        assert sorted(url for url, _status in srv.log) == [
+            "https://x.de/news.xml", "https://x.de/rss"]
+
+    def test_feed_autodiscovery_still_probes_the_homepage(self, server, tmp_path):
+        """Without feed_urls the feeds are found from the homepage, so its host matters."""
+        srv = server({})
+        db, source_file = self.project(tmp_path, [], sitemap=False, feeds=True)
+        run_collection(source_file, db_path=db, workers=1)
+
+        # Only the probe tries the www twin.
+        assert "https://www.x.de/" in [url for url, _status in srv.log]
+
+    def test_a_paused_source_sends_nothing_and_holds_its_watermark(self, server, tmp_path):
+        """zeit.de's homepage was still probed daily after every method was switched off."""
+        srv = server({"https://x.de/news.xml": urlset("https://x.de/a")})
+        db = tmp_path / "test.sqlite3"
+        migrate(db)
+        source_file = tmp_path / "sources.json"
+        source_file.write_text(json.dumps([
+            entry(sitemap_urls=["https://x.de/news.xml"]),
+            entry(url="https://paused.de/", sitemap=False, feeds=False, frontpage=False,
+                  sitemap_urls=["https://paused.de/news.xml"]),
+        ]), encoding="utf-8")
+        summary = run_collection(source_file, db_path=db, workers=1)
+        rows = {row["slug"]: row for row in summary["per_source"]}
+
+        assert [url for url, _status in srv.log] == ["https://x.de/news.xml"]
+        assert (rows["paused.de"]["status"], rows["x.de"]["status"]) == ("paused", "ok")
+        assert (summary["paused"], summary["failed"]) == (1, 0)
+        with session(db) as conn:
+            recorded = conn.execute("SELECT status FROM run_source "
+                                    "WHERE source_slug = 'paused.de'").fetchone()[0]
+            mark = get_watermark(conn, source_watermark_scope("news", "paused.de"))
+        assert recorded == "paused"
+        # Re-enabling resumes from where the pause began.
+        assert mark == rows["paused.de"]["start"]
 
     def test_an_unpinned_source_still_walks_its_index(self, monkeypatch, tmp_path):
         """The walker is demoted, not removed: a source without pins is unchanged."""

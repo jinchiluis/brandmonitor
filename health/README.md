@@ -18,6 +18,12 @@ itself failed.
 
 ## Laptop observations
 
+**Deployment checked 2026-09-16:** the laptop and VPS still run `9cb3ea4`.
+The canary disable described below is in the newer checkout; the last production
+snapshot still contains ten active checks. Intraday is disabled in Task Scheduler.
+The launch work and temporary independent coverage review are in
+[crawl_tasks.md](../crawl_tasks.md), C5.
+
 `health/canary.py` checks small independent publisher routes - a news sitemap, an
 RSS feed - by validating the XML, rejecting common access-challenge pages, and
 comparing the ten newest eligible URLs with `raw_item`. Configuration lives in
@@ -48,9 +54,20 @@ periods counted back from the latest run's window end, so the 06:00 run and any
 intraday runs before it form one day however many there were. The sum is
 `items_stored`, not `items_found`: a front page lists the same links on every run,
 so a summed "found" would scale with the run count. Rules stay in `learning` until
-seven comparable prior days exist; a day containing a failed run, or whose runs
+seven comparable prior weekdays exist; weekend buckets are excluded from the
+baseline, zero streak and yield-drop pair. A day containing a failed run, or whose runs
 span more than 36 hours (initial backfills, recovery windows), does not train the
-baseline.
+baseline. A source whose discovery methods are all switched off is recorded as
+`paused`: it raises no incident, a paused day neither trains the baseline nor
+counts as a zero day, and it does not hold the verdict at `learning`.
+
+The analyzer currently includes configured DIP and EP collectors, but not Safety
+Gate, which has no collector entry in the source list. Yield warnings also require
+a learned median of at least two; a broken source can learn a low baseline.
+Body warnings cover repeated retryable failures, not queue age or technical errors
+retired as unavailable. These remaining gaps are recorded in `weaknesses.md`.
+Observers run only after the daily pass: the VPS's 15-minute polling does not
+refresh per-source coverage during intraday collection.
 
 Both observers retain the first immutable observation for each news run and
 atomically replace a latest pointer:

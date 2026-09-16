@@ -138,7 +138,8 @@ def finish_run(conn: sqlite3.Connection, run_id: int, status: str,
 def record_source_result(conn: sqlite3.Connection, run_id: int, source_slug: str,
                          status: str, items_found: int = 0, items_stored: int = 0,
                          error: Optional[str] = None) -> None:
-    """Record one source's outcome. 'zero' means looked and found nothing."""
+    """Record one source's outcome. 'zero' means looked and found nothing;
+    'paused' means the source list switched it off and nothing was sent."""
     conn.execute(
         "INSERT INTO run_source (run_id, source_slug, status, items_found, "
         "items_stored, error) VALUES (?, ?, ?, ?, ?, ?) "

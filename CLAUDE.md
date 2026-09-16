@@ -1,12 +1,15 @@
 # brandmonitor — Project Notes
 
 Monitoring for Chinese consumer brands sold in Germany, with Chinese-language
-deliverables. The repository is in MVP build-out: the news fetch stack is vendored,
-but the application pipeline is not built yet.
+deliverables. Collection, gating, internal alerts and the weekly report stack are
+built. Collection is scheduled on the primary laptop; launch validation and the
+remaining reliability work are tracked in `crawl_tasks.md`.
 
 ## Working documents
 
-- [mvp_plan.md](mvp_plan.md) is the implementation plan for the first customer cycle.
+- [mvp_plan.md](docs/Designs/mvp_plan.md) is the implementation plan for the first customer cycle.
+- [crawl_tasks.md](crawl_tasks.md) is the remaining crawl launch work and monitoring
+  plan; [weaknesses.md](weaknesses.md) records its evidence and unresolved findings.
 - [todo.md](todo.md) is the active backlog. Completed implementation history does
   not belong there.
 - [docs/source_coverage.md](docs/source_coverage.md) records what each configured
@@ -15,7 +18,8 @@ but the application pipeline is not built yet.
   storage/retry contract.
 - [docs/selection_and_assessment.md](docs/selection_and_assessment.md) records the
   durable client-selection rationale and planned assessment funnel.
-- [new_product_plan.md](new_product_plan.md) and [plan_v2.md](plan_v2.md) are idea
+- [new_product_plan.md](docs/Designs/new_product_plan.md) and
+  [plan_v2.md](docs/Designs/plan_v2.md) are idea
   archives. They contain useful research and possible later features, but they are
   not build specifications.
 
@@ -52,8 +56,10 @@ it to a customer.
 
 Take the publication date from the page itself: schema.org `datePublished`,
 `article:published_time` or a lone `<time datetime>` during body fetch, or
-`<news:publication_date>` from a news sitemap. Both survive a restamp; `lastmod`
-does not. Every stored row records which field supplied its date in
+`<news:publication_date>` from a news sitemap. These are publisher assertions of
+publication, not guarantees against restamping: the September 15 audit found news,
+feed and even page publication fields moving on updates (weaknesses.md W3/W9).
+Every stored row records which field supplied its date in
 `published_at_source` (`page`, `feed`, `news_sitemap`, `record`, `lastmod`,
 `frontpage`, or null); a report may print the first four and must never print
 `lastmod`. `record` is the date a structured record gives for its own event — a
@@ -74,7 +80,8 @@ sitemap source for this before trusting its dates: count distinct publication *d
 against row count, and check the lag between the busiest day and the fetch day. A
 high share on one day, well before the fetch, is a restamp rather than a busy day.
 
-Sources discovered by feed carry a real `<pubDate>` and are not exposed to this.
+Feed `<pubDate>` is preferable to sitemap `lastmod`, but some publishers rewrite
+it on updates too. Preserve its provenance and keep first-seen time distinct.
 
 The same rule applies to API sources under a different field name. In the DSA
 Transparency Database, `received_date` is when a platform *submitted*, not when it
@@ -135,6 +142,7 @@ python tools/laptop.py status                  # deployed commit, tasks, run mar
 python tools/laptop.py sql "SELECT ..."        # read-only; --json for untruncated rows
 python tools/laptop.py py path/to/script.py    # runs in the laptop repo with its venv
 python tools/laptop.py ps "Get-ScheduledTaskInfo -TaskName brandmonitor-daily"
+python tools/laptop.py admin                   # read-only monitor at http://127.0.0.1:8765/
 ```
 
 The live `.env` belongs on the laptop and is never committed. The VPS needs only the
@@ -149,6 +157,13 @@ An uncommitted local working tree is allowed but explicitly reported because tho
 changes cannot be part of the pushed deployment.
 
 ### Scheduled work
+
+**Deployment snapshot, 2026-09-16:** the laptop and health VPS run `9cb3ea4`;
+the reviewed checkout is `637603f`. Pinned discovery, ZEIT's discovery pause and
+the new outage handling below are not deployed yet. The daily task is enabled;
+the intraday task is disabled. Canaries are disabled in the checkout but were
+still active in the last production daily run. Check actual task settings and
+deployed revisions before relying on a documented capability.
 
 **Live since 2026-09-12.** `run_daily.bat` runs on the primary laptop under Task
 Scheduler as `brandmonitor-daily`, daily at 06:00 Europe/Berlin. Collection is
@@ -184,7 +199,8 @@ An `Interactive` principal runs only while that user is logged on, which is why 
 remote access above is part of the operating arrangement rather than a convenience.
 Running whether-logged-on-or-not requires storing a password.
 
-**Intraday news pass (optional).** `run_intraday.bat` repeats only the news path —
+**Intraday news pass (optional; paused as of 2026-09-16).** When enabled,
+`run_intraday.bat` repeats only the news path —
 collection, title gate, body fetch, news body gate, alert gate — every two hours
 from 08:00 to 22:00, so a potential alert reaches the reviewer the same day rather
 than after the next 06:00 run. 23:00–05:00 stays free for Windows updates and
@@ -195,7 +211,8 @@ intraday pass stopped. The two share `data/run.lock`: a slot that finds the lock
 held exits 3 and writes no marker. Its own marker is `data/last_intraday_run.json`,
 which `health/check.py` alerts on only when it failed after the latest daily run.
 
-No run re-covers another run's window, and every stage but one resumes on its own:
+Discovery checkpoints chain, with a 48-hour overlap in sitemap/feed filtering.
+Every stage but one has a resume mechanism:
 collection and the alert gate from watermarks, body fetch and body gate from their
 queues. The title gate judges only the latest news run, so a gate that exited 2 or
 crashed leaves that run unjudged for good. Transient API errors are not this case —
@@ -231,13 +248,14 @@ descriptions of one cause. `src/net.py` probes resolution *and* routing, because
 they fail independently and DNS-only failure is the mode a single ping calls
 healthy.
 
-There is deliberately no wait-and-retry loop: news collection runs nine times a
-day and every stage resumes from a watermark or a durable queue, so a skipped pass
-costs nothing — and a waiter would hold `data/run.lock` and make the next slot
-exit 3 instead of running. After an outage nothing needs repairing by hand, with
-one exception worth knowing: the intraday pass is news-only, so `regulatory`,
-`safety_gate`, `dip`, `ep_procedures`, `backup` and the observers wait for the
-next 06:00 unless `run_daily.bat` is re-run manually.
+There is deliberately no wait-and-retry loop. With intraday enabled, news has nine
+scheduled passes a day; during its current pause the next automatic attempt is
+the next daily run. Watermarks and queues retain unfinished work, but publisher
+feed/frontpage retention and fixed sitemap page ranges limit what can be recovered
+(weaknesses.md W21). After an outage, reconcile that coverage and any interrupted
+title-gate run. The intraday pass is news-only, so `regulatory`, `safety_gate`,
+`dip`, `ep_procedures`, `backup` and the observers wait for the next 06:00 unless
+`run_daily.bat` is re-run manually.
 
 An outage must also not retire the body queue. A connection-level failure before
 anything in a pass has been fetched is this host's network, not the page, so it
@@ -264,6 +282,34 @@ marker is older than 26 hours, any stage exited non-zero, or the coverage observ
 reports a warning/critical condition. It pushes to its own developer topic,
 `NTFY_HEALTH_TOPIC`, never the admins' alert `NTFY_TOPIC`. It never opens the database — see
 [health/README.md](health/README.md).
+
+**Operational monitoring tables** (`src/monitoring.py`, migration 007) record what
+the pipeline did so problems can be seen per pass, source and file rather than
+reconstructed from logs: `pipeline_pass` (every batch invocation, including offline
+and lock-skipped slots, with deployed commit and config hashes, written by
+`run.py record-pass` at each batch exit), `discovery_source` (per source per
+collection run: attempts versus responses, bytes, 304s, window, watermark before and
+after, drop counts), `fetch_event` (every discovery request, answered or not, with
+what each sitemap/feed file held and its newest/oldest entry date) and
+`body_attempt`. The contract is one-way: rows are written after the production
+commit in their own transaction, failures only log, and nothing in the pipeline
+reads them. Keep it that way — a monitoring change must never alter an outcome.
+Stage runs belong to the pass whose time span contains them. `PoliteAdapter.requests`
+counts responses only, so a request that got none exists only in `fetch_event`: on
+2026-09-16 at 06:00, 23 of 24 news sources logged `0 request(s)` and were stored
+as `zero`. The daily pass prunes these four tables to a rolling
+`monitoring.retention_days` (30) window; runs, `run_source` and the corpus are never
+pruned by it. Frontpage fetches that fall back to a headless browser bypass the
+adapter and are not recorded.
+
+`tools/admin.py` is the read-only monitor over all of this plus runs, the body queue,
+gate decisions, the title-gate JSONL, markers, the health verdict and logs: schedule
+strip, source × run heatmap (quiet `zero` versus unanswered `no response`), per-file
+request history, run detail, bodies, funnel, log viewer. Standard library only, no
+import from `src/`, database opened `mode=ro` + `query_only`, GET only, bound to
+127.0.0.1. `python tools/laptop.py admin` starts it on the laptop over SSH, forwards
+the port, and the server exits when that session ends — nothing listens on the
+network. Passes before migration 007 are derived from stage runs and marked so.
 
 `run_daily.bat` makes `backup` the last stage that touches the corpus, so the
 snapshot always carries the day's collection instead of yesterday's. Two read-only
@@ -432,16 +478,21 @@ A pinned file that **cannot be read** fails the source and holds its watermark: 
 404 or 5xx, a redirect to another host, markup where XML was promised, XML that
 will not parse, or a root element that is not `<urlset>`/`<sitemapindex>`. A
 pinned file that is **readable and empty** does not — that is a Sunday, and a rule
-failing on it would fire about a hundred times a year. When a pin expands to
-several URLs, the group fails only if none of them could be read, because the file
-for a month that has just begun may not exist yet. What pinning cannot see is a
-file that still parses but has quietly stopped carrying a section; the independent
-canaries in `health/canary.py` and `tools/rediscover.py` cover that, which is why
-a canary must not share the crawler's parser.
+failing on it would fire about a hundred times a year. In an expanded group,
+404/410 is tolerated if a sibling reads; other failures fail the source. That
+tolerance currently also excuses required older files, and the recover parser
+can accept partial XML; a leaf returning a sitemap index is accepted but its
+children are ignored. These open gaps are in weaknesses.md W19.
 
-`origin` skips the homepage probe for a pinned host. A source whose sitemaps are
-pinned and which enables neither `feeds` nor `frontpage` needs no homepage at all
-and is not probed.
+A file that still parses but has stopped carrying a section needs a coverage
+comparison. `tools/rediscover.py` compares a wider traversal using the production
+parser; it is not independent and currently omits traversal-cap reporting.
+`health/canary.py` has an independent parser but is disabled in the checkout.
+The temporary manual check and conditions for restoring it are in crawl_tasks.md C5.
+
+`origin` skips the homepage probe for a pinned host. Only `frontpage` and feed
+autodiscovery start from a homepage, so a source that enables neither — feeds off
+or pinned in `feed_urls` — is not probed; its configured host is the origin.
 
 Collection runs nine times a day, so a request that finds nothing is sent nine
 times a day. Once the probe has shown which feeds a source really has, write them

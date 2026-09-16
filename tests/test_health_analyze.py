@@ -46,7 +46,8 @@ def _add_window_run(db, start, end, stored, status="ok", found=None):
             items_found=stored if found is None else found, items_stored=stored,
             error="blocked" if status == "failed" else None,
         )
-        if status != "failed":
+        # Collection holds the watermark of a failed or paused source.
+        if status not in ("failed", "paused"):
             set_watermark(conn, "collection:news:news.test", end.isoformat())
         finish_run(conn, run_id, "failed" if status == "failed" else "ok")
         conn.execute(
@@ -175,6 +176,38 @@ def test_baseline_counts_stored_items_not_repeated_front_page_links(tmp_path):
 
     incident = next(item for item in result["incidents"] if item["check"] == "yield_drop")
     assert "stored [3, 3]; prior median was 40" in incident["message"]
+
+
+def test_a_paused_source_is_neither_an_incident_nor_still_learning(tmp_path):
+    """zeit.de switched off after a block: silence is the configuration, not the source."""
+    db = tmp_path / "db.sqlite3"
+    migrate(db)
+    for day in range(9):
+        _add_news_run(db, day, 20)
+    for day in (9, 10):
+        run_id = _add_news_run(db, day, 0, status="paused")
+
+    result = _analyze(tmp_path, db, run_id)
+
+    assert result["incidents"] == []
+    assert result["status"] == "healthy"
+    source = result["sources"][0]
+    assert source["latest_status"] == "paused"
+    assert source["recent_statuses"][-2:] == ["paused", "paused"]
+
+
+def test_paused_days_do_not_join_a_zero_streak_after_resuming(tmp_path):
+    db = tmp_path / "db.sqlite3"
+    migrate(db)
+    for day in range(9):
+        _add_news_run(db, day, 20)
+    _add_news_run(db, 9, 0, status="paused")
+    run_id = _add_news_run(db, 10, 0, status="zero")
+
+    result = _analyze(tmp_path, db, run_id)
+
+    assert result["sources"][0]["zero_streak"] == 1
+    assert not [item for item in result["incidents"] if item["check"] == "zero_streak"]
 
 
 def _weekday_source(db, days, zero_days=()):

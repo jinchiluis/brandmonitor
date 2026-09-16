@@ -364,6 +364,16 @@ def fetch_local_quality(path: Path) -> QualityProbe:
         return QualityProbe(None, str(exc), invalid_snapshot=True)
 
 
+def _only_netcheck(marker: Marker) -> bool:
+    """True when the preflight stopped the run before any real stage started."""
+    return set(marker.stages) == {"netcheck"}
+
+
+def _failed_stages(marker: Marker) -> str:
+    return ", ".join(f"{name}={code}" for name, code in marker.stages.items()
+                     if code and name != "netcheck")
+
+
 def evaluate(
     probe: Probe,
     *,
@@ -430,15 +440,35 @@ def evaluate(
             True,
         )
     if marker.worst_exit == OFFLINE_EXIT:
+        if _only_netcheck(marker):
+            return HealthStatus(
+                "offline",
+                "Daily run skipped: the laptop had no internet",
+                (
+                    f"Completed: {format_local(marker.finished_utc)}",
+                    "No stage ran, so no watermark moved and no retry budget was spent.",
+                    # Deliberately not "the next intraday slot": this checker cannot
+                    # see whether that task is enabled, and it was disabled on
+                    # 2026-09-16. Promising a recovery that never fires is worse
+                    # than naming the one pass that is always scheduled.
+                    "Collection resumes from each source's watermark on the next pass "
+                    "that runs. Regulatory collection, DIP, EP, backup and the observers "
+                    "run only in the daily pass - re-run run_daily.bat by hand if this "
+                    "cycle needs them before tomorrow.",
+                    f"Laptop log: {marker.log or '(not recorded)'}",
+                ),
+                True,
+            )
         return HealthStatus(
-            "offline",
-            "Daily run skipped: the laptop had no internet",
+            "offline_during_run",
+            "Daily run lost the network partway through",
             (
                 f"Completed: {format_local(marker.finished_utc)}",
-                "No stage ran, so no watermark moved and no retry budget was spent.",
-                "The news path recovers by itself at the next intraday slot. Regulatory "
-                "collection, DIP, EP, backup and the observers run only in the daily "
-                "pass - re-run run_daily.bat by hand to get them for this cycle.",
+                f"Stages that failed: {_failed_stages(marker) or '(none recorded)'}",
+                "netcheck passed before the run and failed after it, so these are one "
+                "network failure rather than that many sources breaking at once.",
+                "Whatever each stage had already stored is kept, and every stage resumes "
+                "from its own watermark or queue on the next pass.",
                 f"Laptop log: {marker.log or '(not recorded)'}",
             ),
             True,
@@ -509,12 +539,17 @@ def evaluate_intraday(probe: Probe | None, *, daily: Marker) -> HealthStatus | N
         # Worth saying once - a whole day of skipped slots is otherwise invisible,
         # because the VPS cannot reach the laptop while it is offline - but it
         # needs no action: the next slot resumes from the same watermarks.
+        lost = not _only_netcheck(marker)
         return HealthStatus(
             "intraday_offline",
-            "Intraday news pass skipped: the laptop had no internet",
+            ("Intraday news pass lost the network partway through" if lost else
+             "Intraday news pass skipped: the laptop had no internet"),
             (
                 f"Completed: {format_local(marker.finished_utc)}",
-                "No stage ran. The next slot resumes the same windows; nothing to do.",
+                (f"Stages that failed: {_failed_stages(marker)}; netcheck failed after "
+                 "the run, so they share one cause." if lost else
+                 "No stage ran."),
+                "The next slot resumes the same windows; nothing to do.",
                 f"Laptop log: {marker.log or '(not recorded)'}",
             ),
             True,

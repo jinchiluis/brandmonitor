@@ -52,6 +52,11 @@ set "OUT=%LOGDIR%\run_intraday.txt"
 echo.>> "%OUT%"
 echo ======== brandmonitor intraday %DATE% %TIME% ========>> "%OUT%"
 
+rem Monitoring only, as in run_daily.bat: every exit below records this slot with
+rem `run.py record-pass`, whose exit code is ignored.
+"%PY%" -c "import datetime;print(datetime.datetime.now(datetime.timezone.utc).isoformat()[:19])" > "%TMPVAL%" 2>nul
+set /p STARTED=<"%TMPVAL%"
+
 rem Preflight, for the reasons in run_daily.bat and src/net.py. This slot does not
 rem wait for the network: seven more follow it, and a waiter would hold the
 rem run lock, which would make the next one exit 3 instead of running.
@@ -77,11 +82,13 @@ if errorlevel 4 (
         echo }
     )
     move /y "!MARKER!.tmp" "!MARKER!" >nul
+    "%PY%" run.py record-pass --kind intraday --outcome offline --started "!STARTED!" --marker "!MARKER!" >> "%OUT%" 2>&1
     echo [brandmonitor] offline - intraday slot skipped  log: %OUT%
     exit /b 4
 )
 
 set "WORST=0"
+set "CODE_netcheck=0"
 set "CODE_news=2"
 set "CODE_title_gate=2"
 set "CODE_title_bodies=2"
@@ -96,7 +103,21 @@ rem slot is skipped without a marker, so the VPS keeps judging the last real run
     echo [brandmonitor] another run holds data\run.lock - intraday slot skipped
     >> "%OUT%" echo [intraday] %TIME% skipped: another run holds data\run.lock
     del "%TMPVAL%" "%TMPVAL%.err" 2>nul
+    rem Still no marker, but a monitoring row: a skipped slot is otherwise
+    rem indistinguishable from one that never fired.
+    "%PY%" run.py record-pass --kind intraday --outcome lock_skipped --started "!STARTED!" >> "%OUT%" 2>&1
     exit /b 3
+)
+
+rem Ask again when anything failed - see run_daily.bat for why.
+if !WORST! GTR 0 (
+    echo.>> "%OUT%"
+    echo -------- netcheck ^(after a non-zero run^) -------->> "%OUT%"
+    "%PY%" run.py netcheck >> "%OUT%" 2>&1
+    if errorlevel 4 (
+        set "CODE_netcheck=4"
+        set "WORST=4"
+    )
 )
 
 "%PY%" -c "import datetime;print(datetime.datetime.now(datetime.timezone.utc).isoformat()[:19])" > "%TMPVAL%" 2>nul
@@ -110,11 +131,12 @@ set "MARKER=%~dp0data\last_intraday_run.json"
     echo   "finished_utc": "!FINISHED!Z",
     echo   "worst_exit": !WORST!,
     echo   "cycle_date": "%DAY%",
-    echo   "stages": { "news": !CODE_news!, "title_gate": !CODE_title_gate!, "title_bodies": !CODE_title_bodies!, "body_gate": !CODE_body_gate!, "alert_gate": !CODE_alert_gate! },
+    echo   "stages": { "netcheck": !CODE_netcheck!, "news": !CODE_news!, "title_gate": !CODE_title_gate!, "title_bodies": !CODE_title_bodies!, "body_gate": !CODE_body_gate!, "alert_gate": !CODE_alert_gate! },
     echo   "log": "data/log/%DAY%/run_intraday.txt"
     echo }
 )
 move /y "%MARKER%.tmp" "%MARKER%" >nul
+"%PY%" run.py record-pass --kind intraday --outcome completed --started "!STARTED!" --marker "%MARKER%" >> "%OUT%" 2>&1
 
 echo [brandmonitor] intraday done, worst exit=!WORST!  log: %OUT%
 exit /b %WORST%

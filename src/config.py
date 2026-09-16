@@ -98,5 +98,9 @@ BACKUP_WARN_TOTAL_MB = _BACKUP.get("warn_total_mb", 1024)
 # (data/), not the repo root - see src/backup.py.
 BACKUP_STATE_DIRS = _BACKUP.get("state_dirs", ["reports", "title_gate"])
 
+# -- operational monitoring (src/monitoring.py) --
+# A rolling window over the monitoring tables only; see config.json.
+MONITORING_RETENTION_DAYS = _CFG.get("monitoring", {}).get("retention_days", 30)
+
 # -- verbose --
 CRAWLER_VERBOSE = _CFG.get("verbose", {}).get("crawler", False)

@@ -895,21 +895,24 @@ main obstacle.
 
 ## Pinned sitemaps — measured 2026-09-16
 
-Every news source with a sitemap now names the files that carry its articles in
-`sitemap_urls`, and collection no longer walks any index. The pins were chosen from
-a probe of all 24 sources over a 3-day window, counting for each file the URLs that
+Every enabled news source with a sitemap now names its article files in
+`sitemap_urls`. Collection no longer walks whole index trees; `{LATEST}` still
+reads its configured index to resolve the newest numbered files. The pins were
+chosen from a probe of all 24 sources over a 3-day window, counting the URLs that
 survive `allowed_dirs`, the source's exclusion rules, furniture and malformed
 filtering — not from what a site looks like it should have.
 
 | | Full walk | Pinned | |
 |---|---|---|---|
-| Requests | 471 (warm cache) | **80** | cold cache, so the warm figure is lower |
+| Requests | 471 (warm cache) | **80** | cold-cache probe; sustained warm total not measured here |
 | Bytes | 180 MB (warm) / 229 MB (cold) | **35.6 MB** | |
 | Files read | 471 | 46 | |
 
-Nine passes a day, so this is roughly 3,500 fewer requests and 1.3 GB less traffic
-daily. The request count is the number that matters: zeit.de blocked us for request
-volume on 2026-09-15, and no amount of caching reduces a request count.
+At nine passes a day this would save roughly 3,500 requests and 1.3 GB daily.
+**Deployment checked 2026-09-16:** the laptop still runs `9cb3ea4`, before pinning,
+and intraday is disabled. These are probe measurements and projected savings,
+not observed daily production totals. The request count matters: zeit.de blocked
+us for request volume on 2026-09-15, and conditional GET still sends a request.
 
 ### Per source
 
@@ -938,12 +941,39 @@ is how many carry `<news:publication_date>` rather than only `<lastmod>`.
 
 Not pinned, and why: **sueddeutsche.de** and **bpex-ev.de** are frontpage-only;
 **tagesschau.de**, **t3n.de** and **einzelhandel.de** are feed-only; **bvl.de** is
-disabled (its 5,323 URLs share one regenerated `lastmod`); **zeit.de** is blocked.
+disabled (its 5,323 URLs share one regenerated `lastmod`). **zeit.de** is pinned
+but still paused (`"sitemap": false`), see below.
+
+### zeit.de: one file per day of `lastmod`
+
+Measured 2026-09-16 in six requests through the Bright Data ISP proxy in headful
+Chrome, because `gsitemaps/index.xml` answers this network with a 403 block page
+since the 2026-09-15 block. `robots.txt` declares only that index. It lists 7,674
+children: months from 1946, half-months 2000–2007, and one file per day from
+2008-01-01, `index.xml?date=YYYY-MM-DD&unit=days&period=1`, which is the pin.
+
+| Day file | URLs | size | `<lastmod>` range (UTC) | `news:publication_date` | titles |
+|---|---|---|---|---|---|
+| 2026-09-15 | 418 | 232 KB | 00:08–23:30 | 0 | 0 |
+| 2026-09-16, read 12:20 UTC | 270 | 151 KB | 00:00–12:19 | 0 | 0 |
+
+The day is the **UTC day of the last modification**, not of publication: the two
+files share no URL, and the 16th carries a 2025-10 Gaza liveblog and a 2026-05 Iran
+liveblog that were edited that morning. Nothing is lost by this — an edited article
+moves forward into a file the window still reads — but every sitemap row is dated
+`lastmod`, as all 1,321 provenance-recorded rows from the old walk already were.
+Only ZEIT's feed supplied publisher dates (`feed`, 336 rows) and titles. A pinned
+read over 09-15 06:00 → 09-16 14:30 Berlin requested exactly those two files and
+kept 614 URLs after exclusions, furniture and malformed filtering. A daily pass with
+the 48-hour overlap reads three or four files, roughly 0.2 MB each.
+
+`robots.txt` also states that automated access without ZEIT's permission is
+prohibited and names `crawl-request@zeit.de`.
 
 ### Three files that were carrying index pages, not articles
 
 `weaknesses.md` suspected these and the probe's sample URLs confirm all three. They
-are dropped from the pins, which also removes them from the corpus:
+are dropped from future pinned discovery; existing stored rows are not deleted:
 
 - **bgl-ev.de `category-sitemap.xml`** — `/category/archiv/2026-archiv/`,
   `/category/bgl-presse/verband/`. Category listings. `is_furniture` does not catch
@@ -982,8 +1012,8 @@ articles and the number counts backwards**:
 | 30 | 41 | 0 | 2026-09-01 04:12 | 2026-09-01 14:19 |
 
 Pinned with `{LATEST}` it fetched pages 27–30 and returned nothing while reading a
-23,635-child index every pass. `{PAGE}` with `"pages": [1, 6]` names the low range
-directly, needs no index, and is one group — so pages that do not exist yet on the
+23,635-child index every pass. `{PAGE}` with `"pages": [1, 9]` names the current low
+range directly, needs no index, and is one group — so pages that do not exist yet on the
 1st of a month are logged rather than fatal. Ask of any paged sitemap which end is
 new before pinning it.
 
@@ -991,9 +1021,17 @@ new before pinning it.
 
 Pinning trades a rediscovery per pass for a standing bet, and its failure mode is a
 file that still returns 200 and valid XML but has quietly stopped carrying a
-section. `tools/rediscover.py` walks each pinned source's whole tree and diffs it
-against what the pins return, naming the file behind anything missed. Run it
-monthly, and after any publisher redesign.
+section. `tools/rediscover.py` compares a wider traversal with the pins, naming the
+file behind differences. It uses the production parser and does not currently
+report a traversal stopped at a cap; a no-difference result is not proof of a
+complete walk or of storage/gating. See weaknesses.md W22.
+
+Monthly rediscovery is a maintenance target, not sufficient launch monitoring
+while independent canaries are paused. Use the budgeted source comparisons in
+`crawl_tasks.md` C5 during validation and after publisher changes. The three-day
+measurement below does not validate seven-/thirty-day recovery, chunk rollover,
+or a month boundary. Fixed page ranges and finite feeds need a per-source recovery
+route (W21).
 
 **Baseline run, 2026-09-16, all 17 pinned sources over 3 days.** It found two real
 gaps and confirmed the rest:

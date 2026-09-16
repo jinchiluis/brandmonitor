@@ -34,6 +34,7 @@ from src.db import (
 )
 from src.logger import get_logger
 from src.discovery import PinnedSitemapError, collect_from_pinned, has_pins
+from src.monitoring import FetchRecorder, record_discovery
 from src.polite_http import (DiscoveryCache, PoliteAdapter, load_discovery_cache,
                              save_discovery_cache)
 from vendor.newscrawler.crawler import (
@@ -209,6 +210,17 @@ def discovery_enabled(entry: Dict[str, Any]) -> bool:
     return any(entry.get(method) is True for method in DISCOVERY_METHODS)
 
 
+def needs_homepage(entry: Dict[str, Any]) -> bool:
+    """Whether an enabled discovery method starts from the source's homepage.
+
+    Only frontpage scraping and feed autodiscovery do, with its guesses at
+    ``COMMON_FEED_PATHS``. ``feed_urls`` and pinned sitemaps are absolute, and the
+    sitemap walker starts from the configured URL.
+    """
+    return bool(entry.get("frontpage")) or (bool(entry.get("feeds"))
+                                            and not entry.get("feed_urls"))
+
+
 def collector_entry(name: str, sources_path: Optional[Path] = None) -> Dict[str, Any]:
     """The regulatory source entry stored by the collector called ``name``."""
     path = Path(sources_path) if sources_path else DEFAULT_REGULATORY_SOURCES
@@ -326,8 +338,10 @@ def collect_source(entry: Dict[str, Any], start: datetime,
     since = start - overlap
     hints: List[ArticleHint] = []
     errors: List[str] = []
-    adapter = PoliteAdapter()
-    cache = DiscoveryCache(cache_rows or {}, since)
+    # Observes every request and file for src/monitoring.py; decides nothing.
+    recorder = FetchRecorder(since)
+    adapter = PoliteAdapter(recorder=recorder)
+    cache = DiscoveryCache(cache_rows or {}, since, recorder=recorder)
     session_html = requests.Session()
     session_html.headers.update(HTML_HEADERS)
     sm = requests.Session()
@@ -340,14 +354,20 @@ def collect_source(entry: Dict[str, Any], start: datetime,
         if http is not None:
             http.update(requests=adapter.requests, not_modified=adapter.not_modified,
                         replayed=cache.replayed, bytes=adapter.bytes,
-                        cache_updates=cache.updates)
+                        cache_updates=cache.updates, throttles=adapter.throttles,
+                        recorder=recorder)
 
-    # Only feeds and the frontpage need a homepage: pinned sitemap URLs are
-    # absolute and answer for themselves. Probing anyway cost a request per source
-    # per pass for nothing, nine times a day.
+    # The probe GETs the configured host and its www twin and keeps the first that
+    # answers, which only a method that starts from the homepage can use. Anywhere
+    # else the configured host is the origin: tagesschau, whose feeds are pinned,
+    # downloaded its 1.58 MB homepage every pass to learn the host its entry names.
+    # A fallback would also hurt there, because collect_from_feeds finds feed_urls
+    # by host and bare tagesschau.de does not match www.tagesschau.de.
     origin = (entry.get("origin") or "").rstrip("/") or None
-    if origin is None and not (has_pins(entry) and not entry.get("feeds")
-                               and not entry.get("frontpage")):
+    if origin is None and not needs_homepage(entry):
+        configured = urlparse(entry["url"])
+        origin = f"{configured.scheme or 'https'}://{configured.netloc}"
+    if origin is None:
         try:
             origin = pick_accessible_origin(session_html, entry["url"])
         except Exception as exc:
@@ -403,6 +423,8 @@ def collect_source(entry: Dict[str, Any], start: datetime,
     if len(kept) < len(unique):
         logger.info("[collect] %s: dropped %d URL(s) by source exclusion policy",
                     slug_for(entry), len(unique) - len(kept))
+    if http is not None:
+        http["excluded"] = len(unique) - len(kept)
     return kept, "; ".join(errors) if errors else None
 
 
@@ -531,6 +553,7 @@ def run_collection(sources_path: Optional[Path] = None, *, days: Optional[float]
                     slug, start.isoformat(), mark, start - checkpoint)
             plans.append({"entry": entry, "slug": slug, "start": start,
                           "scope": source_scope, "leaves_gap": leaves_gap,
+                          "mark": mark,
                           "cache_rows": load_discovery_cache(conn, slug)})
 
         earliest = min(plan["start"] for plan in plans)
@@ -552,14 +575,35 @@ def run_collection(sources_path: Optional[Path] = None, *, days: Optional[float]
         return plan, hints, error, truncation, http
 
     summary = {"kind": kind, "sources": len(entries), "ok": 0, "zero": 0,
-               "failed": 0, "found": 0, "stored": 0,
+               "failed": 0, "paused": 0, "found": 0, "stored": 0,
                "start": earliest.isoformat(), "end": end_iso,
                "per_source": [], "run_id": run_id}
+
+    # A source with every discovery method off is paused, not quiet. It gets no
+    # request at all: collect_source's homepage probe kept reaching zeit.de every
+    # day after it had blocked us and its methods were switched off. Its watermark
+    # holds, so re-enabling it resumes from where the pause began, and the run
+    # records "paused" so health does not read the silence as a source gone dry.
+    active = []
+    with session(db_path) as conn:
+        for plan in plans:
+            if discovery_enabled(plan["entry"]):
+                active.append(plan)
+                continue
+            logger.info("[collect] %s is paused: every discovery method is off, "
+                        "no request sent", plan["slug"])
+            summary["paused"] += 1
+            summary["per_source"].append(
+                {"slug": plan["slug"], "organization": plan["entry"].get("organization"),
+                 "status": "paused", "found": 0, "stored": 0,
+                 "start": plan["start"].isoformat(), "watermark_advanced": False,
+                 "error": None, "http": {}})
+            record_source_result(conn, run_id, plan["slug"], "paused")
 
     # Commit each completed source immediately. Like the body queue, a stopped
     # process keeps completed work and the unfinished sources retain their marks.
     with ThreadPoolExecutor(max_workers=workers or CRAWLER_WORKERS) as ex:
-        futures = [ex.submit(work, plan) for plan in plans]
+        futures = [ex.submit(work, plan) for plan in active]
         for future in as_completed(futures):
             plan, hints, error, truncation, http = future.result()
             entry, slug = plan["entry"], plan["slug"]
@@ -601,6 +645,13 @@ def run_collection(sources_path: Optional[Path] = None, *, days: Optional[float]
                 record_source_result(conn, run_id, slug, status,
                                      items_found=len(hints), items_stored=stored,
                                      error=note)
+            # After the commit above and in its own transaction: monitoring
+            # describes this outcome and cannot change it.
+            record_discovery(db_path, run_id, slug, status=status,
+                             window_start=plan["start"].isoformat(), window_end=end_iso,
+                             watermark_scope=plan["scope"],
+                             watermark_before=plan.get("mark"), hints=hints,
+                             stored=stored, error=note, http=http)
 
     gaps = sum(1 for plan in plans if plan["leaves_gap"])
     with session(db_path) as conn:

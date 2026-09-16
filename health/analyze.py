@@ -36,7 +36,7 @@ DEFAULT_CANARY = ROOT / "data" / "health" / "canaries" / "latest.json"
 DEFAULT_OUTPUT = ROOT / "data" / "health"
 UTC = timezone.utc
 BERLIN = ZoneInfo("Europe/Berlin")
-RULES_VERSION = "coverage-health-v2"
+RULES_VERSION = "coverage-health-v3"
 SEVERITY_RANK = {"healthy": 0, "learning": 0, "warning": 1, "critical": 2}
 BASELINE_DAYS = 7
 BASELINE_MAX_DAYS = 28
@@ -108,6 +108,10 @@ def _daily_periods(rows: list[dict[str, Any]], anchor: datetime | None) -> list[
     A period is marked ``weekend`` when the Berlin day it covers is a Saturday or
     Sunday. Trade press publishes nothing then, so those periods are left out of
     the zero streak, the yield-drop pair and the baseline for every source.
+
+    A period in which every run found the source ``paused`` (all discovery methods
+    switched off in the source list) is neither zero nor comparable: nothing was
+    asked of the publisher, so it says nothing about what the publisher yields.
     """
     if anchor is None:
         return []
@@ -123,6 +127,7 @@ def _daily_periods(rows: list[dict[str, Any]], anchor: datetime | None) -> list[
         members = buckets[offset]
         starts = [_parse_time(row["window_start"]) for row in members]
         ends = [_parse_time(row["window_end"]) for row in members]
+        paused = all(row["status"] == "paused" for row in members)
         failed = any(row["status"] == "failed" for row in members)
         stored = sum(row["items_stored"] or 0 for row in members)
         span_ok = all(starts) and timedelta(0) <= max(ends) - min(starts) <= COMPARABLE_WINDOW
@@ -131,10 +136,11 @@ def _daily_periods(rows: list[dict[str, Any]], anchor: datetime | None) -> list[
         periods.append({
             "offset": offset,
             "weekend": covered.weekday() >= 5,
-            "status": "failed" if failed else ("ok" if stored else "zero"),
+            "status": ("paused" if paused else "failed" if failed
+                       else "ok" if stored else "zero"),
             "stored": stored,
             "runs": len(members),
-            "comparable": not failed and span_ok,
+            "comparable": not paused and not failed and span_ok,
         })
     return periods
 
@@ -229,7 +235,10 @@ def _source_metrics(
                         if period["offset"] != 0][-BASELINE_MAX_DAYS:]
             baseline_ready = len(previous) >= BASELINE_DAYS
             baseline = float(statistics.median(previous)) if baseline_ready else None
-            if not baseline_ready:
+            paused = current is not None and current["status"] == "paused"
+            # A paused source trains no baseline, so counting it would hold the
+            # whole verdict at "learning" for as long as the pause lasts.
+            if not baseline_ready and not paused:
                 learning += 1
 
             severity = "critical" if slug in critical_sources else "warning"
@@ -243,6 +252,10 @@ def _source_metrics(
                     slug, "missing_source_result", "critical",
                     f"source has no result in latest {kind} run {latest_run['id']}",
                 ))
+            elif paused:
+                # Switched off in the source list and sent nothing: expected
+                # silence, and its held watermark is deliberate.
+                pass
             elif current["status"] == "failed":
                 incidents.append(_incident(
                     slug, "source_failed", severity,

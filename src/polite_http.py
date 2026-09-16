@@ -54,12 +54,15 @@ class DiscoveryCache:
     ``updates`` for the caller to save; nothing here touches the database.
     """
 
-    def __init__(self, rows: Dict[str, Dict[str, Any]], since: datetime):
+    def __init__(self, rows: Dict[str, Dict[str, Any]], since: datetime,
+                 recorder: Any = None):
         self.rows = rows
         self.since = since
         self.updates: Dict[str, Dict[str, Any]] = {}
         self._validators: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
         self.replayed = 0
+        # src.monitoring.FetchRecorder: told what each file yielded, changes nothing.
+        self.recorder = recorder
 
     def headers(self, url: str) -> Dict[str, str]:
         row = self.rows.get(url)
@@ -78,6 +81,8 @@ class DiscoveryCache:
         entries = [(u, _dt(when), title, label)
                    for u, when, title, label in json.loads(row["entries"])]
         children = [(u, _dt(when)) for u, when in json.loads(row["children"])]
+        if self.recorder is not None:
+            self.recorder.file_read(url, "replayed", entries, children)
         return entries, children
 
     def seen(self, url: str, response: Any) -> None:
@@ -86,6 +91,8 @@ class DiscoveryCache:
                                  response.headers.get("Last-Modified"))
 
     def remember(self, url: str, entries: List[Entry], children: List[Child]) -> None:
+        if self.recorder is not None:
+            self.recorder.file_read(url, "parsed", entries, children)
         validators = self._validators.pop(url, None)
         # A file without validators is not worth a row, but one that has lost them
         # overwrites its old row, whose headers() then sends nothing.
@@ -142,7 +149,7 @@ class PoliteAdapter(HTTPAdapter):
 
     def __init__(self, *, max_throttles: int = 2, max_wait: float = 60.0,
                  default_wait: float = 10.0, sleep: Callable[[float], None] = time.sleep,
-                 **kwargs: Any):
+                 recorder: Any = None, **kwargs: Any):
         super().__init__(**kwargs)
         self.max_throttles = max_throttles
         self.max_wait = max_wait
@@ -153,15 +160,26 @@ class PoliteAdapter(HTTPAdapter):
         self.bytes = 0
         self.throttles = 0
         self.tripped: Optional[str] = None
+        # src.monitoring.FetchRecorder. ``requests`` counts responses only, so a
+        # request that never got one (DNS, refused, timeout) is visible only there.
+        self.recorder = recorder
 
     def send(self, request, **kwargs):
         if self.tripped:
             raise HostThrottled(self.tripped, request=request)
         while True:
-            response = super().send(request, **kwargs)
+            event = self.recorder.begin(request) if self.recorder is not None else None
+            try:
+                response = super().send(request, **kwargs)
+            except Exception as exc:
+                if self.recorder is not None:
+                    self.recorder.finish(event, error=exc)
+                raise
             self.requests += 1
             # Read here so the count covers every caller, including HEAD probes.
             self.bytes += len(response.content or b"")
+            if self.recorder is not None:
+                self.recorder.finish(event, response=response)
             if response.status_code == 304:
                 self.not_modified += 1
             if response.status_code not in THROTTLE_STATUSES:
