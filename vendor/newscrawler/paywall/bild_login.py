@@ -1,6 +1,6 @@
 """
 Bild.de login steps.
-Called by the paywall handler in scraper_fetch_html.py.
+Called by the paywall handler (handler.py).
 
 Single-page form: both email and password fields are visible at once.
 """

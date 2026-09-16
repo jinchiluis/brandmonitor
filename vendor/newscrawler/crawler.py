@@ -21,16 +21,14 @@ import time, random
 from datetime import datetime, timedelta, timezone
 
 from src.config import CRAWLER_VERBOSE as _VERBOSE
-from typing import Any, Iterable, List, Optional, Tuple, Dict, Set
-from urllib.parse import urljoin, urlparse, urlunparse, urlsplit, urlunsplit, parse_qsl, urlencode
+from typing import Any, List, Optional, Tuple, Dict, Set
+from urllib.parse import urljoin, urlparse, urlsplit, urlunsplit, parse_qsl, urlencode
 import tldextract
-import xml.etree.ElementTree as ET
 import requests
 from lxml import etree
 import feedparser
 from dateutil import parser as dateparser
-from .crawler_html_utils import (HostThrottled, enrich_dates_light, fetch_html,
-                                 fetch_title_fallback)
+from .crawler_html_utils import HostThrottled, fetch_html
 from .crawler_playwright import fetch_html_with_playwright
 from .source_loader import sources
 from src.logger import get_logger
@@ -106,30 +104,8 @@ class ArticleHint:
     # None when there is no date. Stored so a report can tell which dates it may print.
     date_source: Optional[str] = None
 
-@dataclasses.dataclass
-class ArticleRecord:
-    site: str
-    title: Optional[str]
-    url: str
-    published_at: Optional[str]  # ISO string
-    crawled_at: str  # ISO string
-
 
 # ------------------ Utilities ------------------
-
-def feature_allowed(url: str, feature: str) -> bool:
-    """
-    Check if a feature is allowed for a given URL.
-    Args:
-        url: The URL to check (will extract host)
-        feature: The feature to check (e.g., 'sitemap', 'feeds', 'gov', 'frontpage', 'brightdata')
-    Returns:
-        True if feature is allowed, False otherwise
-    """
-    rules = sources.get_site_rules(url)
-    if rules is None:
-        return True  # URL not in our sources → allow everything
-    return rules.get(feature, False)  # default to False if not specified
 
 def now_berlin() -> datetime:
     return datetime.now(tz=BERLIN_TZ)
@@ -1132,120 +1108,3 @@ def collect_from_frontpage(session, site_url, start_date=None, cap=80):
                     date_source="frontpage" if dt else None)
         for url, dt in selected_items
     ]
-
-def crawl_site(site_url: str, start: datetime, end: datetime, max_per_source: int = 5000) -> tuple[List[ArticleRecord], int]:
-
-    # Load blacklist URLs from config (cached, filtered to this specific source)
-    blacklist_urls = sources.load_blacklist(source_url=site_url)
-    if _VERBOSE: logger.info(f"[blacklist] loaded {len(blacklist_urls)} URLs for {domain_of(site_url)}")
-
-    # Check if brightdata should be used (once for entire crawl)
-    use_brightdata = sources.is_brightdata_enabled(site_url)
-
-    session = requests.Session()
-    session.headers.update(HTML_HEADERS) #real person header
-    origin = pick_accessible_origin(session, site_url)
-    session.headers["Referer"] = origin + "/"   # helps some WAFs
-    if _VERBOSE and origin.rstrip('/') != _origin(site_url).rstrip('/'): logger.info(f"[probe] using origin {origin}")
-
-    session_for_sm = requests.Session()
-    session_for_sm.headers.update(SITEMAP_HEADERS) #Sidemaps need simple robot headers
-
-    hints = []
-
-    # If Bright Data is enabled, use it exclusively (other methods will likely fail due to anti-bot protection)
-    if use_brightdata:
-        if _VERBOSE: logger.info("[brightdata] Expensive brightdata crawl for " + site_url)
-        hints += collect_from_frontpage(session, origin, start_date=start, cap=80)
-    else:
-        if feature_allowed(site_url, "sitemap"):
-            sitemap_hints = []
-            for attempt in range(3):  # Try up to 3 times
-                sitemap_hints = collect_from_sitemaps(session_for_sm, site_url, start, end, max_per_source=max_per_source)
-                if len(sitemap_hints) > 0:
-                    break
-            hints += sitemap_hints
-        if feature_allowed(site_url, "feeds"):
-            hints += collect_from_feeds(session, origin)
-        if feature_allowed(site_url, "frontpage"):
-            hints += collect_from_frontpage(session, origin, start_date=start, cap=300)
-
-    if _VERBOSE: logger.info(f"[hints] total={len(hints)}")
-
-    dated = [h for h in hints if h.published_at]
-    undated = [h for h in hints if not h.published_at]
-    undated_enriched = enrich_dates_light(session, undated, cap=300, workers=12, site_url=site_url, use_brightdata=use_brightdata)
-    candidate_hints = dated + undated_enriched
-
-    # then filter by date range
-    by_source = {"sitemap": 0, "rss": 0, "frontpage": 0}
-    filtered = []
-    for h in candidate_hints:
-        if h.published_at and in_range(h.published_at, start, end):
-            if by_source.get(h.source, 0) < max_per_source:
-                filtered.append(h)
-                by_source[h.source] = by_source.get(h.source, 0) + 1
-
-    if _VERBOSE: logger.info(f"[filter] kept={len(filtered)} by_source={by_source}")
-
-    seen: Set[str] = set()
-    uniq: List[ArticleHint] = []
-    for h in filtered:
-        u = normalize_url(h.url)
-        if u in seen:
-            continue
-        seen.add(u)
-        uniq.append(dataclasses.replace(h, url=u))
-
-    if _VERBOSE: logger.info(f"[dedup] uniq={len(uniq)}")
-
-    records: List[ArticleRecord] = []
-    fetch_title_count = 0
-    site = domain_of(site_url)
-    crawl_ts = now_berlin_iso()
-
-    ordered = sorted(uniq, key=lambda x: x.published_at or datetime.min.replace(tzinfo=BERLIN_TZ))
-
-    # News sitemaps only carry titles for ~48h; older entries come from the plain
-    # sitemaps with no title, so each must be fetched one-by-one (the slow part).
-    need_fetch = sum(1 for h in ordered
-                     if not h.title and normalize_url(h.url) not in blacklist_urls)
-    have_title = sum(1 for h in ordered if h.title)
-    if need_fetch:
-        logger.info(f"[{site}] {len(ordered)} articles in window — {have_title} already titled, "
-                    f"{need_fetch} need a page-open to read the title (fetching one-by-one)...")
-    else:
-        logger.info(f"[{site}] {len(ordered)} articles in window — all already titled, no fetching needed")
-
-    fetched_so_far = 0
-    for h in ordered:
-        rec = ArticleRecord(
-            site=site,
-            title=h.title,
-            url=h.url,
-            published_at=h.published_at.isoformat() if h.published_at else None,
-            crawled_at=crawl_ts,
-        )
-
-        # Check blacklist before fetching title
-        if normalize_url(rec.url) in blacklist_urls:
-            if _VERBOSE: logger.info(f"[blacklist] skipping {rec.url}")
-            continue
-
-        if not rec.title:
-            fetched_so_far += 1
-            if fetched_so_far == 1 or fetched_so_far % 50 == 0 or fetched_so_far == need_fetch:
-                logger.info(f"[{site}] fetching titles {fetched_so_far}/{need_fetch}...")
-            time.sleep(0.4)
-            rec.title = fetch_title_fallback(session, rec.url, use_brightdata=use_brightdata)
-            if rec.title:
-                fetch_title_count += 1
-
-        if rec.title: #It makes no sense to add records without title???? Not assessable?
-            if _VERBOSE: logger.info(f"[fetch] fetched {rec.url}")
-            records.append(rec)
-        else:
-            if _VERBOSE: logger.info(f"[fetch] No title, not fetched {rec.url}")
-
-    logger.info(f"[{site}] done — {len(records)} articles with titles ({fetch_title_count} fetched from page)")
-    return records, fetch_title_count

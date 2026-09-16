@@ -399,7 +399,7 @@ facts:
 
 brandmonitor's vendored crawler is the older lineage. It has no proxy support
 anywhere: not in
-[scraper_fetch_html.py](vendor/newscrawler/scraper_fetch_html.py), not in
+[crawler_html_utils.py](vendor/newscrawler/crawler_html_utils.py), not in
 [crawler_playwright.py](vendor/newscrawler/crawler_playwright.py) (whose
 signature is `(url, timeout_ms, use_cache)` against rewriter's
 `(url, timeout_ms, use_cache, proxy_cfg, proxy_name, url_guard)`), and not in
@@ -408,7 +408,7 @@ signature is `(url, timeout_ms, use_cache)` against rewriter's
 Its current Bright Data support is the *wrong shape* for this purpose:
 `fetch_html` short-circuits to the Unlocker API when a source carries
 `"brightdata": true`, and raises if that fails rather than falling back
-([scraper_fetch_html.py:263](vendor/newscrawler/scraper_fetch_html.py#L263)).
+([crawler_html_utils.py:203](vendor/newscrawler/crawler_html_utils.py#L203)).
 That is a per-source replacement. Emergency mode needs the opposite — an
 escalation rung reached on evidence, for sources that were never flagged.
 

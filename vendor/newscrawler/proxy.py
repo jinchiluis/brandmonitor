@@ -18,15 +18,13 @@
 #      Never on 401/402/404/410 - those are permanent and would cost up to
 #      HTTP_ATTEMPTS paid requests per dead URL on every retry.
 #   2. vendor/newscrawler/crawler_html_utils.fetch_html, before the Playwright
-#      fallback (frontpage sections, title fallback, date sniffing), with the
+#      fallback (frontpage sections), with the
 #      same status restriction. has_sufficient_content wants >=3 <p> and 300
 #      chars, which listing/section pages fail - skip that gate for them, or
 #      every proxied frontpage fetch is discarded after all attempts.
 #
 # Sitemaps (crawler.polite_get) and feeds (use_playwright_fallback=False) do not
 # pass through either place; add them only if the VPS test shows them refused.
-# vendor/newscrawler/scraper_fetch_html.py is not used by the pipeline - do not
-# hook it there.
 #
 # Credentials: BRD_PASS_ISP is read from os.environ, and the collect and body
 # processes do not call load_dotenv, so call load_dotenv(ROOT / ".env") before

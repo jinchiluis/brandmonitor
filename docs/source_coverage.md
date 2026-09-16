@@ -414,7 +414,7 @@ conventional. Verified working after the change: 30, 50 and 27 items respectivel
 
 **3. Its own collector.** EU Safety Gate is not articles — it is structured records
 with `product`, `brand`, `barcode`, `riskType`, `countryOfOrigin`, `onlineTrader`.
-Forcing it through `ArticleRecord` would discard exactly the fields that make it
+Forcing it through `ArticleHint` would discard exactly the fields that make it
 valuable. The same applies to the DSA API. This is what `vendor/govcrawler/` is for
 in the planned tree, and it matches the design rules: regulatory and reputation
 processing stay independent, and `mvp_plan.md` §4 already says the raw store holds

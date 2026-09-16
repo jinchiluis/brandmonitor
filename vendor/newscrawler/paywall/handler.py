@@ -1,5 +1,5 @@
 """
-Paywall handler — called from scraper_fetch_html.fetch_html().
+Paywall handler — called from src/bodies.py, the top rung of the body fetch ladder.
 
 Flow:
   1. get_paywall_cfg(url)  → returns config dict or None

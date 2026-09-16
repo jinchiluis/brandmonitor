@@ -34,9 +34,14 @@ paywall/paywalls.json
 paywall/{bild,manager_magazin,spiegel,welt,zeit}_login.py
 ```
 
-`crawler_brightdata.py` is included because `scraper_fetch_html.py` imports it and it
-may support social-platform collection. It is not the default path for website
-fetching on the laptop.
+The list records what was copied. Four of these files — `crawler_google_feeds.py`,
+`parallel_crawler.py`, `scraper.py` and `scraper_fetch_html.py` — were deleted on
+2026-09-16 as unreachable; see the dated entry below.
+
+`crawler_brightdata.py` is kept because `crawler_html_utils.fetch_html` imports it
+lazily when a source carries `"brightdata": true`, and it may support
+social-platform collection. No source sets that flag today, and it is not the
+default path for website fetching on the laptop.
 
 ### Excluded
 
@@ -196,7 +201,7 @@ an optional `report` dict and fills `cap` (`url_cap` or `fetch_cap`) and `note`
 when `max_per_source` dropped an in-window URL or left sitemaps unread, or when
 `max_sitemap_fetches` stopped it with sitemaps still queued. Both caps used to stop
 silently while the source reported ok. The return type is unchanged, so `probe.py`
-and `crawl_site` need nothing; `src/collect.py` stores the note as
+needs nothing; `src/collect.py` stores the note as
 `truncated: ...` in `run_source.error` with status still `ok` (crawl_tasks.md T5).
 
 **2026-09-15 — polite discovery: conditional requests, throttle stop, no guessing
@@ -236,6 +241,32 @@ body fetch (`src/bodies.py` uses neither function), the collection hook fired on
 404s and discarded listing pages, and the laptop's residential IP has no measured
 blocking problem. The module stays for VPS disaster recovery; its header says where
 to wire it and what to test first.
+
+**2026-09-16 — deleted the code no pipeline path reaches.** Four modules and one
+function subtree, about 1,780 lines, removed after tracing every import from
+`run.py`, `src/` and `health/`:
+
+- `crawler_google_feeds.py`, `parallel_crawler.py`, `scraper.py`,
+  `scraper_fetch_html.py`: nothing outside the deleted set imported any of them.
+- `crawler.crawl_site` and its subtree — `ArticleRecord`, `feature_allowed` — plus
+  the `crawler_html_utils` functions only it called: `fetch_title_fallback`,
+  `sniff_date`, `_fetch_sitemap_dates`, `enrich_dates_light`.
+
+`crawl_site` was the upstream entry point: point it at a URL and a date range and
+it discovers everything from scratch. That is the right shape for an ad-hoc crawl
+of an unknown site and the wrong one for a fixed source list swept nine times a
+day, which is what `src/collect.py` `collect_source` does instead — it calls
+`collect_from_sitemaps`, `collect_from_feeds` and `collect_from_frontpage`
+directly. Keeping the old entry point around made the vendored crawler look like
+a much larger thing to reason about than the ~415 lines of discovery the pipeline
+actually runs (crawl_tasks.md T10).
+
+Nothing live changed: 565 tests pass before and after. Stale references in
+`proxy.py`, `paywall/*_login.py`, `paywall/handler.py`, `src/probe.py`,
+`docs/body_collection.md` and `backup_plan.md` were repointed at the surviving
+code. `source_loader.load_blacklist` and `is_url_blacklisted` are now unreachable
+too — `crawl_site` was their only caller and `input/Blacklist/` does not exist —
+but they are left in place pending a decision on whether the blacklist returns.
 
 ## googlesearch
 

@@ -46,8 +46,8 @@ logger = get_logger(__name__)
 
 # An empty answer is often a throttle or a cold cache rather than an absent feature,
 # and writing "feeds": false for a site that has feeds is a silent loss of coverage.
-# crawl_site already retries sitemaps for this reason; the probe retries all three,
-# because its whole purpose is deciding whether a method works.
+# The probe retries all three methods, because its whole purpose is deciding
+# whether a method works.
 ATTEMPTS = 3
 RETRY_PAUSE_SECONDS = 3.0
 
@@ -208,7 +208,7 @@ def probe_site(
         ), cap=max_per_source),
         # Feeds return whatever the feed holds; the window filter is applied on report.
         _run_method("feeds", lambda: collect_from_feeds(session, origin)),
-        # Frontpage hints stay undated until a real crawl runs enrich_dates_light.
+        # Frontpage hints carry only a date read near the link, often none at all.
         _run_method("frontpage", lambda: collect_from_frontpage(
             session, origin, start_date=start, cap=frontpage_cap
         ), cap=frontpage_cap),

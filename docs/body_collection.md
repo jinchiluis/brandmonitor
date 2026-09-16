@@ -81,13 +81,14 @@ only one that sees the status code, content type and final URL, which is what
 classifies an outcome as `unavailable` (stop) rather than `failed` (retry) - the
 rungs above it receive markup and nothing else.
 
-The vendored `scraper_fetch_html.fetch_html` is deliberately **not** the entry
-point. It returns markup only, discarding the metadata that classification needs;
-it attempts a paywall login before anything else, which would launch a browser
-for every ZEIT, WELT and SPIEGEL URL whether or not a subscription exists; and it
-makes up to eight requests per URL before AMP variants, which would undo the
-per-host pacing. Its useful leaves - `fetch_html_with_playwright` and
-`paywall/handler.py` - are called directly by the rungs that need them.
+The vendored `scraper_fetch_html.fetch_html` was deliberately **not** the entry
+point, and was deleted on 2026-09-16 once that was settled. It returned markup
+only, discarding the metadata that classification needs; it attempted a paywall
+login before anything else, which would launch a browser for every ZEIT, WELT and
+SPIEGEL URL whether or not a subscription exists; and it made up to eight requests
+per URL before AMP variants, which would undo the per-host pacing. Its useful
+leaves - `fetch_html_with_playwright` and `paywall/handler.py` - survive and are
+called directly by the rungs that need them.
 
 PDF library: **pypdf** (BSD-3). pymupdf extracts better but is AGPL, which does
 not suit a commercial deliverable without a paid licence.
