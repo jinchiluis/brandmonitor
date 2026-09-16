@@ -25,7 +25,10 @@ inspection, and anything that writes still needs the owner's confirmation.
 
 ``admin`` starts ``tools/admin.py`` on the laptop, bound to its loopback address,
 and forwards the port over the same SSH session: nothing listens on the network,
-no firewall rule is needed, and the server exits when the session ends.
+no firewall rule is needed, and the server exits when the session ends. When the
+laptop's always-on ``brandmonitor-admin`` task is already serving, the session only
+forwards to it. From a tailnet device, https://desktop-paf96vp.tail33e56b.ts.net/
+needs neither.
 """
 
 from __future__ import annotations
@@ -132,7 +135,10 @@ def run_admin(port: int, open_browser: bool) -> int:
     """Serve the read-only monitor from the laptop's data and show it here."""
     url = f"http://127.0.0.1:{port}/"
     if ON_LAPTOP:
-        command = [sys.executable, str(LOCAL_ROOT / "tools" / "admin.py"), "--port", str(port)]
+        # --exit-on-stdin-eof: when the always-on server already holds the port,
+        # admin.py waits on our pipe instead of returning at once.
+        command = [sys.executable, str(LOCAL_ROOT / "tools" / "admin.py"), "--port", str(port),
+                   "--exit-on-stdin-eof"]
     else:
         # The server binds the laptop's loopback; -L carries it over this session, and
         # --exit-on-stdin-eof ends it when the session does.

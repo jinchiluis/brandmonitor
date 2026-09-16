@@ -18,7 +18,10 @@ checkout against any data directory.
     python tools/admin.py --data D:/copy/data    # a restored snapshot
 
 It binds to 127.0.0.1 by default, and there is no login: reach it through the SSH
-tunnel, not by binding a public address.
+tunnel or ``tailscale serve``, not by binding a public address. On the laptop the
+``brandmonitor-admin`` task keeps it running and ``tailscale serve`` publishes it to
+the tailnet only (CLAUDE.md, "Scheduled work"); a second start finds that server and
+uses it rather than binding the port again.
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ import argparse
 import json
 import os
 import re
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -794,8 +798,37 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def already_serving(host: str, port: int) -> bool:
+    """True when something accepts connections on the address already.
+
+    On the laptop the ``brandmonitor-admin`` task keeps a server running. Binding
+    again is not a clean failure on Windows, where SO_REUSEADDR lets a second
+    socket share the port and connections split between the two.
+    """
+    try:
+        with socket.create_connection((host, port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def wait_for_stdin_eof() -> None:
+    try:
+        while sys.stdin.read(1024):
+            pass
+    except (OSError, ValueError):
+        pass
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    if already_serving(args.host, args.port):
+        print(f"[admin] already serving http://{args.host}:{args.port}/ - using that server",
+              flush=True)
+        if args.exit_on_stdin_eof:
+            # Keep the session, and so its port forward, open until it ends.
+            wait_for_stdin_eof()
+        return 0
     store = Store(args.data.resolve(), args.inputs.resolve(), args.repo.resolve())
     server = ThreadingHTTPServer((args.host, args.port), make_handler(store))
     server.daemon_threads = True
@@ -803,11 +836,7 @@ def main(argv: Optional[List[str]] = None) -> int:
           flush=True)
     if args.exit_on_stdin_eof:
         def watch() -> None:
-            try:
-                while sys.stdin.read(1024):
-                    pass
-            except (OSError, ValueError):
-                pass
+            wait_for_stdin_eof()
             os._exit(0)
         threading.Thread(target=watch, daemon=True).start()
     try:

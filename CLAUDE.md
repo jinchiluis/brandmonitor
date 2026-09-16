@@ -307,9 +307,31 @@ gate decisions, the title-gate JSONL, markers, the health verdict and logs: sche
 strip, source × run heatmap (quiet `zero` versus unanswered `no response`), per-file
 request history, run detail, bodies, funnel, log viewer. Standard library only, no
 import from `src/`, database opened `mode=ro` + `query_only`, GET only, bound to
-127.0.0.1. `python tools/laptop.py admin` starts it on the laptop over SSH, forwards
-the port, and the server exits when that session ends — nothing listens on the
-network. Passes before migration 007 are derived from stage runs and marked so.
+127.0.0.1. Passes before migration 007 are derived from stage runs and marked so.
+
+On the laptop it is always on: the `brandmonitor-admin` task (S4U, so it runs
+without a logged-on user and without a console window) starts it at boot and
+retries every 10 minutes, and `tailscale serve --bg 8765` publishes that loopback
+port to the tailnet only, over HTTPS, at
+`https://desktop-paf96vp.tail33e56b.ts.net/`. The server still binds 127.0.0.1 and
+has no login, so never use `tailscale funnel` for it. Output goes to
+`data/log/admin.log`. `python tools/laptop.py admin` still works from any checkout:
+it forwards the port over SSH and uses the running server when there is one.
+
+```powershell
+$root = 'C:\apps\brandmonitor'
+$a = New-ScheduledTaskAction -Execute 'cmd.exe' -WorkingDirectory $root `
+       -Argument "/c `"$root\.venv\Scripts\python.exe tools\admin.py >> data\log\admin.log 2>&1`""
+$s = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+       -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+$again = New-ScheduledTaskTrigger -Daily -At 12am
+$again.Repetition = (New-ScheduledTaskTrigger -Once -At 12am `
+       -RepetitionInterval (New-TimeSpan -Minutes 10) -RepetitionDuration (New-TimeSpan -Days 1)).Repetition
+$p = New-ScheduledTaskPrincipal -UserId 'DELL Laptop' -LogonType S4U
+Register-ScheduledTask -TaskName 'brandmonitor-admin' -Action $a -Settings $s -Principal $p `
+  -Trigger (New-ScheduledTaskTrigger -AtStartup), $again
+tailscale serve --bg 8765        # once; persists across reboots. Undo: tailscale serve reset
+```
 
 `run_daily.bat` makes `backup` the last stage that touches the corpus, so the
 snapshot always carries the day's collection instead of yesterday's. Two read-only
