@@ -514,11 +514,23 @@ def api_source(store: Store, params: Dict[str, str]) -> dict:
             bodies["queue"] = {r["status"]: r["n"] for r in conn.execute(
                 "SELECT status, COUNT(*) n FROM body_fetch WHERE source_slug=? GROUP BY status", (slug,))}
             bodies["problems"] = store.rows(
-                conn, "SELECT external_id, status, attempts, attempted_at, error FROM body_fetch "
-                      "WHERE source_slug=? AND status != 'ok' ORDER BY attempted_at DESC LIMIT 40", slug)
+                conn, "SELECT external_id, status, attempts, attempted_at, error, "
+                      "(SELECT title FROM raw_item ri WHERE ri.source_slug=body_fetch.source_slug "
+                      "AND ri.external_id=body_fetch.external_id ORDER BY ri.version DESC LIMIT 1) AS title "
+                      "FROM body_fetch WHERE source_slug=? AND status != 'ok' "
+                      "ORDER BY attempted_at DESC LIMIT 40", slug)
+            bodies["ok"] = store.rows(
+                conn, "SELECT external_id, attempts, attempted_at, "
+                      "(SELECT title FROM raw_item ri WHERE ri.source_slug=body_fetch.source_slug "
+                      "AND ri.external_id=body_fetch.external_id ORDER BY ri.version DESC LIMIT 1) AS title "
+                      "FROM body_fetch WHERE source_slug=? AND status = 'ok' "
+                      "ORDER BY attempted_at DESC LIMIT 40", slug)
         if "body_attempt" in tables:
             bodies["attempts"] = store.rows(
-                conn, "SELECT * FROM body_attempt WHERE source_slug=? AND julianday(at) >= julianday(?) "
+                conn, "SELECT body_attempt.*, "
+                      "(SELECT title FROM raw_item ri WHERE ri.source_slug=body_attempt.source_slug "
+                      "AND ri.external_id=body_attempt.external_id ORDER BY ri.version DESC LIMIT 1) AS title "
+                      "FROM body_attempt WHERE source_slug=? AND julianday(at) >= julianday(?) "
                       "ORDER BY id DESC LIMIT 60", slug, since)
     decisions = [d for d in store.title_gate_decisions(cutoff.date()) if d.get("source") == slug]
     gate = Counter("fail_open" if d.get("fail_open") else d.get("decision") for d in decisions)
@@ -566,8 +578,12 @@ def api_run(store: Store, params: Dict[str, str]) -> dict:
         for source in sources:
             source["bad_requests"] = bad.get(source["source_slug"], 0)
             source["class"] = classify(source) if run["kind"] in ("news", "regulatory") else None
-        attempts = store.rows(conn, "SELECT * FROM body_attempt WHERE run_id=? ORDER BY id LIMIT 3000",
-                              run_id) if "body_attempt" in tables else []
+        attempts = store.rows(
+            conn, "SELECT body_attempt.*, "
+                  "(SELECT title FROM raw_item ri WHERE ri.source_slug=body_attempt.source_slug "
+                  "AND ri.external_id=body_attempt.external_id ORDER BY ri.version DESC LIMIT 1) AS title "
+                  "FROM body_attempt WHERE run_id=? ORDER BY id LIMIT 3000",
+            run_id) if "body_attempt" in tables else []
         stored = store.rows(conn, "SELECT id, source_slug, version, title, url, published_at, "
                                   "json_extract(payload, '$.published_at_source') AS date_source "
                                   "FROM raw_item WHERE first_run_id=? ORDER BY source_slug, id LIMIT 500",
@@ -599,12 +615,15 @@ def api_bodies(store: Store, params: Dict[str, str]) -> dict:
                            "FROM raw_item GROUP BY source_slug, external_id) first "
                            "ON first.source_slug=b.source_slug AND first.external_id=b.external_id "
                            "GROUP BY b.source_slug, b.status ORDER BY b.source_slug")
+        title_sub = ("(SELECT title FROM raw_item ri WHERE ri.source_slug=body_fetch.source_slug "
+                     "AND ri.external_id=body_fetch.external_id ORDER BY ri.version DESC LIMIT 1) AS title")
         retired = store.rows(conn,
-                             "SELECT source_slug, external_id, attempts, attempted_at, error FROM body_fetch "
+                             f"SELECT source_slug, external_id, attempts, attempted_at, error, {title_sub} "
+                             "FROM body_fetch "
                              "WHERE status='unavailable' AND julianday(attempted_at) >= julianday(?) "
                              "ORDER BY attempted_at DESC LIMIT 200", since)
         waiting = store.rows(conn,
-                             "SELECT source_slug, external_id, status, attempts, attempted_at, error "
+                             f"SELECT source_slug, external_id, status, attempts, attempted_at, error, {title_sub} "
                              "FROM body_fetch WHERE status IN ('pending', 'failed') "
                              "ORDER BY attempted_at IS NOT NULL, attempted_at LIMIT 200")
         by_day: Dict[str, Counter] = defaultdict(Counter)
@@ -616,8 +635,12 @@ def api_bodies(store: Store, params: Dict[str, str]) -> dict:
                 counter[row["status"]] += 1
                 counter["transport"] += row["transport"]
                 counter["uncounted"] += 0 if row["counted"] else 1
-            recent = store.rows(conn, "SELECT * FROM body_attempt WHERE status != 'ok' AND "
-                                      "julianday(at) >= julianday(?) ORDER BY id DESC LIMIT 150", since)
+            recent = store.rows(
+                conn, "SELECT body_attempt.*, "
+                      "(SELECT title FROM raw_item ri WHERE ri.source_slug=body_attempt.source_slug "
+                      "AND ri.external_id=body_attempt.external_id ORDER BY ri.version DESC LIMIT 1) AS title "
+                      "FROM body_attempt WHERE status != 'ok' AND "
+                      "julianday(at) >= julianday(?) ORDER BY id DESC LIMIT 150", since)
         runs = runs_since(conn, cutoff)
     return {"days": days, "queue": queue, "retired": retired, "waiting": waiting,
             "attempts_by_day": [{"day": day, **counts} for day, counts in sorted(by_day.items())],
