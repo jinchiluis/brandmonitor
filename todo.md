@@ -16,11 +16,9 @@ Authoritative references:
 
 ## Current state
 
-**Checked 2026-09-16:** production laptop and VPS run `9cb3ea4`; checkout
-`637603f` adds the not-yet-deployed sitemap pins and outage handling. Daily is
-enabled, intraday is paused. Canaries are disabled in the checkout but still ran
-in production's last daily cycle. See the crawl plan for deployment/recovery and
-the remaining failure cases; the old T1–T10 briefs are replaced by C1–C7.
+**Checked 2026-09-16:** daily is enabled, intraday is paused, canaries are off.
+See the crawl plan for recovery and the remaining failure cases; the old T1–T10
+briefs are replaced by C1–C7.
 
 Built and running daily: news and regulatory discovery, SQLite storage and
 versioning, the durable body queue, public/PDF/browser extraction, source path

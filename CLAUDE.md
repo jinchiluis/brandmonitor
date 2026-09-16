@@ -158,12 +158,9 @@ changes cannot be part of the pushed deployment.
 
 ### Scheduled work
 
-**Deployment snapshot, 2026-09-16:** the laptop and health VPS run `9cb3ea4`;
-the reviewed checkout is `637603f`. Pinned discovery, ZEIT's discovery pause and
-the new outage handling below are not deployed yet. The daily task is enabled;
-the intraday task is disabled. Canaries are disabled in the checkout but were
-still active in the last production daily run. Check actual task settings and
-deployed revisions before relying on a documented capability.
+**As of 2026-09-16** the daily task is enabled, the intraday task is disabled and
+the canaries are off. Check actual task settings with `python tools/laptop.py
+status` before relying on a documented capability.
 
 **Live since 2026-09-12.** `run_daily.bat` runs on the primary laptop under Task
 Scheduler as `brandmonitor-daily`, daily at 06:00 Europe/Berlin. Collection is
@@ -509,7 +506,7 @@ children are ignored. These open gaps are in weaknesses.md W19.
 A file that still parses but has stopped carrying a section needs a coverage
 comparison. `tools/rediscover.py` compares a wider traversal using the production
 parser; it is not independent and currently omits traversal-cap reporting.
-`health/canary.py` has an independent parser but is disabled in the checkout.
+`health/canary.py` has an independent parser but is disabled.
 The temporary manual check and conditions for restoring it are in crawl_tasks.md C5.
 
 `origin` skips the homepage probe for a pinned host. Only `frontpage` and feed

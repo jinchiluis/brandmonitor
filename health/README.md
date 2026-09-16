@@ -18,10 +18,8 @@ itself failed.
 
 ## Laptop observations
 
-**Deployment checked 2026-09-16:** the laptop and VPS still run `9cb3ea4`.
-The canary disable described below is in the newer checkout; the last production
-snapshot still contains ten active checks. Intraday is disabled in Task Scheduler.
-The launch work and temporary independent coverage review are in
+The canaries described below are disabled, and intraday is disabled in Task
+Scheduler. The launch work and temporary independent coverage review are in
 [crawl_tasks.md](../crawl_tasks.md), C5.
 
 `health/canary.py` checks small independent publisher routes - a news sitemap, an
@@ -61,8 +59,11 @@ baseline. A source whose discovery methods are all switched off is recorded as
 `paused`: it raises no incident, a paused day neither trains the baseline nor
 counts as a zero day, and it does not hold the verdict at `learning`.
 
-The analyzer currently includes configured DIP and EP collectors, but not Safety
-Gate, which has no collector entry in the source list. Yield warnings also require
+The analyzer includes the configured DIP and EP collectors and Safety Gate, which
+has no entry in either source list and is named in `UNLISTED_COLLECTORS`. Each is
+judged on failure and on its latest run being older than 48 hours. Safety Gate
+writes a run on every daily check, not only in a week with a new report, so a
+quiet week is not an absence. Yield warnings also require
 a learned median of at least two; a broken source can learn a low baseline.
 Body warnings cover repeated retryable failures, not queue age or technical errors
 retired as unavailable. These remaining gaps are recorded in `weaknesses.md`.

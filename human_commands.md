@@ -15,7 +15,5 @@ powershell -NoProfile
 Get-Content C:\apps\brandmonitor\data\log\2026-09-12\run_daily.txt -Wait -Tail 20
 
 # Human todos:
-- zeit with proxy probe
-- admin tool for logs
-- new run
 - paywall?
+- zeit can be retried (block gone, --exclude param there)

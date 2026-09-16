@@ -148,12 +148,25 @@ def _native_value(element: ET.Element) -> Any:
 
 
 def parse_report_detail(data: bytes | str, report: WeeklyReport) -> list[dict[str, Any]]:
-    """Parse one report, preserving every native notification field."""
+    """Parse one report, preserving every native notification field.
+
+    The document must be a report before its notifications are believed. A
+    well-formed ``<error>temporarily unavailable</error>`` has none either, and
+    reading it as an empty week would advance the watermark past a report that
+    was never seen. Every report checked on 2026-09-16, from 2005 to 2026, had a
+    ``Safety-Gate`` root and a ``report_date``; a week with no notifications
+    keeps both, so it is still accepted.
+    """
     root = _xml_root(data, report.reference)
+    if _tag(root) != "Safety-Gate":
+        raise SafetyGateError(
+            f"{report.reference}: expected a Safety-Gate report, got <{_tag(root)}>")
     root_values = {_tag(child): _text(child) for child in root
                    if _tag(child) != "notifications"}
     stated_date = root_values.get("report_date")
-    if stated_date and _parse_eu_date(stated_date) != report.publication_date:
+    if not stated_date:
+        raise SafetyGateError(f"{report.reference}: report has no report_date")
+    if _parse_eu_date(stated_date) != report.publication_date:
         raise SafetyGateError(
             f"{report.reference}: list date {report.publication_date} does not match "
             f"detail date {stated_date}"
@@ -317,6 +330,24 @@ def _choose_reports(reports: list[WeeklyReport], mark: Optional[str], *,
     return chosen, contiguous
 
 
+def _record_check(db_path: Optional[Path], status: str, note: str,
+                  error: Optional[str] = None) -> int:
+    """Store a check that fetched no report as a run of its own.
+
+    Safety Gate publishes once a week, so most daily checks find nothing new. A
+    check that left no row could not be told from one that never ran - the latest
+    stored run stayed at 2026-09-11 through five successful daily checks - and a
+    failed listing left no row either. The window is the day of the check, as for
+    the body and DIP-document queues; the note names the newest official report.
+    """
+    today = utcnow()[:10]
+    with session(db_path) as conn:
+        run_id = start_run(conn, SOURCE_KIND, today, today)
+        record_source_result(conn, run_id, SOURCE_SLUG, status, error=error)
+        finish_run(conn, run_id, "failed" if status == "failed" else "ok", note=note)
+    return run_id
+
+
 def run_safety_gate_collection(*, weeks: Optional[int] = None,
                                end: Optional[date] = None,
                                lookback_weeks: int = DEFAULT_LOOKBACK_WEEKS,
@@ -332,22 +363,33 @@ def run_safety_gate_collection(*, weeks: Optional[int] = None,
         raise ValueError("max_reports must be positive")
 
     api = client or SafetyGateClient()
-    reports = api.list_reports()
-    with session(db_path) as conn:
-        mark = get_watermark(conn, WATERMARK_SCOPE)
-    chosen, contiguous = _choose_reports(
-        reports, mark, weeks=weeks, end=end, lookback_weeks=lookback_weeks)
+    summary: dict[str, Any] = {
+        "kind": SOURCE_KIND, "source": SOURCE_SLUG, "reports": 0,
+        "reports_ok": 0, "reports_failed": 0, "found": 0, "stored": 0,
+        "failed_reports": [], "watermark_advanced": None, "aborted": None,
+    }
+    try:
+        reports = api.list_reports()
+        with session(db_path) as conn:
+            mark = get_watermark(conn, WATERMARK_SCOPE)
+        chosen, contiguous = _choose_reports(
+            reports, mark, weeks=weeks, end=end, lookback_weeks=lookback_weeks)
+    except SafetyGateError as exc:
+        logger.warning("[safety_gate] could not start: %s", exc)
+        summary["aborted"] = str(exc)
+        summary["run_id"] = _record_check(
+            db_path, "failed", f"could not start: {exc}", error=str(exc))
+        return summary
     if max_reports is not None:
         chosen = chosen[:max_reports]
+    summary["reports"] = len(chosen)
 
-    summary: dict[str, Any] = {
-        "kind": SOURCE_KIND, "source": SOURCE_SLUG, "reports": len(chosen),
-        "reports_ok": 0, "reports_failed": 0, "found": 0, "stored": 0,
-        "failed_reports": [], "watermark_advanced": None,
-    }
     if not chosen:
         summary["note"] = "up to date"
         summary["end"] = reports[-1].publication_date
+        summary["run_id"] = _record_check(
+            db_path, "zero",
+            f"up to date: official reports complete through {summary['end']}")
         return summary
 
     summary["start"] = chosen[0].publication_date

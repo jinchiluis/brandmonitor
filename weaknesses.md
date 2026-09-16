@@ -1,9 +1,9 @@
 # Open weaknesses and launch evidence
 
-Reviewed **2026-09-16** against checkout `637603f`, the existing uncommitted WELT
-`/deals` exclusion, production read-only SQL/logs/health snapshots, both deployed
-commits, Task Scheduler settings and the VPS notification state. No implementation,
-production writes, publisher crawl, deployment or notifications were performed.
+Reviewed **2026-09-16** against the code, production read-only SQL/logs/health
+snapshots, Task Scheduler settings and the VPS notification state. Re-checked the
+same evening: production runs the current main branch, and the discovery,
+rediscovery, canary and gate files that W18, W19, W21–W23 cite have not changed.
 
 The active action plan and monitoring thresholds are in
 [crawl_tasks.md](crawl_tasks.md). Completed fixes and their old implementation
@@ -14,24 +14,24 @@ current code, not the missing entries cited by the previous audit table.
 Evidence labels matter: **production** means observed stored state;
 **reproduced** means an offline mocked fault or disposable test database;
 **code review** means a reachable path, not a measured publisher incident.
-**366 existing focused tests passed**. The additional fault cases below demonstrate
-behaviour those tests do not currently reject.
+The fault cases below demonstrate behaviour the test suite does not currently
+reject.
 
-## Deployment and recovery are still open
+## Recovery is still open
 
-**Production:** laptop and VPS both run `9cb3ea4` (polite HTTP). The new pinned
-sitemaps, outage preflight/body transport protection and ZEIT discovery disable
-have not reached them. The daily task is enabled; the intraday task's
+**Production** runs the pinned sitemaps, the outage preflight and body transport
+protection, and the paused-source handling. Every pass records its commit and
+config hashes in `pipeline_pass`. The daily task is enabled; the intraday task's
 `Settings.Enabled` is **false**. A printed next trigger does not mean it will run.
-The new checkout disables canaries, while production's last daily snapshot still
-contains the ten checks added previously.
+Canaries are disabled.
 
 The 06:00 Berlin run on September 16 ended at 04:10:57 UTC with
 `worst_exit=2`: title bodies 1, Safety Gate 2, DIP 1, EP 2. News run 143 recorded
 23 zero sources and SZ as its only nonzero source; regulatory run 146 recorded
 all eight crawled sources as zero with no source error. DIP/EP errors identify DNS
-failure. The newer generic network preflight helps an outage already present at
-startup; it cannot prove every publisher is reachable or catch a later outage.
+failure. The manual re-run that afternoon finished with every stage at 0. The
+network preflight helps an outage already present at startup; it cannot prove
+every publisher is reachable or catch a later outage.
 
 DVZ, VerkehrsRundschau, Händlerbund and etailment have new first-version rows on
 September 15, so the old statement that they remain completely stuck is obsolete.
@@ -52,8 +52,8 @@ no pending rows. No latest news row lacks a body that an earlier version already
 held, so the old W2 hidden-body repair is no longer outstanding. Queue drainage
 does not establish that unavailable articles or pre-gate exclusions were acceptable.
 
-**Next:** C1 deployment/reconciliation and C7 recovery evidence. A code fix does
-not recover a listing that has already disappeared.
+**Next:** C1 reconciliation and C7 recovery evidence. A code fix does not recover
+a listing that has already disappeared.
 
 ## W18. Feed/frontpage failures and frontpage caps can still look complete
 
@@ -114,20 +114,16 @@ contributes eligible articles.
 article inventory, and test required versus optional missing files across the
 month boundary. Do not silently restore unrestricted recursive discovery.
 
-## W20. Disabled discovery is not a complete host pause; body traffic is separate
+## W20. Body requests ignore publisher throttling
 
 **Priority:** before resuming intraday or contacting ZEIT again.
-**Evidence:** reproduced and code review. Files: `src/collect.py`, `src/bodies.py`,
+**Evidence:** code review and production. Files: `src/bodies.py`,
 `src/polite_http.py`.
 
-- With every discovery flag false, `collect_source` still calls the origin probe.
-  Disabled entries remain in `crawled_entries`, so a pause can still contact the
-  homepage and is reported as an ordinary zero source.
-- T7 prevents new title-gate keeps from queuing disabled sources. It does **not**
-  prevent old queued work from running: the subsequent per-source body loop has
-  no disabled check. A disposable database containing one queued item for a
-  disabled source still called `fetch_body` once. This applies to the proposed
-  ZEIT pause even after its config is deployed.
+A paused source (every discovery method off) now sends no origin, discovery or
+body request, keeps its queue and holds its watermark (`test_discovery.py`,
+`test_bodies.py`). What remains is throttling:
+
 - `PoliteAdapter` belongs to one discovery pass. `_fetch_public` uses plain
   `requests.get`; browser/subscriber fetching is also outside that adapter.
   Body requests do not share discovery's throttle state or honour its
@@ -142,8 +138,7 @@ September 16 (403/read timeout). One Verbraucherzentrale item had already become
 unavailable after five 403 attempts. This establishes the terminal-error path;
 it does not prove that particular page will become fetchable later.
 
-**Needed:** C3. A pause must cover origin, discovery, old queues and body requests,
-without deleting them. Respect host cooldowns across stages/passes and distinguish
+**Needed:** C3. Respect host cooldowns across stages/passes and distinguish
 publisher access trouble from permanent article unavailability. Avoid an automatic
 bulk retry of unavailable bodies against a blocked publisher.
 
@@ -181,8 +176,8 @@ Preserve cheap routine collection; do not restore full-tree walks nine times dai
 snapshot and reproduced cap case. Files: `health/analyze.py`, `health/canaries.json`,
 `tools/rediscover.py`.
 
-The ten canaries exist, but `enabled: false` in the reviewed checkout means they
-will stop once deployed. The analyzer deliberately stops expecting their snapshot.
+The ten canaries exist but are disabled (`enabled: false`). The analyzer
+deliberately stops expecting their snapshot.
 The measured reason for the pause—unconditional traffic and configuration churn—
 remains valid; it also removes the only automated independent publisher comparison.
 
@@ -210,8 +205,7 @@ Current health also has operational blind spots: observers run only after the
 daily pass, partial intraday source failure may still exit 0, and the optional
 intraday marker has no freshness alarm. `_body_metrics` warns on retryable rows
 with at least three attempts, but that warning disappears when they retire to
-`unavailable`; there is no queue-age/retirement incident. Disabled sources remain
-ordinary zero sources in the learned baseline.
+`unavailable`; there is no queue-age/retirement incident.
 
 **Needed:** C5 and the monitoring table. Until a budgeted independent check is
 restored, explicitly own manual comparisons. A healthy threshold is a triage rule,
@@ -264,8 +258,9 @@ Also, a sweep advances its sweep watermark whenever `stopped is None`, even when
 individual details failed or isolated rate limits were skipped. An already-stored
 dormant procedure can wait until the next weekly sweep instead of retrying tomorrow.
 
-**Needed:** C6. Record partial/throttled work as incomplete and keep every failed
-procedure due. Preserve the legitimate unknown-procedure skip introduced by T3.
+**Status:** fixed by C6 on 2026-09-16. Throttled details are errors, so the run
+records `failed`; the sweep holds while any due procedure failed. Remove this
+entry once C6's production check passes.
 
 ## W25. Safety Gate can checkpoint an unexpected XML document as an empty report
 
@@ -287,9 +282,11 @@ up-to-date path and a listing failure also do not create a `run` row. Production
 latest stored Safety Gate run is September 11 even though later daily checks were
 attempted. Therefore simply adding a 48-hour run-age rule would create false alarms.
 
-**Needed:** C6. Validate document shape before advancing; distinguish a valid
-empty report from an unexpected payload. Record successful checks separately
-from new weekly publications and make partial failures visible to health.
+**Status:** fixed by C6 on 2026-09-16. The document
+root and `report_date` are required; every check writes a run (`zero` when up to
+date); the analyzer judges Safety Gate. A partial failure still exits 0 by the
+batch convention, but its run is `failed` and now raises a health warning. Remove
+this entry once C6's production check passes.
 
 ## Remaining quality and report decisions
 

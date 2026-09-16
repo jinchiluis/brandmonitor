@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -238,8 +238,38 @@ def test_repeated_rate_limiting_stops_the_run_and_holds_the_sweep(project):
     # Stopped at the third refusal rather than working through the whole list.
     assert len(client.calls) == 3
     assert s["fetched"] == 0 and s["swept"] is False
+    # Throttling is a failure the health observer must see, not a quiet day.
+    assert len(s["errors"]) == 3 and all("HTTP 429" in e for e in s["errors"])
     with session(db) as conn:
         assert get_watermark(conn, f"collection:regulatory:{SLUG}:sweep") is None
+        assert conn.execute("SELECT status FROM run").fetchone()["status"] == "failed"
+        assert conn.execute("SELECT status FROM run_source").fetchone()["status"] == "failed"
+
+
+def test_a_throttled_dormant_procedure_is_swept_again_the_next_day(project):
+    db, sources, _ = project
+    dormant_ref = "2019/0001(COD)"
+    years = {2026: [dormant_ref, REFERENCE]}
+    records = {"2019-0001": dormant(), "2023-0156": record()}
+
+    def collect(day, client):
+        return run_ep_collection(client=client, db_path=db, sources_path=sources,
+                                 since_year=2026, today=day)
+
+    collect(TODAY, FakeClient(records, years=years))
+    sweep_day = TODAY + timedelta(days=7)
+    # One isolated refusal: the run carries on, but the dormant file was not read.
+    s = collect(sweep_day, FakeClient(records, years=years, refuse={"2019-0001"}))
+    assert s["fetched"] == 1 and s["stopped"] is None
+    assert len(s["errors"]) == 1 and s["errors"][0].startswith(dormant_ref)
+    assert s["swept"] is False
+    with session(db) as conn:
+        assert get_watermark(conn, f"collection:regulatory:{SLUG}:sweep") == TODAY.isoformat()
+        assert conn.execute("SELECT status FROM run ORDER BY id DESC").fetchone()["status"] == "failed"
+
+    retry = FakeClient(records, years=years)
+    s = collect(sweep_day + timedelta(days=1), retry)
+    assert "2019-0001" in retry.calls and s["swept"] is True and s["errors"] == []
 
 
 def test_a_failed_listing_collects_nothing_and_says_so(project):

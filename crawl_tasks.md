@@ -1,51 +1,54 @@
 # Crawl stabilisation — remaining launch work
 
-Updated **2026-09-16**, for go-live in about two weeks. This replaces the old
-T1–T10 implementation briefs: completed work is removed. Findings and supporting
+Updated **2026-09-16**, for go-live in about two weeks. Findings and supporting
 evidence are in [weaknesses.md](weaknesses.md); this file is the execution order
-and the monitoring plan. Recommendations below have not been implemented by this
-audit.
+and the monitoring plan. Finished work is checked off under **Done** with one line
+each; its brief is removed.
 
 ## Current position
 
-- Reviewed checkout: `637603f`, plus the existing, uncommitted WELT `/deals`
-  exclusion. Both the production laptop and the health VPS still run `9cb3ea4`.
-  Polite HTTP and the earlier T2–T9 changes are deployed; pinned discovery,
-  ZEIT's discovery pause, and the new outage handling are not deployed there yet.
-- All **17 enabled news sitemap sources are pinned** in the reviewed config.
-  The recorded September 16 probe measured **80 discovery requests / 35.6 MB**
-  cold, versus 471 / 180 MB for the previous warm traversal. This is a probe
-  measurement, not a sustained production measurement or a whole-pipeline budget.
-- The laptop's daily task is enabled. **Intraday is disabled**, verified from
-  Task Scheduler settings, even though `tools/laptop.py status` prints a next
-  trigger. Do not assume nine passes/day or two-hour recovery while it is paused.
-- Canaries are disabled in the new checkout; the deployed September 16 daily run
-  still ran them. The remaining local coverage observer learns from stored yield;
+- Production runs the current main branch. Every pass records its commit and
+  config hashes in `pipeline_pass` and per-source discovery traffic in
+  `discovery_source`.
+- All **17 enabled news sitemap sources are pinned**. The first pinned production
+  pass (2026-09-16 afternoon) sent **65 discovery requests / 27.1 MB** across 22
+  news sources, against 471 / 180 MB for the old warm traversal. One pass, not a
+  sustained measurement.
+- The daily task is enabled. **Intraday is disabled**, verified from Task
+  Scheduler settings, even though `tools/laptop.py status` prints a next trigger.
+  Do not assume nine passes/day or two-hour recovery while it is paused, and
+  restart it deliberately after C2–C4; a code pull does not enable it.
+- Canaries are disabled. The coverage observer learns from stored yield;
   `rediscover` is a manual comparison using the production parser.
-- The September 16 daily marker is failed (`worst_exit=2`). The VPS timer is
-  active and its state records a `run_failed` notification at 04:15:12 UTC.
-  Its notification latch can mean email **or** push delivered; mailbox/phone
-  receipt was not checked here.
-- **366 focused existing tests passed**, covering discovery, polite HTTP,
-  watermarks, bodies, gates, structured collectors, health and rediscovery.
-  Additional offline fault cases exposed W18–W25. Tests do not establish live
-  coverage. Production inspection was read-only; no crawl, deployment, recovery,
-  paid model call or notification was initiated.
+- The 06:00 run on September 16 failed (`worst_exit=2`) in a DNS outage; the
+  afternoon re-run finished with every stage at 0. The VPS recorded a
+  `run_failed` notification; its latch means email **or** push delivered.
+
+## Done
+
+- [x] **C1 deployment** — pins, ZEIT pause, canary switch and outage handling are
+  live, with commit/config hash and per-source traffic recorded per pass. The
+  reconciliation half of C1 is still open below.
+- [x] **C3 pause** — a paused source sends no origin, discovery or body request,
+  keeps its queued bodies and holds its watermark (tested). Throttling is still
+  open below.
+- [x] **C6 structured collectors (W24, W25)** — EP throttling records `failed` and
+  holds the weekly sweep; Safety Gate rejects a document without the
+  `Safety-Gate` root/`report_date` and writes a run on every check; the health
+  analyzer judges Safety Gate. After the next deploy, check that
+  `python tools/laptop.py sql "SELECT id, status, note FROM run WHERE
+  kind='safety_gate' ORDER BY id DESC LIMIT 3"` shows a run from the latest daily
+  pass, then remove W24/W25.
 
 ## Before the final validation week
 
-### C1. Deploy the intended configuration and reconcile recovery
+### C1. Reconcile the September 10–16 gap
 
 **Priority: first operational step.** The source fixes have already restored
 new September 15 arrivals from DVZ, VerkehrsRundschau, Händlerbund and etailment.
 That does not establish that the earlier gap was recovered completely. BVDW's
 latest first-version row is still September 10; its old canary lists four missing
 URLs, which need checking against current exclusions before calling them losses.
-
-Deploy a reviewed commit to the laptop and VPS, recording the actual commit and
-source-config hash. Confirm that the intended ZEIT pause, canary switch and
-sitemap pins reached production. Keep intraday's restart a deliberate operational
-step after C2–C4; a code pull does not enable that task.
 
 Reconcile the September 10–16 affected window source by source. Separate missing
 articles, renamed URLs, deliberate exclusions, and entries no longer recoverable
@@ -54,10 +57,8 @@ run lock; checking that the lock was free earlier does not acquire it. The old
 blanket `collect --days 7` recipe is withdrawn: C4 explains why it cannot prove
 recovery. Replay affected title-gate run ids through the existing repair workflow.
 
-**Done when:** both hosts' revisions/settings are recorded, the first production
-pass has per-source outcomes and traffic counts, and every sampled gap has a
-recorded explanation or recovered identity. No unresolved loss is marked fixed
-because the daily task returned zero.
+**Done when:** every sampled gap has a recorded explanation or recovered identity.
+No unresolved loss is marked fixed because the daily task returned zero.
 
 ### C2. Propagate failed and incomplete discovery (W18, W19)
 
@@ -82,15 +83,10 @@ required-file-404 and frontpage-cap cases cannot report a complete source or
 advance its watermark. Valid empty and 304 replay cases still pass. Successful
 sibling results remain available, with the incomplete interval retried.
 
-### C3. Make a publisher pause stop all requests (W20)
+### C3. Make body fetching respect publisher throttling (W20)
 
 **Priority: before resuming intraday / contacting ZEIT again.** Files:
-`src/collect.py`, `src/bodies.py`, `src/polite_http.py`, health source accounting.
-
-A disabled source still reaches the origin probe; the existing body queue also
-bypasses the disabled-source check applied to new title-gate keeps. Fix those
-paths together. Keep queued work recoverable and display the source as paused,
-not as a successful quiet source.
+`src/bodies.py`, `src/polite_http.py`, health source accounting.
 
 Extend the publisher cooldown rule to body requests and future passes. Discovery's
 adapter currently stops only its own pass; body fetching neither shares that
@@ -98,9 +94,9 @@ state nor honours `Retry-After`. A long server-requested delay must survive the
 next scheduled run. A temporary host block must not retire all its articles as
 permanently unavailable after five attempts.
 
-**Done when:** a disabled source with old queued keeps sends zero origin,
-discovery and body requests; a throttled publisher remains deferred until its
-retry time; unrelated sources continue. Re-enabling resumes retained work.
+**Done when:** a throttled publisher remains deferred until its retry time across
+stages and passes; unrelated sources continue; a temporary host block does not
+retire its queued articles as unavailable.
 
 ### C4. Establish how far each source can recover (W21)
 
@@ -152,28 +148,6 @@ coverage; each sampled omission is explained, including at the old 70% canary
 threshold. Verify the first complete weekday/weekend cycle with the actual
 schedule. There is no fixed September 19 baseline-readiness date anymore.
 
-### C6. Close the remaining structured-collector failure paths (W24, W25)
-
-**Priority: before launch.** Files: `src/ep_procedures.py`, `src/safety_gate.py`,
-`run.py`, `health/analyze.py`, their existing tests.
-
-- EP detail throttling must appear in source status and the CLI result. Currently
-  three rate-limit refusals stop a run with no fetched procedures but record
-  `status=ok` and exit 0. Failed/skipped dormant procedures must remain due; a
-  partial sweep must not postpone them for another week.
-- Safety Gate must validate the expected report structure before checkpointing:
-  a well-formed `<error>…</error>` response currently counts as an empty successful
-  report and advances its watermark. Preserve legitimate empty-report handling
-  only when the expected structure is present.
-- Record Safety Gate's successful no-new-report checks and failed attempts, and
-  include it in health accounting. T3 added DIP/EP health rows, but Safety Gate
-  has no configured collector entry. Its weekly publication cadence needs a
-  last-successful-check signal, not a 48-hour last-new-report alarm.
-
-**Done when:** throttled EP detail fetches and malformed Safety Gate response
-shapes cannot look healthy or skip work; a normal quiet weekly source does not
-raise an absence alarm. Prove recovery on the next attempt with offline fixtures.
-
 ### C7. Validate handoffs and recovery, then hold a stable configuration (W23)
 
 **Priority: before customer delivery.** Files: existing title-gate repair workflow,
@@ -209,7 +183,7 @@ remain absent from VPS alerts until the next morning even while the timer polls.
 
 | Signal | Where / comparison | Action threshold during validation |
 |---|---|---|
-| Actual schedule and revision | Task **Enabled/State**, last/next start, deployed commit/config hash | Any missed intended slot, unexpected revision, repeated lock skip, or runtime approaching the 90-minute intraday / 4-hour daily limit |
+| Actual schedule and revision | Task **Enabled/State**, last/next start, `pipeline_pass` commit/config hash | Any missed intended slot, unexpected revision, repeated lock skip, or runtime approaching the 90-minute intraday / 4-hour daily limit |
 | Per-source completion and watermarks | `run`, `run_source`, collection watermark | Any required-file failure, held/incorrectly advanced watermark, simultaneous unexplained zeros, or truncated/inconclusive pass; do not rely on the aggregate exit code |
 | Independent article coverage | Publisher sample → stored identity → gate/body outcome | Every unexplained relevant omission after grace; 7/10 can be healthy under the old canary and still miss three articles |
 | Traffic and publisher response | Per-source discovery request/MB/304/replay logs plus body/browser activity | Investigate >120 discovery requests or >40 MB on a comparable normal pinned pass, repeated 403/429/503, falling validator reuse, or traffic from a paused host; recovery passes need separate budgets |

@@ -412,6 +412,10 @@ def run_ep_collection(*, client: Optional[EpClient] = None, db_path: Optional[Pa
             record = api.procedure(api_id)
             refusals = 0
         except EpRateLimited as exc:
+            # Not the procedure's fault, but it was not fetched: an error, so the
+            # run cannot read as healthy and the sweep below stays due.
+            logger.warning("[ep] %s: %s", reference, exc)
+            summary["errors"].append(f"{reference}: {exc}")
             refusals += 1
             if refusals >= MAX_RATE_LIMIT_FAILURES:
                 summary["stopped"] = f"rate limited {refusals} times in a row: {exc}"
@@ -446,7 +450,11 @@ def run_ep_collection(*, client: Optional[EpClient] = None, db_path: Optional[Pa
         if is_final(record):
             summary["final"].append(reference)
 
-    if sweep and summary["stopped"] is None:
+    # A sweep counts only when every due procedure was fetched or is known to be
+    # unfetchable (listed but unknown to the API). Otherwise a dormant procedure
+    # that failed would wait a week. Sweeping again tomorrow instead costs the
+    # dormant set once more: 84 procedures on top of 138 active, 2026-09-16.
+    if sweep and summary["stopped"] is None and not summary["errors"]:
         with session(db_path) as conn:
             set_watermark(conn, scope, today.isoformat())
         summary["swept"] = True

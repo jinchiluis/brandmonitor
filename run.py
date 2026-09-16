@@ -444,7 +444,7 @@ def cmd_collect_dsa(args: argparse.Namespace) -> int:
 def cmd_collect_safety_gate(args: argparse.Namespace) -> int:
     from src.db import migrate
     from src.logger import install_excepthook, set_pipeline_log, set_verbose
-    from src.safety_gate import SafetyGateError, run_safety_gate_collection
+    from src.safety_gate import run_safety_gate_collection
 
     log_path = set_pipeline_log("collect_safety_gate")
     install_excepthook()
@@ -452,17 +452,17 @@ def cmd_collect_safety_gate(args: argparse.Namespace) -> int:
         set_verbose(True)
 
     migrate()
-    try:
-        s = run_safety_gate_collection(
-            weeks=args.weeks, end=args.end, lookback_weeks=args.lookback,
-            max_reports=args.max_reports,
-        )
-    except SafetyGateError as exc:
-        print(f"Safety Gate collection could not start: {exc}")
+    s = run_safety_gate_collection(
+        weeks=args.weeks, end=args.end, lookback_weeks=args.lookback,
+        max_reports=args.max_reports,
+    )
+    if s["aborted"]:
+        print(f"run {s['run_id']}  Safety Gate collection could not start: {s['aborted']}")
         return 2
 
     if s.get("note") == "up to date":
-        print(f"nothing to collect: official reports complete through {s['end']}")
+        print(f"run {s['run_id']}  nothing to collect: official reports complete "
+              f"through {s['end']}")
         return 0
 
     print(f"\nrun {s['run_id']}  {s['start']} -> {s['end']}")

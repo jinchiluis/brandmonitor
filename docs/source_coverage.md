@@ -346,7 +346,11 @@ fetches the official report index, resumes from a report watermark, and stores e
 alert under `source_kind = "safety_gate"` with its native fields intact. Each report
 commits independently, so a stopped or partially failed historical run resumes
 without losing completed work. Explicit `--weeks`, `--end`, and `--max-reports`
-options support fixed-window validation and bounded backfills.
+options support fixed-window validation and bounded backfills. Every check writes a
+run, including the daily checks that find no new weekly report (`zero`, noted
+"up to date") and a check that cannot read the index (`failed`). A detail document
+must have the `Safety-Gate` root and a `report_date` before its notifications are
+believed, so an error page cannot pass as an empty week.
 
 The current 12-report window contained 639 alerts. The J&T pilot view selected 50
 that were both Germany-notified and Chinese-origin; 20 of those matched a customer
@@ -908,11 +912,12 @@ filtering — not from what a site looks like it should have.
 | Bytes | 180 MB (warm) / 229 MB (cold) | **35.6 MB** | |
 | Files read | 471 | 46 | |
 
-At nine passes a day this would save roughly 3,500 requests and 1.3 GB daily.
-**Deployment checked 2026-09-16:** the laptop still runs `9cb3ea4`, before pinning,
-and intraday is disabled. These are probe measurements and projected savings,
-not observed daily production totals. The request count matters: zeit.de blocked
-us for request volume on 2026-09-15, and conditional GET still sends a request.
+At nine passes a day this would save roughly 3,500 requests and 1.3 GB daily; with
+intraday disabled that saving is projected, not observed. The first pinned
+production pass, the 2026-09-16 afternoon daily run, sent **65** discovery requests
+for **27.1 MB** across 22 news sources (`discovery_source`, one pass). The request
+count matters: zeit.de blocked us for request volume on 2026-09-15, and conditional
+GET still sends a request.
 
 ### Per source
 

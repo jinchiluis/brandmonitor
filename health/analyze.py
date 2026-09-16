@@ -36,13 +36,22 @@ DEFAULT_CANARY = ROOT / "data" / "health" / "canaries" / "latest.json"
 DEFAULT_OUTPUT = ROOT / "data" / "health"
 UTC = timezone.utc
 BERLIN = ZoneInfo("Europe/Berlin")
-RULES_VERSION = "coverage-health-v3"
+RULES_VERSION = "coverage-health-v4"
 SEVERITY_RANK = {"healthy": 0, "learning": 0, "warning": 1, "critical": 2}
 BASELINE_DAYS = 7
 BASELINE_MAX_DAYS = 28
 PERIOD = timedelta(hours=24)
 COLLECTOR_MAX_AGE = timedelta(hours=48)
 COMPARABLE_WINDOW = timedelta(hours=36)
+# Collectors with no entry in either source list, judged like DIP and EP. Safety
+# Gate alerts are stored under their own source_kind and reach a client through
+# its own view, not the selector. Its run rows carry this slug rather than a host.
+# Every daily check writes a run, new weekly report or not, so the 48-hour rule
+# measures the last check and a quiet week raises nothing.
+UNLISTED_COLLECTORS = (
+    {"collector": "safety_gate", "slug": "eu-safety-gate",
+     "url": "https://ec.europa.eu/safety-gate-alerts/", "organization": "EU Safety Gate"},
+)
 
 
 class AnalysisError(RuntimeError):
@@ -320,7 +329,7 @@ def _collector_metrics(
     entries: list[dict[str, Any]], latest_runs: dict[str, dict[str, Any]],
     rows: list[dict[str, Any]], generated: datetime,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    """Judge a collector source (DIP, EP) by the latest run of its own kind.
+    """Judge a collector source (DIP, EP, Safety Gate) by the latest run of its kind.
 
     Only failure and absence are checked. A procedure list is quiet by nature, so
     the volume rules that suit a news source would warn about nothing.
@@ -329,7 +338,7 @@ def _collector_metrics(
     incidents: list[dict[str, str]] = []
     for entry in entries:
         kind = entry["collector"]
-        slug = _slug(entry["url"])
+        slug = entry.get("slug") or _slug(entry["url"])
         run = latest_runs.get(kind)
         finished = _parse_time(run["finished_at"]) if run else None
         if finished is None or generated - finished > COLLECTOR_MAX_AGE:
@@ -486,6 +495,7 @@ def analyze(
     *, db_path: Path, news_sources: Path, regulatory_sources: Path,
     canary_config: Path, canary_file: Path, output_dir: Path,
     cycle_date: str, generated_at: datetime | None = None,
+    unlisted_collectors: tuple[dict[str, Any], ...] = (),
 ) -> dict[str, Any]:
     generated = generated_at or now_utc()
     news_raw = news_sources.read_bytes()
@@ -499,7 +509,7 @@ def analyze(
         for path in (news_sources, regulatory_sources)
         for entry in _source_entries(path, include_collectors=True)
         if entry.get("collector")
-    ]
+    ] + list(unlisted_collectors)
     critical_sources, canary_enabled, canary_config_raw = _load_canary_sources(canary_config)
     with _connect_readonly(db_path) as conn:
         latest_runs = _latest_runs(conn)
@@ -601,6 +611,7 @@ def main(argv: list[str] | None = None) -> int:
             canary_file=args.canary_file,
             output_dir=args.output_dir,
             cycle_date=args.cycle_date,
+            unlisted_collectors=UNLISTED_COLLECTORS,
         )
     except Exception as exc:
         print(f"ERROR: coverage analyzer failed: {type(exc).__name__}: {exc}", file=sys.stderr)

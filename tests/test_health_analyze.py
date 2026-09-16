@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 
-from health.analyze import analyze
+from health.analyze import UNLISTED_COLLECTORS, analyze
 from src.db import (finish_run, migrate, record_source_result, session,
                     set_watermark, start_run)
 
@@ -305,6 +305,60 @@ def test_collector_without_a_recent_run_is_missing(tmp_path):
 
     incident = next(item for item in result["incidents"]
                     if item["source"] == "oeil.secure.europarl.europa.eu")
+    assert incident["check"] == "missing_collection_run"
+
+
+def _safety_gate_check(db, status, finished):
+    with session(db) as conn:
+        run_id = start_run(conn, "safety_gate", "2026-09-13", "2026-09-13")
+        record_source_result(conn, run_id, "eu-safety-gate", status,
+                             error="weekly report list: HTTP 503" if status == "failed" else None)
+        finish_run(conn, run_id, "failed" if status == "failed" else "ok",
+                   note="up to date: official reports complete through 2026-09-11")
+        conn.execute("UPDATE run SET finished_at = ? WHERE id = ?",
+                     (finished.isoformat(), run_id))
+
+
+def _analyze_with_safety_gate(tmp_path, db, run_id):
+    news, regulatory, canary_config = _inputs(tmp_path)
+    return analyze(
+        db_path=db, news_sources=news, regulatory_sources=regulatory,
+        canary_config=canary_config, canary_file=_canary(tmp_path / "canary.json", run_id),
+        output_dir=tmp_path / "health", cycle_date="2026-09-13",
+        generated_at=datetime(2026, 9, 13, 5, 1, tzinfo=UTC),
+        unlisted_collectors=UNLISTED_COLLECTORS,
+    )
+
+
+def _safety_gate_incidents(result):
+    return [item for item in result["incidents"] if item["source"] == "eu-safety-gate"]
+
+
+def test_a_quiet_safety_gate_week_is_healthy_but_a_failed_check_is_not(tmp_path):
+    db = tmp_path / "db.sqlite3"
+    migrate(db)
+    run_id = _add_news_run(db, 11, 12)
+    # The newest official report is two days old; this morning's check still ran.
+    _safety_gate_check(db, "zero", datetime(2026, 9, 13, 4, 10, tzinfo=UTC))
+
+    quiet = _analyze_with_safety_gate(tmp_path, db, run_id)
+    row = next(item for item in quiet["sources"] if item["source"] == "eu-safety-gate")
+    assert row["kind"] == "safety_gate" and row["latest_status"] == "ok"
+    assert _safety_gate_incidents(quiet) == []
+
+    _safety_gate_check(db, "failed", datetime(2026, 9, 13, 4, 20, tzinfo=UTC))
+    [incident] = _safety_gate_incidents(_analyze_with_safety_gate(tmp_path, db, run_id))
+    assert (incident["check"], incident["severity"]) == ("source_failed", "warning")
+    assert incident["message"].endswith("failed: weekly report list: HTTP 503")
+
+
+def test_safety_gate_without_a_recent_check_is_missing(tmp_path):
+    db = tmp_path / "db.sqlite3"
+    migrate(db)
+    run_id = _add_news_run(db, 11, 12)
+    _safety_gate_check(db, "zero", datetime(2026, 9, 11, 4, 0, tzinfo=UTC))
+
+    [incident] = _safety_gate_incidents(_analyze_with_safety_gate(tmp_path, db, run_id))
     assert incident["check"] == "missing_collection_run"
 
 

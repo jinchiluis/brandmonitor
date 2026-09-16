@@ -62,6 +62,22 @@ def test_detail_date_must_match_the_list():
         parse_report_detail(DETAIL_XML, wrong)
 
 
+def test_an_error_document_is_not_an_empty_report():
+    # Well-formed XML with no notifications, which used to read as a quiet week.
+    report = reports()[-1]
+    with pytest.raises(SafetyGateError, match="expected a Safety-Gate report"):
+        parse_report_detail(b"<error>temporarily unavailable</error>", report)
+    with pytest.raises(SafetyGateError, match="no report_date"):
+        parse_report_detail(
+            b"<Safety-Gate><report_year>2026</report_year></Safety-Gate>", report)
+
+
+def test_a_week_without_notifications_is_still_a_report():
+    empty = (b"<Safety-Gate><report_language>en</report_language>"
+             b"<report_date>11/09/2026</report_date></Safety-Gate>")
+    assert parse_report_detail(empty, reports()[-1]) == []
+
+
 def test_store_is_idempotent_and_changed_alert_appends_a_version(db):
     payload = alerts()[0]
     with session(db) as conn:
@@ -107,6 +123,23 @@ class FakeClient:
         return result
 
 
+class ErrorDocumentClient(FakeClient):
+    """Answers the ids in ``fail`` with a well-formed error document."""
+
+    def get_report(self, report):
+        if report.report_id not in self.fail:
+            return super().get_report(report)
+        self.calls.append(report.report_id)
+        return parse_report_detail(b"<error>temporarily unavailable</error>", report)
+
+
+def runs(db):
+    with session(db) as conn:
+        return [dict(row) for row in conn.execute(
+            "SELECT r.id, r.status, r.note, s.status AS source_status, s.error "
+            "FROM run r JOIN run_source s ON s.run_id = r.id ORDER BY r.id")]
+
+
 def test_first_run_backfills_then_the_watermark_makes_next_run_free(db):
     first = FakeClient()
     summary = run_safety_gate_collection(
@@ -120,6 +153,42 @@ def test_first_run_backfills_then_the_watermark_makes_next_run_free(db):
     summary = run_safety_gate_collection(client=again, db_path=db)
     assert summary["note"] == "up to date"
     assert again.calls == []
+    # The quiet check is still a run, so health can tell it from one that never ran.
+    check = runs(db)[-1]
+    assert check["id"] == summary["run_id"]
+    assert (check["status"], check["source_status"]) == ("ok", "zero")
+    assert check["note"] == "up to date: official reports complete through 2026-09-11"
+
+
+def test_a_check_that_cannot_read_the_list_is_a_failed_run(db):
+    class Unreachable(FakeClient):
+        def list_reports(self):
+            raise SafetyGateError("weekly report list: giving up after 4 attempts")
+
+    summary = run_safety_gate_collection(client=Unreachable(), db_path=db)
+    assert summary["aborted"].startswith("weekly report list")
+    [check] = runs(db)
+    assert check["id"] == summary["run_id"]
+    assert (check["status"], check["source_status"]) == ("failed", "failed")
+    assert "giving up after 4 attempts" in check["error"]
+    with session(db) as conn:
+        assert get_watermark(conn, WATERMARK_SCOPE) is None
+
+
+def test_an_error_document_holds_the_watermark_and_is_retried(db):
+    broken = ErrorDocumentClient(fail={10000321, 10000322})
+    summary = run_safety_gate_collection(lookback_weeks=2, client=broken, db_path=db)
+    assert (summary["reports_ok"], summary["reports_failed"]) == (0, 2)
+    assert summary["watermark_advanced"] is None
+    assert runs(db)[-1]["status"] == "failed"
+    with session(db) as conn:
+        assert get_watermark(conn, WATERMARK_SCOPE) is None
+
+    healed = FakeClient()
+    summary = run_safety_gate_collection(lookback_weeks=2, client=healed, db_path=db)
+    assert healed.calls == [10000321, 10000322]
+    assert summary["stored"] == 4
+    assert summary["watermark_advanced"] == 10000322
 
 
 def test_failed_report_stops_the_watermark_and_is_retried(db):
