@@ -38,6 +38,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from src.logger import get_logger
+from vendor.newscrawler.crawler_html_utils import HostThrottled
 from vendor.newscrawler.crawler import (ArticleHint, fetch_sitemap_urls,
                                         normalize_url, url_matches_dirs)
 
@@ -45,6 +46,7 @@ logger = get_logger(__name__)
 
 DATE_TOKENS = ("{YYYY}", "{MM}", "{DD}")
 LATEST_TOKEN = "{LATEST}"
+PAGE_TOKEN = "{PAGE}"
 
 
 class PinnedSitemapError(RuntimeError):
@@ -69,6 +71,7 @@ def _specs(entry: Dict[str, Any]) -> List[Dict[str, Any]]:
 
         {"url": ".../sitemap.xml?page={LATEST}", "index": ".../sitemap.xml"}
         {"url": ".../sitemap-{YYYY}-{MM}_{LATEST}.xml", "index": "...", "latest_count": 3}
+        {"url": ".../sitemap-{YYYY}-{MM}_{PAGE}.xml", "pages": [1, 6]}
     """
     specs: List[Dict[str, Any]] = []
     for raw in entry.get("sitemap_urls") or []:
@@ -80,9 +83,30 @@ def _specs(entry: Dict[str, Any]) -> List[Dict[str, Any]]:
             raise PinnedSitemapError(
                 f"{url}: {LATEST_TOKEN} needs an \"index\" naming the sitemap that "
                 f"lists the numbered files")
+        if PAGE_TOKEN in url:
+            pages = spec.get("pages")
+            if (not isinstance(pages, (list, tuple)) or len(pages) != 2
+                    or not all(isinstance(n, int) for n in pages) or pages[0] > pages[1]
+                    or pages[0] < 0):
+                raise PinnedSitemapError(
+                    f"{url}: {PAGE_TOKEN} needs \"pages\": [first, last]")
+        if LATEST_TOKEN in url and PAGE_TOKEN in url:
+            raise PinnedSitemapError(f"{url}: use {LATEST_TOKEN} or {PAGE_TOKEN}, not both")
         spec.setdefault("latest_count", 1)
         specs.append(spec)
     return specs
+
+
+def _is_absent(exc: BaseException) -> bool:
+    """True only for a definite "this file does not exist".
+
+    The group tolerance below exists for one case: a page or a month that has not
+    begun yet. That case answers 404. A 500, a timeout or a refused connection is
+    not evidence of absence, and tolerating one would advance the watermark over a
+    window the file was never read for - the silent loss pinning is meant to end.
+    """
+    response = getattr(exc, "response", None)
+    return getattr(response, "status_code", None) in (404, 410)
 
 
 def _months(since: datetime, end: datetime) -> List[date]:
@@ -123,6 +147,25 @@ def expand_dates(url: str, since: datetime, end: datetime) -> List[str]:
     return list(dict.fromkeys(fill(when) for when in reversed(periods)))
 
 
+def expand_pages(url: str, spec: Dict[str, Any]) -> List[str]:
+    """Resolve ``{PAGE}`` over the configured range, first page first.
+
+    ``{LATEST}`` asks an index which file is newest, which is right when the
+    highest number is the newest - ohn.haendlerbund's page 34, Wettbewerbszentrale's
+    post-sitemap4. Spiegel numbers the other way: within one month, page 1 holds the
+    newest 50 articles and page 30 the start of the month, so the newest pages are a
+    fixed low range and no index lookup is needed to name them. Asking its index
+    instead would cost a 23,635-child file every pass and return four empty files.
+
+    The range is one group (see ``collect_from_pinned``), so pages that do not exist
+    yet in a month that has just begun are logged, not fatal.
+    """
+    if PAGE_TOKEN not in url:
+        return [url]
+    first, last = spec["pages"]
+    return [url.replace(PAGE_TOKEN, str(n)) for n in range(first, last + 1)]
+
+
 def resolve_latest(session: requests.Session, url: str, spec: Dict[str, Any],
                    cache: Any = None) -> List[str]:
     """Read the index once and return its highest-numbered matching children.
@@ -134,11 +177,19 @@ def resolve_latest(session: requests.Session, url: str, spec: Dict[str, Any],
     """
     index_url = spec["index"]
     _entries, children = fetch_sitemap_urls(session, index_url, cache, strict=True)
-    pattern = re.compile(re.escape(url).replace(re.escape(LATEST_TOKEN), r"(\d+)"))
+    # The token marks where the number is, and matching stops there: ohn.haendlerbund
+    # and bevh serve TYPO3 paged sitemaps whose every page carries its own cHash
+    # (?page=34&cHash=7ea2f388...), which no template can predict. What follows the
+    # number is taken from the child's own URL, the only place it is knowable. When
+    # the template's tail is a plain suffix it still has to match, so ".xml" does not
+    # collect a sibling that is not one.
+    head, _, tail = url.partition(LATEST_TOKEN)
+    suffix = tail if tail and "?" not in tail and not any(c.isdigit() for c in tail) else None
+    pattern = re.compile(re.escape(head) + r"(\d+)")
     numbered = []
     for child, _lastmod in children:
-        match = pattern.fullmatch(child)
-        if match:
+        match = pattern.match(child)
+        if match and (suffix is None or child.endswith(suffix)):
             numbered.append((int(match.group(1)), child))
     if not numbered:
         raise PinnedSitemapError(
@@ -154,9 +205,11 @@ def collect_from_pinned(entry: Dict[str, Any], since: datetime, end: datetime, *
 
     Raises ``PinnedSitemapError`` when a pin could not be read, which makes the
     source fail in ``collect_source`` so its watermark holds. A pin that expands to
-    several URLs - a month boundary, ``latest_count`` - is judged as one unit: it
-    fails only when none of them could be read, because the file for a month that
-    has just begun legitimately may not exist yet.
+    several URLs - a month boundary, a ``{PAGE}`` range - is judged as one unit, but
+    only absence is forgiven: a 404 on one of them is the file for a month or a page
+    that has not begun yet, while a 500, a timeout or markup fails the source even
+    when a sibling read. Tolerating the second kind would advance the watermark over
+    a window that was never read.
 
     Entries are not capped. The pinned set is small by construction and everything
     in it is filtered to ``[since, end]``; what a wide recovery window returns is
@@ -173,15 +226,21 @@ def collect_from_pinned(entry: Dict[str, Any], since: datetime, end: datetime, *
             for url in urls:
                 resolved += resolve_latest(session, url, spec, cache)
             urls = list(dict.fromkeys(resolved))
+        elif PAGE_TOKEN in spec["url"]:
+            urls = [page for url in urls for page in expand_pages(url, spec)]
 
-        read, failures = 0, []
+        read, failures, unreadable = 0, [], []
         for url in urls:
             try:
                 url_entries, _children = fetch_sitemap_urls(session, url, cache, strict=True)
-            except PinnedSitemapError:
+            except (PinnedSitemapError, HostThrottled):
+                # A throttled host must stop the source's pass, not be retried
+                # against the next page of the same range.
                 raise
-            except Exception as exc:  # noqa: BLE001 - re-raised below unless a sibling read
+            except Exception as exc:  # noqa: BLE001 - re-raised below unless absent
                 failures.append(f"{url}: {type(exc).__name__}: {exc}")
+                if not _is_absent(exc):
+                    unreadable.append(f"{url}: {type(exc).__name__}: {exc}")
                 continue
             read += 1
 
@@ -203,11 +262,13 @@ def collect_from_pinned(entry: Dict[str, Any], since: datetime, end: datetime, *
             if cache is not None:
                 cache.remember(url, kept, [])
 
-        if not read:
-            raise PinnedSitemapError("pinned sitemap unavailable: " + "; ".join(failures))
+        if not read or unreadable:
+            raise PinnedSitemapError(
+                "pinned sitemap unavailable: " + "; ".join(unreadable or failures))
         if failures:
-            # One of a group answered, so the source is not down; say which did not.
-            logger.info("[pinned] %s: %d of %d file(s) unread: %s",
+            # Every failure here answered 404, and a sibling read: a page or month
+            # that has not started yet, which is not this source being down.
+            logger.info("[pinned] %s: %d of %d file(s) absent: %s",
                         entry.get("url"), len(failures), len(urls), "; ".join(failures))
 
     if undated:

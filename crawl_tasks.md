@@ -377,12 +377,32 @@ Short recommendations so each takes minutes, not a session.
 
 ## T10 — Pin the sitemaps and feeds; stop discovering on every pass (M)
 
-**Status 2026-09-16.** The mechanism is committed: `src/discovery.py`, the token
-resolver, the failure rules, `fetch_sitemap_urls(strict=True)`, the probe's
-per-file report and `sitemap_urls` block, and `tools/rediscover.py`. **No pins are
-configured yet** - what remains is the live half: probe each source, write its
-`sitemap_urls`, re-measure the pass, and record the per-source pins and yields in
-`docs/source_coverage.md`. T4's canaries should land before the pins go live.
+**Status 2026-09-16 - done, not deployed.** All 17 sitemap sources are pinned and
+measured; see `docs/source_coverage.md` "Pinned sitemaps". One cold-cache pass is
+**80 requests / 35.4 MB**, against the 471 / 180 MB warm-cache baseline, with every
+source's kept-URL count within a couple of articles of the full walk.
+
+Four things the live half changed, each from measurement rather than the plan:
+
+- **Coverage alone was the wrong objective.** welt.de's monthly sitemap holds 1,290
+  in-window URLs to its news sitemap's 815, so a pure set cover picked the file that
+  dates every article by `<lastmod>`. `pin_suggestion` now takes a news-dated file
+  first; the same correction found etailment's `news-sitemap.xml`.
+- **Page numbers run in both directions.** `{LATEST}` is right for ohn.haendlerbund
+  (page 34) and Wettbewerbszentrale, and exactly wrong for spiegel.de, where page 1
+  is the newest and 30 the oldest - it fetched four empty files and re-read a
+  23,635-child index every pass. Hence the `{PAGE}` range token.
+- **Only absence is forgiven inside a group.** The month-boundary tolerance was
+  swallowing 5xx and timeouts too, which would advance a watermark over a window
+  that was never read. Now a 404 is forgiven and nothing else is.
+- **Three pinned-away files were carrying index pages, not articles**, confirming
+  what `weaknesses.md` suspected of BGL and Wettbewerbszentrale, plus dslv.org.
+
+Remaining: deploy with T1's mechanism, then re-run `tools/rediscover.py` a month
+in. With the canaries switched off, rediscover is the only check that would catch a
+pinned file quietly ceasing to carry a section, so the baseline run matters.
+zeit.de is still 403 on its sitemap index and stays disabled: proxy.py needs
+`BRD_PASS_ISP`, which is on the VPS and not on the laptop.
 
 **Files.** `src/discovery.py` (new), `src/collect.py` (`collect_source`),
 `input/germany_medias.json`, `src/probe.py`, `tools/rediscover.py` (new),

@@ -376,3 +376,23 @@ class TestTokenHints:
     def test_a_number_that_is_not_a_date_is_not_templated_as_one(self):
         """0916 is not this month; only a four-digit year anchors a date."""
         assert token_hints(["https://x.de/sitemap-0916.xml"], {}, WINDOW_END) == []
+
+
+class TestPinSuggestionPrefersRealDates:
+    """welt.de: the monthly file covers more URLs and dates every one by lastmod."""
+
+    def test_a_news_sitemap_is_taken_before_a_larger_plain_one(self):
+        per_file = {
+            "monthly.xml": {"kept": {f"u{n}" for n in range(1290)}, "news_dates": 0},
+            "news.xml": {"kept": {f"u{n}" for n in range(815)}, "news_dates": 815},
+        }
+        chosen, _ = pin_suggestion(per_file)
+        assert chosen[0] == "news.xml"
+        assert "monthly.xml" in chosen  # still needed for what news.xml lacks
+
+    def test_a_plain_file_is_dropped_when_the_news_sitemap_covers_it(self):
+        per_file = {
+            "plain.xml": {"kept": {"a", "b"}, "news_dates": 0},
+            "news.xml": {"kept": {"a", "b", "c"}, "news_dates": 3},
+        }
+        assert pin_suggestion(per_file)[0] == ["news.xml"]

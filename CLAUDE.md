@@ -408,13 +408,25 @@ nothing in the window, and dvz.de 88 of which 87 did; neither host sends `ETag` 
 probe shows carries articles, never what the site looks like it should have.
 
 A pinned URL may carry `{YYYY}`, `{MM}` or `{DD}`, resolved against the collection
-window — so a run inside the 48-hour overlap at a month boundary reads both months
-— or `{LATEST}` for a page number that rolls, which needs the object form naming
-the index that lists the numbered files:
+window — so a run inside the 48-hour overlap at a month boundary reads both months.
+
+Paged sitemaps need one of two tokens, and **which one depends on which end of the
+numbering is new — ask before pinning**. `{LATEST}` reads the named index and takes
+the highest-numbered child, which is right for ohn.haendlerbund (page 34) and
+Wettbewerbszentrale (`post-sitemap4.xml`). `{PAGE}` names a fixed range directly and
+reads no index, which is right for spiegel.de, where page 1 holds the newest 50
+articles and page 30 the start of the month — pinned with `{LATEST}` it fetched four
+empty files and re-read a 23,635-child index every pass.
 
 ```json
 {"url": ".../sitemap.xml?page={LATEST}", "index": ".../sitemap.xml", "latest_count": 1}
+{"url": ".../sitemap-{YYYY}-{MM}_{PAGE}.xml", "pages": [1, 6]}
 ```
+
+`{LATEST}` matches on what precedes the number and takes the rest of the URL from
+the index, because a TYPO3 paged sitemap gives every page its own `cHash` that no
+template can predict. A `{PAGE}` range is one group, so pages that do not exist yet
+on the 1st of a month are logged rather than fatal.
 
 A pinned file that **cannot be read** fails the source and holds its watermark: a
 404 or 5xx, a redirect to another host, markup where XML was promised, XML that

@@ -19,7 +19,7 @@ import time
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -27,6 +27,7 @@ import tldextract
 
 from src.collect import is_furniture, is_malformed, url_is_excluded
 from src.logger import get_logger
+from src.polite_http import PoliteAdapter
 from vendor.newscrawler.crawler import (
     BERLIN_TZ,
     COMMON_FEED_PATHS,
@@ -92,9 +93,14 @@ class FileRecorder:
 
     def __init__(self) -> None:
         self.files: Dict[str, Dict] = {}
+        self.parents: Dict[str, str] = {}
 
     def _row(self, url: str) -> Dict:
         return self.files.setdefault(url, {"entries": [], "validators": (None, None)})
+
+    def parent_of(self, url: str) -> Optional[str]:
+        """The index that listed this file, which a {LATEST} pin has to name."""
+        return self.parents.get(url)
 
     def headers(self, url: str) -> Dict[str, str]:
         return {}
@@ -108,6 +114,8 @@ class FileRecorder:
 
     def remember(self, url: str, entries, children) -> None:
         self._row(url)["entries"] = entries
+        for child, _lastmod in children:
+            self.parents.setdefault(child, url)
 
 
 def file_yield(recorder: "FileRecorder", entry: Dict, start: datetime,
@@ -135,26 +143,33 @@ def file_yield(recorder: "FileRecorder", entry: Dict, start: datetime,
             titled += bool(title)
         out[url] = {"entries": len(row["entries"]), "kept": kept,
                     "news_dates": news_dates, "titled": titled,
-                    "validators": any(row["validators"])}
+                    "validators": any(row["validators"]),
+                    "parent": recorder.parents.get(url)}
     return out
 
 
 def pin_suggestion(per_file: Dict[str, Dict]) -> Tuple[List[str], Set[str]]:
-    """Greedily choose the fewest files that cover every kept URL.
+    """Choose the fewest files that cover every kept URL, news sitemaps first.
 
-    Returns (chosen files, URLs no file covers - always empty, kept for symmetry
-    with the caller's accounting). Greedy set cover is exactly the question being
-    asked: which files carry the articles, and which are archive the pass reads
-    for nothing.
+    Greedy set cover answers "which files carry the articles", but coverage alone
+    is the wrong objective on its own: welt.de's monthly sitemap holds 1,290
+    in-window URLs to its news sitemap's 815, so pure coverage picks the monthly
+    file and dates every article by ``<lastmod>`` - the field CLAUDE.md says may
+    never be printed to a customer. A file carrying ``<news:publication_date>`` is
+    taken first whenever it still adds anything, and the plain files then cover
+    what is left.
+
+    Returns (chosen files, URLs no file covers - empty unless a file was unreadable).
     """
     remaining = set().union(*(f["kept"] for f in per_file.values())) if per_file else set()
     chosen: List[str] = []
     while remaining:
-        best = max(per_file, key=lambda u: (len(per_file[u]["kept"] & remaining),
-                                            per_file[u]["news_dates"]))
-        gain = per_file[best]["kept"] & remaining
-        if not gain:
+        gains = [(url, per_file[url]["kept"] & remaining) for url in per_file]
+        gains = [(url, gain) for url, gain in gains if gain]
+        if not gains:
             break
+        best, gain = max(gains, key=lambda item: (per_file[item[0]]["news_dates"] > 0,
+                                                  len(item[1])))
         chosen.append(best)
         remaining -= gain
     return chosen, remaining
@@ -197,7 +212,8 @@ def token_hints(chosen: List[str], per_file: Dict[str, Dict], end: datetime) -> 
 
         if not notes:
             continue
-        spec = (f'{{"url": "{pinned}", "index": "<the index listing them>"}}'
+        index = (per_file.get(url) or {}).get("parent") or "<the index listing them>"
+        spec = (f'{{"url": "{pinned}", "index": "{index}"}}'
                 if "{LATEST}" in pinned else f'"{pinned}"')
         hints.append(f"{url}\n    -> {'; '.join(notes)}; pin as {spec}")
     return hints
@@ -290,6 +306,9 @@ def unreachable_feeds(feed_urls: List[str]) -> List[str]:
     return [u for u in feed_urls if urlparse(u).path.rstrip("/") not in known]
 
 
+ALL_METHODS = ("sitemap", "feeds", "frontpage")
+
+
 def probe_site(
     site_url: str,
     *,
@@ -297,8 +316,19 @@ def probe_site(
     max_per_source: int = 2000,
     frontpage_cap: int = 300,
     sources_path: Optional[str] = None,
+    methods: Sequence[str] = ALL_METHODS,
 ) -> Dict:
-    """Run every discovery method against one site and return a structured report."""
+    """Run the named discovery methods against one site and return a report.
+
+    ``methods`` narrows the probe to what a question needs. Verifying a configured
+    source's sitemap files should not also scrape its homepage: the probe is the
+    heaviest thing we point at a publisher, and zeit.de has already blocked us once
+    for request volume. For the same reason both sessions carry ``PoliteAdapter``,
+    so a host answering 429 or 503 twice ends its probe instead of being walked.
+    """
+    unknown = [m for m in methods if m not in ALL_METHODS]
+    if unknown:
+        raise ValueError(f"unknown probe method(s): {', '.join(unknown)}")
     if not site_url.startswith("http"):
         site_url = "https://" + site_url
 
@@ -323,39 +353,48 @@ def probe_site(
     end = datetime.now(tz=BERLIN_TZ)
     start = end - timedelta(days=days)
 
+    adapter = PoliteAdapter()
     session = requests.Session()
     session.headers.update(HTML_HEADERS)
+    sitemap_session = requests.Session()
+    sitemap_session.headers.update(SITEMAP_HEADERS)
+    for each in (session, sitemap_session):
+        each.mount("https://", adapter)
+        each.mount("http://", adapter)
+
     origin = pick_accessible_origin(session, site_url)
     session.headers["Referer"] = origin + "/"
 
-    sitemap_session = requests.Session()
-    sitemap_session.headers.update(SITEMAP_HEADERS)
-
     recorder = FileRecorder()
-    results = [
+    runners = {
         # Sitemap hints arrive already window- and dir-filtered by the crawler.
-        _run_method("sitemap", lambda: collect_from_sitemaps(
+        "sitemap": lambda: _run_method("sitemap", lambda: collect_from_sitemaps(
             sitemap_session, site_url, start, end, max_per_source=max_per_source,
             cache=recorder
         ), cap=max_per_source),
         # Feeds return whatever the feed holds; the window filter is applied on report.
-        _run_method("feeds", lambda: collect_from_feeds(session, origin)),
+        "feeds": lambda: _run_method("feeds", lambda: collect_from_feeds(session, origin)),
         # Frontpage hints carry only a date read near the link, often none at all.
-        _run_method("frontpage", lambda: collect_from_frontpage(
+        "frontpage": lambda: _run_method("frontpage", lambda: collect_from_frontpage(
             session, origin, start_date=start, cap=frontpage_cap
         ), cap=frontpage_cap),
-    ]
+    }
+    results = [runners[name]() for name in ALL_METHODS if name in methods]
 
     return {
         "site_url": site_url,
         "origin": origin,
-        "declared_feeds": declared_feeds(session, origin),
+        "declared_feeds": declared_feeds(session, origin) if "feeds" in methods else [],
         "domain": domain_of(site_url),
         "mode": mode,
         "start": start,
         "end": end,
         "days": days,
         "results": results,
+        "methods": list(methods),
+        "requests": adapter.requests,
+        "bytes": adapter.bytes,
+        "throttled": adapter.tripped,
         "entry": entry,
         "per_file": file_yield(recorder, entry, start, end),
     }
@@ -532,6 +571,10 @@ def format_report(report: Dict, depth: int = 1, samples: int = 2) -> str:
     lines.extend(sitemap_file_section(report))
 
     allowed = suggest_dirs(order, per_dir)
+    if len(report.get("methods") or ALL_METHODS) < len(ALL_METHODS):
+        lines.append(f"Only {', '.join(report['methods'])} probed, so no draft entry: "
+                     f"its booleans would report an unprobed method as unsupported.")
+        return "\n".join(lines)
     lines.append("--- draft entry (review before use) ---")
     lines.append(json.dumps(draft_entry(report, allowed), indent=2, ensure_ascii=False))
     lines.append("")

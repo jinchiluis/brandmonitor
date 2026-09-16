@@ -6,6 +6,10 @@
     "language": "德语",
     "url": "https://www.spiegel.de/",
     "sitemap": true,
+    "sitemap_urls": [
+      "https://www.spiegel.de/sitemaps/news-de.xml",
+      {"url": "https://www.spiegel.de/sitemaps/article/sitemap-{YYYY}-{MM}_{PAGE}.xml", "pages": [1, 9]}
+    ],
     "feeds": true,
     "feed_urls": ["https://www.spiegel.de/schlagzeilen/index.rss", "https://www.spiegel.de/index.rss"],
     "frontpage": false,
@@ -77,6 +81,11 @@
     "language": "德语",
     "url": "https://www.faz.net/",
     "sitemap": true,
+    "sitemap_urls": [
+      "https://www.faz.net/sitemap-news.xml",
+      "https://www.faz.net/sitemap-politik-artikel-1.xml",
+      "https://www.faz.net/sitemap-karriere-hochschule-artikel-1.xml"
+    ],
     "feeds": true,
     "feed_urls": ["https://www.faz.net/rss/aktuell/"],
     "extra_sitemap_urls": ["https://www.faz.net/sitemap-news.xml", "https://www.faz.net/sitemap-index.xml"],
@@ -104,6 +113,11 @@
     "language": "德语",
     "url": "https://www.handelsblatt.com/",
     "sitemap": true,
+    "sitemap_urls": [
+      "https://www.handelsblatt.com/sitemapExternal/premium-news.xml",
+      "https://www.handelsblatt.com/sitemapExternal/news.xml",
+      "https://www.handelsblatt.com/sitemapExternal/agentur-news.xml"
+    ],
     "feeds": false,
     "frontpage": false,
     "allowed_dirs": [],
@@ -196,6 +210,10 @@
     "language": "德语",
     "url": "https://www.welt.de/",
     "sitemap": true,
+    "sitemap_urls": [
+      "https://www.welt.de/sitemaps/newssitemap/newssitemap.xml",
+      "https://www.welt.de/sitemaps/sitemap/{YYYY}/{MM}/sitemap.xml.gz"
+    ],
     "feeds": false,
     "frontpage": false,
     "allowed_dirs": [],
@@ -226,6 +244,11 @@
     "language": "德语",
     "url": "https://www.wiwo.de/",
     "sitemap": true,
+    "sitemap_urls": [
+      "https://www.wiwo.de/sitemapExternal/agentur-news.xml",
+      "https://www.wiwo.de/sitemapExternal/news.xml",
+      "https://www.wiwo.de/sitemapExternal/premium-news.xml"
+    ],
     "feeds": false,
     "frontpage": false,
     "allowed_dirs": [],
@@ -245,6 +268,9 @@
     "language": "德语",
     "url": "https://www.dvz.de/",
     "sitemap": true,
+    "sitemap_urls": [
+      "https://www.dvz.de/news-sitemap.xml?sitemap=news&cHash=970c7a3a1368b60a65cdb6d24abe42cd"
+    ],
     "feeds": false,
     "frontpage": false,
     "allowed_dirs": [],
@@ -270,6 +296,7 @@
     "language": "德语",
     "url": "https://logistik-heute.de/",
     "sitemap": true,
+    "sitemap_urls": ["https://logistik-heute.de/sitemap.xml"],
     "feeds": true,
     "feed_urls": ["https://logistik-heute.de/rss.xml"],
     "frontpage": false,
@@ -303,6 +330,9 @@
     "language": "德语",
     "url": "https://ohn.haendlerbund.de/",
     "sitemap": true,
+    "sitemap_urls": [
+      {"url": "https://ohn.haendlerbund.de/sitemap-type/articles/sitemap.xml?page={LATEST}", "index": "https://ohn.haendlerbund.de/sitemap.xml"}
+    ],
     "feeds": false,
     "frontpage": false,
     "allowed_dirs": [],
@@ -320,6 +350,7 @@
     "language": "德语",
     "url": "https://www.verkehrsrundschau.de/",
     "sitemap": true,
+    "sitemap_urls": ["https://www.verkehrsrundschau.de/sitemap.news.xml"],
     "feeds": false,
     "frontpage": false,
     "allowed_dirs": [
@@ -339,6 +370,7 @@
     "language": "德语",
     "url": "https://www.e-commerce-magazin.de/",
     "sitemap": true,
+    "sitemap_urls": ["https://www.e-commerce-magazin.de/sitemap_contents1.xml"],
     "feeds": true,
     "feed_urls": ["https://www.e-commerce-magazin.de/rss/news.xml"],
     "frontpage": false,
@@ -354,6 +386,10 @@
     "language": "德语",
     "url": "https://www.etailment.de/",
     "sitemap": true,
+    "sitemap_urls": [
+      "https://www.etailment.de/news-sitemap.xml",
+      {"url": "https://www.etailment.de/sitemap/{LATEST}.xml", "index": "https://www.etailment.de/sitemap-index.xml"}
+    ],
     "feeds": false,
     "frontpage": false,
     "allowed_dirs": [
@@ -388,6 +424,7 @@
     "language": "德语",
     "url": "https://www.bgl-ev.de/",
     "sitemap": true,
+    "sitemap_urls": ["https://www.bgl-ev.de/post-sitemap.xml"],
     "feeds": true,
     "feed_urls": ["https://www.bgl-ev.de/feed/"],
     "frontpage": false,
@@ -441,6 +478,7 @@
     "language": "德语",
     "url": "https://www.bvdw.org/",
     "sitemap": true,
+    "sitemap_urls": ["https://www.bvdw.org/artikel-sitemap.xml"],
     "feeds": false,
     "frontpage": false,
     "allowed_dirs": [
@@ -475,6 +513,9 @@
     "language": "德语",
     "url": "https://www.dslv.org/",
     "sitemap": true,
+    "sitemap_urls": [
+      "https://www.dslv.org/de/?sitemap=lfnews&type=1533906435&cHash=9d559f82042982528c7bb7d59d595612"
+    ],
     "feeds": false,
     "frontpage": false,
     "allowed_dirs": [
@@ -506,6 +547,7 @@
     "language": "德语",
     "url": "https://www.haendlerbund.de/",
     "sitemap": true,
+    "sitemap_urls": ["https://www.haendlerbund.de/sitemap.xml"],
     "feeds": false,
     "frontpage": false,
     "allowed_dirs": [
@@ -527,6 +569,9 @@
     "language": "德语",
     "url": "https://www.wettbewerbszentrale.de/",
     "sitemap": true,
+    "sitemap_urls": [
+      {"url": "https://www.wettbewerbszentrale.de/post-sitemap{LATEST}.xml", "index": "https://www.wettbewerbszentrale.de/sitemap_index.xml"}
+    ],
     "feeds": true,
     "feed_urls": ["https://www.wettbewerbszentrale.de/feed/"],
     "frontpage": false,
@@ -550,6 +595,9 @@
     "language": "德语",
     "url": "https://bevh.org/",
     "sitemap": true,
+    "sitemap_urls": [
+      "https://bevh.org/sitemap.xml?page=1&sitemap=news&cHash=3c1d501a876822b63a218862c216b3bf"
+    ],
     "feeds": false,
     "frontpage": false,
     "allowed_dirs": [

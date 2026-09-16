@@ -63,12 +63,17 @@ def cmd_probe(args: argparse.Namespace) -> int:
     if args.verbose:
         set_verbose(True)
 
+    from src.probe import ALL_METHODS
+
+    methods = ([m.strip() for m in args.methods.split(",") if m.strip()]
+               if args.methods else ALL_METHODS)
     report = probe_site(
         args.site,
         days=args.days,
         max_per_source=args.max,
         frontpage_cap=args.frontpage_cap,
         sources_path=args.sources,
+        methods=methods,
     )
     print()
     print(format_report(report, depth=args.depth, samples=args.samples))
@@ -806,6 +811,9 @@ def build_parser() -> argparse.ArgumentParser:
                        help="path segments per prefix in the directory table (default: 1)")
     probe.add_argument("--samples", type=int, default=2,
                        help="sample URLs to print per prefix (default: 2)")
+    probe.add_argument("--methods", default=None,
+                       help="comma-separated subset of sitemap,feeds,frontpage "
+                            "(default: all three)")
     probe.add_argument("--sources", default=None,
                        help="source JSON file to load, which applies that domain's "
                             "existing rules instead of probing it as unknown")

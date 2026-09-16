@@ -20,20 +20,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.collect import run_collection, source_watermark_scope  # noqa: E402
 from src.db import get_watermark, migrate, session  # noqa: E402
 from src.discovery import (  # noqa: E402
-    PinnedSitemapError, collect_from_pinned, expand_dates, has_pins,
+    PinnedSitemapError, collect_from_pinned, expand_dates, expand_pages, has_pins,
 )
-from src.polite_http import DiscoveryCache  # noqa: E402
+from src.polite_http import DiscoveryCache, PoliteAdapter  # noqa: E402
 from vendor.newscrawler import crawler  # noqa: E402
 from vendor.newscrawler.crawler import BERLIN_TZ  # noqa: E402
+from vendor.newscrawler.crawler_html_utils import HostThrottled  # noqa: E402
 
 END = datetime(2026, 9, 16, 12, 0, tzinfo=BERLIN_TZ)
 SINCE = END - timedelta(days=2)
 
 
+def xml_escape(url: str) -> str:
+    """A sitemap's <loc> must escape &, which is how real paged sitemaps carry cHash."""
+    return url.replace("&", "&amp;")
+
+
 def urlset(*locs: str, when: str = "2026-09-16T08:00:00+02:00") -> bytes:
     """A sitemap listing each loc with a <lastmod> inside the window."""
     rows = "".join(
-        f"<url><loc>{loc}</loc><lastmod>{when}</lastmod></url>"
+        f"<url><loc>{xml_escape(loc)}</loc><lastmod>{when}</lastmod></url>"
         for loc in locs)
     return (b'<?xml version="1.0" encoding="UTF-8"?>'
             b'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
@@ -41,7 +47,8 @@ def urlset(*locs: str, when: str = "2026-09-16T08:00:00+02:00") -> bytes:
 
 
 def index(*children: str) -> bytes:
-    rows = "".join(f"<sitemap><loc>{child}</loc></sitemap>" for child in children)
+    rows = "".join(f"<sitemap><loc>{xml_escape(child)}</loc></sitemap>"
+                   for child in children)
     return (b'<?xml version="1.0" encoding="UTF-8"?>'
             b'<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
             + rows.encode() + b"</sitemapindex>")
@@ -370,3 +377,119 @@ class TestSourceStatus:
         run_collection(source_file, db_path=db, workers=1)
 
         assert walked == ["https://x.de/"]
+
+
+class TestLatestWithUnpredictableChildUrls:
+    """TYPO3 gives every page of a paged sitemap its own cHash."""
+
+    INDEX = index(
+        "https://ohn.test/sitemap.xml?page=15&cHash=e72645b53b7d36b5e0d4641c92f4a5f0",
+        "https://ohn.test/sitemap.xml?page=34&cHash=7ea2f3881c75549673339ec08452110f",
+        "https://ohn.test/sitemap.xml?page=29&cHash=9cf028674285df60d2d61a2d1d24a92f",
+    )
+    NEWEST = "https://ohn.test/sitemap.xml?page=34&cHash=7ea2f3881c75549673339ec08452110f"
+
+    def test_the_page_number_is_matched_and_the_child_url_is_used_whole(self, server):
+        server({"https://ohn.test/sitemap.xml": self.INDEX,
+                self.NEWEST: urlset("https://ohn.test/a-real-article")})
+        pin = {"url": "https://ohn.test/sitemap.xml?page={LATEST}",
+               "index": "https://ohn.test/sitemap.xml"}
+        hints = collect(entry(url="https://ohn.test/", sitemap_urls=[pin]))
+        assert [h.url for h in hints] == ["https://ohn.test/a-real-article"]
+
+    def test_a_plain_suffix_still_has_to_match(self, server):
+        """/s/{LATEST}.xml must not collect /s/12-archive.json."""
+        server({"https://x.de/sitemap.xml": index("https://x.de/s/12-archive.json",
+                                                  "https://x.de/s/3.xml"),
+                "https://x.de/s/3.xml": urlset("https://x.de/a-real-article")})
+        pin = {"url": "https://x.de/s/{LATEST}.xml", "index": "https://x.de/sitemap.xml"}
+        assert [h.url for h in collect(entry(sitemap_urls=[pin]))] == \
+            ["https://x.de/a-real-article"]
+
+
+class TestPageRange:
+    """spiegel.de numbers a month's pages with 1 as the newest, 30 as the oldest."""
+
+    def test_the_range_resolves_first_page_first(self):
+        spec = {"url": "https://x.de/s-{PAGE}.xml", "pages": [1, 3]}
+        assert expand_pages(spec["url"], spec) == [
+            "https://x.de/s-1.xml", "https://x.de/s-2.xml", "https://x.de/s-3.xml"]
+
+    def test_a_page_that_does_not_exist_yet_is_not_a_failure(self, server):
+        """On the 1st of a month only page 1 exists; the range is one group."""
+        server({"https://x.de/s-1.xml": urlset("https://x.de/one-real-article")})
+        pin = {"url": "https://x.de/s-{PAGE}.xml", "pages": [1, 4]}
+        assert [h.url for h in collect(entry(sitemap_urls=[pin]))] == \
+            ["https://x.de/one-real-article"]
+
+    def test_a_range_where_no_page_answers_still_fails(self, server):
+        server({})
+        pin = {"url": "https://x.de/s-{PAGE}.xml", "pages": [1, 4]}
+        with pytest.raises(PinnedSitemapError):
+            collect(entry(sitemap_urls=[pin]))
+
+    def test_the_range_combines_with_the_month_tokens(self, server):
+        server({"https://x.de/2026/09/s-1.xml": urlset("https://x.de/one-real-article"),
+                "https://x.de/2026/09/s-2.xml": urlset("https://x.de/two-real-article")})
+        pin = {"url": "https://x.de/{YYYY}/{MM}/s-{PAGE}.xml", "pages": [1, 2]}
+        assert sorted(h.url for h in collect(entry(sitemap_urls=[pin]))) == \
+            ["https://x.de/one-real-article", "https://x.de/two-real-article"]
+
+    def test_page_without_a_range_is_a_configuration_error(self, server):
+        server({})
+        with pytest.raises(PinnedSitemapError, match="pages"):
+            collect(entry(sitemap_urls=["https://x.de/s-{PAGE}.xml"]))
+
+    def test_the_two_page_tokens_are_not_combinable(self, server):
+        server({})
+        pin = {"url": "https://x.de/s-{LATEST}-{PAGE}.xml", "index": "https://x.de/i.xml",
+               "pages": [1, 2]}
+        with pytest.raises(PinnedSitemapError, match="not both"):
+            collect(entry(sitemap_urls=[pin]))
+
+
+class TestOnlyAbsenceIsForgiven:
+    """A group forgives a file that does not exist yet, never one that broke."""
+
+    PIN = {"url": "https://x.de/s-{PAGE}.xml", "pages": [1, 3]}
+
+    def test_a_404_beside_a_readable_page_is_forgiven(self, server):
+        server({"https://x.de/s-1.xml": urlset("https://x.de/one-real-article")})
+        assert [h.url for h in collect(entry(sitemap_urls=[self.PIN]))] == \
+            ["https://x.de/one-real-article"]
+
+    @pytest.mark.parametrize("broken", [
+        (500, b"boom"),
+        (200, b"<html>blocked</html>"),
+        (200, b"not xml at all"),
+    ])
+    def test_a_broken_page_fails_the_source_even_when_a_sibling_reads(self, server, broken):
+        """Otherwise the watermark advances over a window that was never read."""
+        server({"https://x.de/s-1.xml": urlset("https://x.de/one-real-article"),
+                "https://x.de/s-2.xml": broken})
+        with pytest.raises(PinnedSitemapError, match="pinned sitemap unavailable"):
+            collect(entry(sitemap_urls=[self.PIN]))
+
+    def test_a_throttled_host_stops_the_source_rather_than_trying_the_next_page(
+            self, server, monkeypatch):
+        sent = []
+
+        def throttle(self, request, **kw):
+            sent.append(request.url)
+            r = requests.Response()
+            r.status_code, r._content, r.url = 429, b"", request.url
+            r.request, r.headers = request, CaseInsensitiveDict()
+            r._content_consumed = True
+            return r
+
+        monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", throttle)
+        monkeypatch.setattr(crawler.time, "sleep", lambda s: None)
+        monkeypatch.setattr("src.polite_http.time.sleep", lambda s: None)
+
+        session = requests.Session()
+        adapter = PoliteAdapter(sleep=lambda s: None)
+        session.mount("https://", adapter)
+        with pytest.raises(HostThrottled):
+            collect_from_pinned(entry(sitemap_urls=[self.PIN]), SINCE, END, session=session)
+        # Stopped inside the range rather than working through every page.
+        assert len(sent) < 3

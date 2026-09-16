@@ -893,6 +893,130 @@ Sample sizes are small (2–5 per source). Re-measure before making a purchasing
 decision, but the direction is consistent enough to stop treating paywalls as the
 main obstacle.
 
+## Pinned sitemaps — measured 2026-09-16
+
+Every news source with a sitemap now names the files that carry its articles in
+`sitemap_urls`, and collection no longer walks any index. The pins were chosen from
+a probe of all 24 sources over a 3-day window, counting for each file the URLs that
+survive `allowed_dirs`, the source's exclusion rules, furniture and malformed
+filtering — not from what a site looks like it should have.
+
+| | Full walk | Pinned | |
+|---|---|---|---|
+| Requests | 471 (warm cache) | **80** | cold cache, so the warm figure is lower |
+| Bytes | 180 MB (warm) / 229 MB (cold) | **35.6 MB** | |
+| Files read | 471 | 46 | |
+
+Nine passes a day, so this is roughly 3,500 fewer requests and 1.3 GB less traffic
+daily. The request count is the number that matters: zeit.de blocked us for request
+volume on 2026-09-15, and no amount of caching reduces a request count.
+
+### Per source
+
+`kept` is in-window URLs the file contributes after every collection filter; `news`
+is how many carry `<news:publication_date>` rather than only `<lastmod>`.
+
+| Source | Pinned files | Walk | Pinned | Notes |
+|---|---|---|---|---|
+| handelsblatt.com | `sitemapExternal/{premium-news,news,agentur-news}.xml` | 304 | 306 | all three news-dated |
+| welt.de | `sitemaps/newssitemap/newssitemap.xml`, `sitemaps/sitemap/{YYYY}/{MM}/sitemap.xml.gz` | 1293 | 1292 | see "the news sitemap the cover missed" |
+| faz.net | `sitemap-news.xml`, `sitemap-politik-artikel-1.xml`, `sitemap-karriere-hochschule-artikel-1.xml` | 210 | 210 | 100 files → 6 requests, 99 MB → 4.4 MB |
+| spiegel.de | `sitemaps/news-de.xml`, `sitemaps/article/sitemap-{YYYY}-{MM}_{PAGE}.xml` pages 1–9 | 174 | 174 | page 1 is the newest; see below |
+| wiwo.de | `sitemapExternal/{agentur-news,news,premium-news}.xml` | 152 | 155 | |
+| dvz.de | `news-sitemap.xml?sitemap=news&cHash=…` | 30 | 30 | 88 files → 1; 28.9 MB → 0.01 MB |
+| etailment.de | `news-sitemap.xml`, `sitemap/{LATEST}.xml` | 38 | 38 | needs both; see the rediscover run below |
+| verkehrsrundschau.de | `sitemap.news.xml` | 28 | 28 | 12 files → 1 |
+| e-commerce-magazin.de | `sitemap_contents1.xml` | 19 | 19 | 52 files → 1 |
+| ohn.haendlerbund.de | `sitemap-type/articles/sitemap.xml?page={LATEST}` | 20 | 18 | the 2 missed are old articles whose `lastmod` moved |
+| logistik-heute.de | `sitemap.xml` | 34 | 36 | one 8.8 MB file, and there is no news sitemap |
+| haendlerbund.de | `sitemap.xml` | 5 | 5 | |
+| bevh.org | `sitemap.xml?page=1&sitemap=news&cHash=…` | 2 | 2 | page 1 is its news sitemap |
+| bvdw.org | `artikel-sitemap.xml` | 2 | 2 | 16 files → 1 |
+| dslv.org | `?sitemap=lfnews&type=…&cHash=…` | 4 | 3 | `sitemap=pages` dropped, see below |
+| bgl-ev.de | `post-sitemap.xml` | 4 | 1 | `category-sitemap.xml` dropped, see below |
+| wettbewerbszentrale.de | `post-sitemap{LATEST}.xml` | 2 | 1 | `page-sitemap.xml` dropped, see below |
+
+Not pinned, and why: **sueddeutsche.de** and **bpex-ev.de** are frontpage-only;
+**tagesschau.de**, **t3n.de** and **einzelhandel.de** are feed-only; **bvl.de** is
+disabled (its 5,323 URLs share one regenerated `lastmod`); **zeit.de** is blocked.
+
+### Three files that were carrying index pages, not articles
+
+`weaknesses.md` suspected these and the probe's sample URLs confirm all three. They
+are dropped from the pins, which also removes them from the corpus:
+
+- **bgl-ev.de `category-sitemap.xml`** — `/category/archiv/2026-archiv/`,
+  `/category/bgl-presse/verband/`. Category listings. `is_furniture` does not catch
+  them because the path segments look like sections.
+- **wettbewerbszentrale.de `page-sitemap.xml`** — `/ueber-uns/standorte/bad-homburg/`.
+  An office address.
+- **dslv.org `?sitemap=pages`** — static pages by definition; the news articles are
+  all in `?sitemap=lfnews`.
+
+### The news sitemap the coverage measure missed
+
+welt.de publishes both `sitemaps/sitemap/{YYYY}/{MM}/sitemap.xml.gz` (1,290
+in-window URLs, every one dated by `<lastmod>`) and
+`sitemaps/newssitemap/newssitemap.xml` (815 URLs carrying real
+`<news:publication_date>`). A greedy cover optimising for URLs alone picks the
+monthly file, covers everything, and dates the entire source with the field
+CLAUDE.md forbids printing to a customer. `src/probe.py` `pin_suggestion` therefore
+takes a news-dated file first whenever it still adds anything. The same correction
+found etailment's `news-sitemap.xml`, which replaced a lastmod-only chunk file.
+
+`sitemaps/sitemap/today.xml` was dropped: it added 3 URLs beyond the other two, and
+its unique contribution was `/deals/` and gallery pages.
+
+### Page numbers run in both directions
+
+`{LATEST}` asks an index which numbered file is newest, which is right for
+ohn.haendlerbund (page 34) and Wettbewerbszentrale (`post-sitemap4.xml`). It is
+exactly wrong for spiegel.de, where within one month **page 1 holds the newest 50
+articles and the number counts backwards**:
+
+| page | entries | in a 3-day window | oldest entry | newest entry |
+|---|---|---|---|---|
+| 1 | 50 | 50 | 2026-09-15 18:03 | 2026-09-16 10:13 |
+| 6 | 50 | 46 | 2026-09-13 06:13 | 2026-09-13 21:18 |
+| 7 | 50 | 8 | 2026-09-12 10:27 | 2026-09-15 09:38 |
+| 30 | 41 | 0 | 2026-09-01 04:12 | 2026-09-01 14:19 |
+
+Pinned with `{LATEST}` it fetched pages 27–30 and returned nothing while reading a
+23,635-child index every pass. `{PAGE}` with `"pages": [1, 6]` names the low range
+directly, needs no index, and is one group — so pages that do not exist yet on the
+1st of a month are logged rather than fatal. Ask of any paged sitemap which end is
+new before pinning it.
+
+### Keeping the pins honest
+
+Pinning trades a rediscovery per pass for a standing bet, and its failure mode is a
+file that still returns 200 and valid XML but has quietly stopped carrying a
+section. `tools/rediscover.py` walks each pinned source's whole tree and diffs it
+against what the pins return, naming the file behind anything missed. Run it
+monthly, and after any publisher redesign.
+
+**Baseline run, 2026-09-16, all 17 pinned sources over 3 days.** It found two real
+gaps and confirmed the rest:
+
+- **etailment.de was under-pinned.** `news-sitemap.xml` carries 33 URLs with real
+  publication dates but omits five genuine articles that `sitemap/5.xml` has -
+  analysis pieces with undated slugs (`/magazin/agentic-commerce-warum-agenten-…`).
+  The news sitemap is not a superset of the chunk file, so etailment needs both.
+  `weaknesses.md` said so; trimming to the news sitemap on one window's coverage
+  figures was wrong, and this is what caught it.
+- **spiegel.de's page range was one page short** at a 3-day window. Widened to 1–9.
+
+Both re-verified at `missing 0`. Everything else the run flagged is deliberate: the
+three index-page files above (BGL 3 URLs, Wettbewerbszentrale 1, dslv.org 1), two
+`/deals/` items on welt.de that only `today.xml` carried (a Eurojackpot advert and
+a gallery - worth an `excluded_dirs` entry in its own right), and two
+ohn.haendlerbund articles whose `lastmod` moved them onto older pages, which are
+already in the corpus from when they were published.
+
+The run is also the argument for keeping it: nothing in the pins failed, nothing
+404'd, and a coverage gap of five articles a day on one source would otherwise have
+been invisible until someone noticed the reports were thinner.
+
 ## Open decisions
 
 1. **Which regulatory sources are in scope.** The list above is a proposal, not a
