@@ -49,7 +49,7 @@
     "feeds": false,
     "frontpage": false,
     "allowed_dirs": [],
-    "notes": "WE WERE BLOCKED (too many requests - pause few days);sitemap 1500/14d; feeds 30; paywalled - needs subscription + login module for full text; 1 feed(s) at non-standard paths. culture, sport and lifestyle sections excluded 2026-09-10. /news is the dpa agency ticker (3430 rows) and is deliberately kept. Sitemap pinned 2026-09-16 through the ISP proxy, still paused: gsitemaps/index.xml lists one file per UTC day of <lastmod> (418 URLs on 09-15); an edited article moves to the newest day file, and the files carry no news:publication_date and no titles, so sitemap rows stay dated `lastmod` exactly as the old walk stored them.",
+    "notes": "Zeit.de don't want too many requests;sitemap 1500/14d; feeds 30; paywalled - needs subscription + login module for full text; 1 feed(s) at non-standard paths. culture, sport and lifestyle sections excluded 2026-09-10. /news is the dpa agency ticker (3430 rows) and is deliberately kept. Sitemap pinned 2026-09-16 through the ISP proxy, still paused: gsitemaps/index.xml lists one file per UTC day of <lastmod> (418 URLs on 09-15); an edited article moves to the newest day file, and the files carry no news:publication_date and no titles, so sitemap rows stay dated `lastmod` exactly as the old walk stored them.",
     "content_mode": "title_only",
     "excluded_dirs": [
       "sport",

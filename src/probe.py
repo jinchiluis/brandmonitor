@@ -322,8 +322,7 @@ def probe_site(
 
     ``methods`` narrows the probe to what a question needs. Verifying a configured
     source's sitemap files should not also scrape its homepage: the probe is the
-    heaviest thing we point at a publisher, and zeit.de has already blocked us once
-    for request volume. For the same reason both sessions carry ``PoliteAdapter``,
+    heaviest thing we point at a publisher. For the same reason both sessions carry ``PoliteAdapter``,
     so a host answering 429 or 503 twice ends its probe instead of being walked.
     """
     unknown = [m for m in methods if m not in ALL_METHODS]

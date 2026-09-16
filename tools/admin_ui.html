@@ -162,7 +162,7 @@ const store = {
   get(key, fallback) { try { const v = localStorage.getItem("bm-admin-" + key); return v === null ? fallback : v; } catch (e) { return fallback; } },
   set(key, value) { try { localStorage.setItem("bm-admin-" + key, value); } catch (e) { /* storage blocked */ } },
 };
-const state = { days: Number(store.get("days", "7")), overview: null };
+const state = { days: Number(store.get("days", "7")), overview: null, okPageSlug: null, okPage: 0 };
 const $ = (sel) => document.querySelector(sel);
 
 function h(tag, props, ...children) {
@@ -567,7 +567,8 @@ function eventTip(e) {
 }
 
 async function viewSource(kind, slug) {
-  const d = await api("/api/source", { kind, slug, days: state.days });
+  if (state.okPageSlug !== `${kind}/${slug}`) { state.okPageSlug = `${kind}/${slug}`; state.okPage = 0; }
+  const d = await api("/api/source", { kind, slug, days: state.days, ok_page: state.okPage });
   const e = d.entry || {};
   const tg = d.title_gate.counts;
   return h("div", {},
@@ -624,10 +625,17 @@ async function viewSource(kind, slug) {
       { label: "attempts", key: "attempts", num: true }, { label: "counted", render: (x) => x.counted ? "yes" : h("span", { class: "chip warn" }, "no (outage rule)") },
       { label: "title / url", wrap: true, render: (x) => ext(x.external_id, x.title) }, { label: "error", wrap: true, render: (x) => clip(x.error, 240) },
     ], d.bodies.attempts)] : null,
-    (d.bodies.ok || []).length ? [h("h2", {}, `Bodies ok (${d.bodies.ok.length})`), tableOf([
-      { label: "attempts", key: "attempts", num: true }, { label: "last attempt", render: (x) => fmtTime(x.attempted_at) },
-      { label: "title / url", wrap: true, render: (x) => ext(x.external_id, x.title) },
-    ], d.bodies.ok)] : null,
+    (d.bodies.ok_total || 0) > 0 ? [
+      h("h2", {}, `Bodies ok (${d.bodies.ok_total})`),
+      tableOf([
+        { label: "attempts", key: "attempts", num: true }, { label: "last attempt", render: (x) => fmtTime(x.attempted_at) },
+        { label: "title / url", wrap: true, render: (x) => ext(x.external_id, x.title) },
+      ], d.bodies.ok),
+      h("div", { class: "row" },
+        h("button", { disabled: d.bodies.ok_page <= 0, onclick: () => { state.okPage--; render(); } }, "← newer"),
+        h("span", { class: "muted" }, `page ${d.bodies.ok_page + 1} / ${d.bodies.ok_pages}`),
+        h("button", { disabled: d.bodies.ok_page + 1 >= d.bodies.ok_pages, onclick: () => { state.okPage++; render(); } }, "older →")),
+    ] : null,
     (d.bodies.problems || []).length ? [h("h2", {}, "Bodies not ok"), tableOf([
       { label: "status", render: (x) => statusBadge(x.status) }, { label: "attempts", key: "attempts", num: true },
       { label: "last attempt", render: (x) => fmtTime(x.attempted_at) }, { label: "title / url", wrap: true, render: (x) => ext(x.external_id, x.title) },

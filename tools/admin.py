@@ -453,11 +453,18 @@ def api_structured(store: Store, params: Dict[str, str]) -> dict:
     return {"days": days, "runs": runs, "latest_ok": latest_ok}
 
 
+PAGE_SIZE = 40
+
+
 def api_source(store: Store, params: Dict[str, str]) -> dict:
     days, cutoff = window(params)
     slug, kind = params.get("slug", ""), params.get("kind", "news")
     if not slug:
         raise ApiError(HTTPStatus.BAD_REQUEST, "slug is required")
+    try:
+        ok_page = max(0, int(params.get("ok_page", "0")))
+    except ValueError:
+        raise ApiError(HTTPStatus.BAD_REQUEST, "ok_page must be a number")
     entry = store.sources().get(kind, {}).get(slug)
     since = iso(cutoff)
     with store.connect() as conn:
@@ -519,12 +526,17 @@ def api_source(store: Store, params: Dict[str, str]) -> dict:
                       "AND ri.external_id=body_fetch.external_id ORDER BY ri.version DESC LIMIT 1) AS title "
                       "FROM body_fetch WHERE source_slug=? AND status != 'ok' "
                       "ORDER BY attempted_at DESC LIMIT 40", slug)
+            ok_total = bodies["queue"].get("ok", 0)
             bodies["ok"] = store.rows(
                 conn, "SELECT external_id, attempts, attempted_at, "
                       "(SELECT title FROM raw_item ri WHERE ri.source_slug=body_fetch.source_slug "
                       "AND ri.external_id=body_fetch.external_id ORDER BY ri.version DESC LIMIT 1) AS title "
                       "FROM body_fetch WHERE source_slug=? AND status = 'ok' "
-                      "ORDER BY attempted_at DESC LIMIT 40", slug)
+                      "ORDER BY attempted_at DESC LIMIT ? OFFSET ?",
+                slug, PAGE_SIZE, ok_page * PAGE_SIZE)
+            bodies["ok_page"] = ok_page
+            bodies["ok_total"] = ok_total
+            bodies["ok_pages"] = max(1, -(-ok_total // PAGE_SIZE))
         if "body_attempt" in tables:
             bodies["attempts"] = store.rows(
                 conn, "SELECT body_attempt.*, "

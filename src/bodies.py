@@ -749,8 +749,7 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
     # A source that was switched off must not be fetched from the durable queue
     # either. discovery_enabled gates the keeps that create tasks, but tasks
     # created before the switch survive in body_fetch and were still being
-    # retried: zeit.de kept being requested nine times a day after its discovery
-    # methods were set to false, against a publisher already answering 403.
+    # retried. 
     # Skipped, not deleted - re-enabling the source resumes its queue intact.
     enabled = {slug: entry for slug, entry in by_slug.items() if discovery_enabled(entry)}
     tasks = []
