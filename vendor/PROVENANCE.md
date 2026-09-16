@@ -264,9 +264,12 @@ actually runs (crawl_tasks.md T10).
 Nothing live changed: 565 tests pass before and after. Stale references in
 `proxy.py`, `paywall/*_login.py`, `paywall/handler.py`, `src/probe.py`,
 `docs/body_collection.md` and `backup_plan.md` were repointed at the surviving
-code. `source_loader.load_blacklist` and `is_url_blacklisted` are now unreachable
-too — `crawl_site` was their only caller and `input/Blacklist/` does not exist —
-but they are left in place pending a decision on whether the blacklist returns.
+code. `source_loader.load_blacklist` and `is_url_blacklisted` went with it the same
+day, by the owner's decision: `crawl_site` was their only caller,
+`input/Blacklist/` never existed in this repository, and per-source exclusion is
+`src/collect.py` `url_is_excluded` (`excluded_dirs`, `excluded_url_patterns`,
+`excluded_url_substrings`, `excluded_title_substrings`), which is configured per
+source rather than as one global URL list.
 
 ## googlesearch
 

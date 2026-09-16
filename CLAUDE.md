@@ -268,7 +268,7 @@ archive into `data/` (`tar -xzf brandmonitor-state-<date>.tar.gz -C data`).
 ```text
 run.py                 single entry point
 config.json            operational settings, read by src/config.py
-input/                 source lists, platform lists, and blacklist, shared by all clients
+input/                 source lists and platform lists, shared by all clients
 clients/<slug>/        client config and prompt inputs
 migrations/            ordered SQLite migrations
 src/                    application code and prompts
