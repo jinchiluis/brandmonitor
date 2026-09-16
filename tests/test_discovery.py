@@ -420,6 +420,45 @@ class TestSourceStatus:
         # Re-enabling resumes from where the pause began.
         assert mark == rows["paused.de"]["start"]
 
+    def test_an_excluded_source_is_paused_for_that_pass_only(self, server, tmp_path):
+        """--exclude pauses rather than drops: a source with no run_source row in the
+        latest run is a critical missing_source_result in health/analyze.py."""
+        srv = server({"https://x.de/news.xml": urlset("https://x.de/a"),
+                      "https://y.de/news.xml": urlset("https://y.de/b")})
+        db = tmp_path / "test.sqlite3"
+        migrate(db)
+        source_file = tmp_path / "sources.json"
+        source_file.write_text(json.dumps([
+            entry(sitemap_urls=["https://x.de/news.xml"]),
+            entry(url="https://y.de/", organization="Y", sitemap_urls=["https://y.de/news.xml"]),
+        ]), encoding="utf-8")
+        summary = run_collection(source_file, db_path=db, workers=1, exclude=["www.Y.de"])
+        rows = {row["slug"]: row for row in summary["per_source"]}
+
+        assert [url for url, _status in srv.log] == ["https://x.de/news.xml"]
+        assert (rows["y.de"]["status"], rows["x.de"]["status"]) == ("paused", "ok")
+        with session(db) as conn:
+            recorded = conn.execute("SELECT status FROM run_source "
+                                    "WHERE source_slug = 'y.de'").fetchone()[0]
+            mark = get_watermark(conn, source_watermark_scope("news", "y.de"))
+        assert (recorded, mark) == ("paused", rows["y.de"]["start"])
+
+        # The next pass without it resumes from the held watermark.
+        summary = run_collection(source_file, db_path=db, workers=1)
+        rows = {row["slug"]: row for row in summary["per_source"]}
+        assert (rows["y.de"]["status"], rows["y.de"]["start"]) == ("ok", mark)
+
+    def test_an_unknown_exclusion_fails_before_anything_is_sent(self, server, tmp_path):
+        """A typo in the batch file would otherwise exclude nothing, every pass."""
+        srv = server({"https://x.de/news.xml": urlset("https://x.de/a")})
+        db, source_file = self.project(tmp_path, ["https://x.de/news.xml"])
+
+        with pytest.raises(ValueError, match="zeit.de"):
+            run_collection(source_file, db_path=db, workers=1, exclude=["x.de,zeit.de"])
+        assert srv.log == []
+        with session(db) as conn:
+            assert conn.execute("SELECT COUNT(*) FROM run").fetchone()[0] == 0
+
     def test_an_unpinned_source_still_walks_its_index(self, monkeypatch, tmp_path):
         """The walker is demoted, not removed: a source without pins is unchanged."""
         walked = []

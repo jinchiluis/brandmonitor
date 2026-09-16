@@ -724,15 +724,18 @@ def store_body(conn: sqlite3.Connection, run_id: int, task: sqlite3.Row,
 def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_FETCH_LIMIT,
                    refresh: bool = False, retry_unavailable: bool = False,
                    db_path: Path | None = None, title_gate_client: str | None = None,
-                   title_gate_log_root: Path | None = None) -> dict[str, Any]:
+                   title_gate_log_root: Path | None = None,
+                   exclude: list[str] | None = None) -> dict[str, Any]:
     """Fetch a bounded batch, including old hints and retryable failures.
 
     Normally every configured ``full_text`` item is eligible.  With
     ``title_gate_client``, only explicit keeps from that client's retained JSONL
     decisions are newly queued, regardless of ``content_mode``; existing queued
     title-only failures remain eligible after the originating log is pruned.
+    ``exclude`` names sources to treat as switched off for this pass.
     """
-    from src.collect import crawled_entries, discovery_enabled, slug_for, url_is_excluded
+    from src.collect import (crawled_entries, discovery_enabled, pause_for_pass, slug_for,
+                             url_is_excluded)
     from vendor.newscrawler.source_loader import sources
 
     if limit < 1:
@@ -740,7 +743,7 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
     if title_gate_client and kind != "news":
         raise ValueError("title-gate body fetching is only valid for news")
     sources.clear_cache()
-    entries = crawled_entries(sources.load_sources(str(sources_path)))
+    entries = pause_for_pass(crawled_entries(sources.load_sources(str(sources_path))), exclude)
     if not entries:
         raise ValueError(f"no sources in {sources_path}")
     wanted_mode = "title_only" if title_gate_client else "full_text"

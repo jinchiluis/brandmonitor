@@ -210,6 +210,33 @@ def discovery_enabled(entry: Dict[str, Any]) -> bool:
     return any(entry.get(method) is True for method in DISCOVERY_METHODS)
 
 
+def pause_for_pass(entries: List[Dict[str, Any]],
+                   exclude: Optional[List[str]]) -> List[Dict[str, Any]]:
+    """Switch the named sources off for this pass only (``--exclude``).
+
+    An excluded source goes down the paused path rather than out of the list. A
+    source missing from a run has no run_source row, which health/analyze.py
+    reports as a critical missing_source_result, and run_body_fetch would keep
+    fetching its queued URLs. Paused already means nothing is sent, the queue is
+    left untouched and the watermark holds, so the next run without the exclusion
+    re-covers the window.
+
+    Names are slugs (``zeit.de``), repeatable or comma-separated, because the
+    batch files forward at most eight arguments to a stage. An unknown name is an
+    error: a typo would otherwise exclude nothing on every pass, silently.
+    """
+    wanted = {name.strip().lower().removeprefix("www.")
+              for value in exclude or [] for name in value.split(",") if name.strip()}
+    if not wanted:
+        return entries
+    unknown = wanted - {slug_for(entry) for entry in entries}
+    if unknown:
+        raise ValueError(f"--exclude names no configured source: {', '.join(sorted(unknown))}")
+    logger.info("[sources] excluded for this pass: %s", ", ".join(sorted(wanted)))
+    return [{**entry, **dict.fromkeys(DISCOVERY_METHODS, False)}
+            if slug_for(entry) in wanted else entry for entry in entries]
+
+
 def needs_homepage(entry: Dict[str, Any]) -> bool:
     """Whether an enabled discovery method starts from the source's homepage.
 
@@ -505,8 +532,12 @@ def store_hints(conn: sqlite3.Connection, run_id: int, slug: str,
 def run_collection(sources_path: Optional[Path] = None, *, days: Optional[float] = None,
                    kind: str = "news", max_per_source: int = 2000,
                    workers: Optional[int] = None, db_path: Optional[Path] = None,
-                   body_limit: Optional[int] = None) -> Dict[str, Any]:
-    """Collect every source in a list into the database. Returns a summary dict."""
+                   body_limit: Optional[int] = None,
+                   exclude: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Collect every source in a list into the database. Returns a summary dict.
+
+    ``exclude`` names sources to treat as paused for this pass (pause_for_pass).
+    """
     from src.bodies import content_mode, run_body_fetch
     from src.config import BODY_FETCH_LIMIT
 
@@ -516,7 +547,7 @@ def run_collection(sources_path: Optional[Path] = None, *, days: Optional[float]
     path = Path(sources_path) if sources_path else (
         DEFAULT_REGULATORY_SOURCES if kind == "regulatory" else DEFAULT_NEWS_SOURCES)
     sources.clear_cache()
-    entries = crawled_entries(sources.load_sources(str(path)))
+    entries = pause_for_pass(crawled_entries(sources.load_sources(str(path))), exclude)
     if not entries:
         raise ValueError(f"no sources in {path}")
     modes = {slug_for(entry): content_mode(entry) for entry in entries}
@@ -669,5 +700,6 @@ def run_collection(sources_path: Optional[Path] = None, *, days: Optional[float]
     # Discovery is committed before any page fetch. The durable body queue is
     # independent of the discovery watermark, including for feed items that vanish.
     if "full_text" in modes.values():
-        summary["bodies"] = run_body_fetch(path, kind=kind, limit=limit, db_path=db_path)
+        summary["bodies"] = run_body_fetch(path, kind=kind, limit=limit, db_path=db_path,
+                                           exclude=exclude)
     return summary

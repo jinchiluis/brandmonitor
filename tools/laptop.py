@@ -82,8 +82,11 @@ git status --short
 '--- scheduled tasks'
 foreach ($name in 'brandmonitor-daily', 'brandmonitor-intraday') {
   try {
-    $i = Get-ScheduledTaskInfo -TaskName $name -ErrorAction Stop
-    '{0}: last {1} result {2}, next {3}' -f $name, $i.LastRunTime, $i.LastTaskResult, $i.NextRunTime
+    $t = Get-ScheduledTask -TaskName $name -ErrorAction Stop
+    $i = $t | Get-ScheduledTaskInfo
+    # A disabled task still reports its trigger's NextRunTime; it will not run then.
+    $next = if ($t.State -eq 'Disabled') { 'none (disabled)' } else { $i.NextRunTime }
+    '{0} [{1}]: last {2} result {3}, next {4}' -f $name, $t.State, $i.LastRunTime, $i.LastTaskResult, $next
   } catch { "${name}: not registered" }
 }
 foreach ($marker in 'data\last_run.json', 'data\last_intraday_run.json') {

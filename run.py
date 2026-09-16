@@ -148,7 +148,7 @@ def cmd_collect(args: argparse.Namespace) -> int:
 
     s = run_collection(path, days=args.days, kind=args.kind,
                        max_per_source=args.max, workers=args.workers,
-                       body_limit=args.body_limit)
+                       body_limit=args.body_limit, exclude=args.exclude)
 
     print(f"\nrun {s['run_id']}  {s['start'][:16]} -> {s['end'][:16]}")
     print(f"{'source':<28}{'status':>8}{'found':>8}{'stored':>8}")
@@ -197,7 +197,7 @@ def cmd_fetch_bodies(args: argparse.Namespace) -> int:
         return 2
     summary = run_body_fetch(path, kind=args.kind, limit=args.limit,
                              refresh=args.refresh, retry_unavailable=args.retry_unavailable,
-                             title_gate_client=args.title_gate_client)
+                             title_gate_client=args.title_gate_client, exclude=args.exclude)
     print_body_summary(summary)
     print(f"Log: {log_path}")
     # A batch where every single fetch failed points at the transport or the
@@ -895,6 +895,9 @@ def build_parser() -> argparse.ArgumentParser:
                          help="parallel sources (default: config.json workers.crawler)")
     collect.add_argument("--body-limit", type=positive_int, default=BODY_FETCH_LIMIT,
                          help="maximum body fetches after discovery (default: config.json)")
+    collect.add_argument("--exclude", action="append", default=[], metavar="SLUG",
+                         help="treat this source as paused for this pass: nothing is sent, "
+                              "its watermark holds. Repeatable or comma-separated")
     collect.add_argument("--verbose", action="store_true")
     collect.set_defaults(func=cmd_collect)
 
@@ -909,6 +912,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="also retry paywalls, missing pages and unsupported media")
     bodies.add_argument("--title-gate-client", default=None,
                         help="fetch only title-only URLs kept in this client's JSONL decisions")
+    bodies.add_argument("--exclude", action="append", default=[], metavar="SLUG",
+                        help="leave this source's queue untouched for this pass. "
+                             "Repeatable or comma-separated")
     bodies.set_defaults(func=cmd_fetch_bodies)
 
     gate = sub.add_parser(

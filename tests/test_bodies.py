@@ -311,6 +311,32 @@ def test_collection_runs_bodies_and_keeps_discovery_watermark_independent(projec
     assert again["bodies"]["stored"] == 1
 
 
+def test_an_excluded_source_keeps_its_body_queue_for_the_next_pass(project, monkeypatch):
+    """--exclude must also reach the body fetch that collection runs itself.
+
+    Otherwise the collect stage that just sent the source no discovery request
+    would fetch its queued articles anyway.
+    """
+    monkeypatch.setattr("src.collect.collect_source", lambda entry, *args, **kwargs: ([ArticleHint(
+        entry["url"] + "article", None, "Headline", "rss")], None))
+    monkeypatch.setattr("src.bodies.fetch_body",
+                        lambda url: BodyResult("failed", error="HTTPError: 403"))
+    assert run_collection(project[1], db_path=project[0], workers=1)["bodies"]["attempted"] == 1
+
+    seen = []
+    monkeypatch.setattr("src.collect.collect_source",
+                        lambda entry, *args, **kwargs: seen.append(entry["url"]) or ([], None))
+    monkeypatch.setattr("src.bodies.fetch_body", lambda url: seen.append(url) or success())
+    summary = run_collection(project[1], db_path=project[0], workers=1, exclude=["trade.test"])
+    assert seen == ["https://major.test/"]
+    assert (summary["paused"], summary["bodies"]["attempted"]) == (1, 0)
+    with session(project[0]) as conn:
+        task = conn.execute("SELECT status, attempts FROM body_fetch").fetchone()
+    assert (task["status"], task["attempts"]) == ("failed", 1), "queue kept, not spent"
+
+    assert run(project)["ok"] == 1, "the next pass without --exclude resumes it"
+
+
 def test_body_tracks_are_separate(project, monkeypatch):
     discover(project, kind="regulatory")
     monkeypatch.setattr("src.bodies.fetch_body", lambda url: success())
