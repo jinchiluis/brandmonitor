@@ -166,6 +166,12 @@ rem Independent from the gate's exit code: it also retries URLs queued by an
 rem earlier keep. New keeps come from the client's retained JSONL decision log;
 rem title-only sources are never bulk-fetched.
 call :stage title_bodies fetch-bodies --kind news --title-gate-client jt-express
+rem News alerts are an extra pass over the news items admitted above. It runs
+rem right after news collection, gating and body fetch, ahead of the regulatory
+rem stages, so a same-day news alert reaches the digest without waiting on
+rem regulatory/Safety Gate/DIP/EP collection or the body gate. It reads only
+rem news bodies, so it never depended on those stages anyway.
+call :stage alert_gate alert-gate
 call :stage regulatory collect --kind regulatory
 call :stage safety_gate collect-safety-gate
 rem Parliamentary procedures are stored as regulatory items with a body composed
@@ -181,10 +187,6 @@ rem The documents behind the DIP procedures the gate judged relevant - the answe
 rem the bill. DIP publishes a Drucksache's text days after its date, so a document
 rem without text waits in the queue for a later run rather than failing this one.
 call :stage dip_docs fetch-dip-docs --client jt-express
-rem News alerts are an extra pass over the items admitted above. It waits until
-rem every collection and enrichment stage has finished, then sends at most one
-rem combined email directly from this laptop.
-call :stage alert_gate alert-gate
 rem Backup is the last stage that handles the corpus, so the snapshot carries the
 rem day's collection rather than yesterday's. The observers after it read the
 rem final database without modifying it and publish their own atomic JSON files.
