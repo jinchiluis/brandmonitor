@@ -204,6 +204,11 @@ silently while the source reported ok. The return type is unchanged, so `probe.p
 needs nothing; `src/collect.py` stores the note as
 `truncated: ...` in `run_source.error` with status still `ok` (crawl_tasks.md T5).
 
+**2026-09-17 — publisher rejection cooldown.** `crawler_html_utils` adds
+`REJECTION_STATUSES` (403 plus the existing 429/503 throttle statuses). Discovery
+and body fetching use that shared definition; `fetch_html` no longer launches a
+browser after a 403. Persistent cooldown state lives in `src/publisher_cooldown.py`.
+
 **2026-09-15 — polite discovery: conditional requests, throttle stop, no guessing
 past configured roots.** Measured the same day, one news discovery pass sent 601
 requests and 229 MB, nine passes a day; ZEIT had already blocked us for request

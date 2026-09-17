@@ -39,13 +39,16 @@ import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
+from src import publisher_cooldown
 from src.config import (BODY_FETCH_BROWSER, BODY_FETCH_DELAY, BODY_FETCH_LIMIT,
                         BODY_FETCH_MAX_ATTEMPTS, BODY_FETCH_TIMEOUT, PDF_MAX_PAGES,
                         ROOT)
 from src.db import finish_run, record_source_result, session, start_run, utcnow
 from src.logger import get_logger
 from src.monitoring import record_body_attempt
+from src.polite_http import retry_after_seconds
 from vendor.newscrawler.crawler import HTML_HEADERS, url_matches_dirs
+from vendor.newscrawler.crawler_html_utils import REJECTION_STATUSES
 
 logger = get_logger(__name__)
 
@@ -184,6 +187,8 @@ class BodyResult:
     # until something else in the same pass succeeds, so it must not spend the
     # URL's attempt budget. See the breaker in run_body_fetch.
     transport: bool = False
+    http_status: int | None = None
+    retry_after: float | None = None
 
 
 def _page_published_value(soup: BeautifulSoup) -> str | None:
@@ -486,6 +491,11 @@ def _fetch_public(url: str) -> BodyResult:
     try:
         with requests.get(url, headers=HTML_HEADERS,
                           timeout=(5, BODY_FETCH_TIMEOUT)) as response:
+            if response.status_code in REJECTION_STATUSES:
+                return BodyResult("failed", url=response.url,
+                                  error=f"HTTP {response.status_code} from {urlsplit(response.url).netloc}",
+                                  http_status=response.status_code,
+                                  retry_after=retry_after_seconds(response.headers.get("Retry-After")))
             if response.status_code in (401, 402, 404, 410):
                 return BodyResult("unavailable", url=response.url,
                                   error=f"HTTP {response.status_code}")
@@ -510,6 +520,7 @@ def _fetch_public(url: str) -> BodyResult:
         # network. ReadTimeout and HTTPError mean the host answered, so they are
         # the publisher's problem and always count toward the attempt cap. An
         # SSLError is a certificate, which is per-host and stays countable too.
+        # Publisher rejections were returned separately above.
         transport = (isinstance(exc, requests.ConnectionError)
                      and not isinstance(exc, requests.exceptions.SSLError))
         return BodyResult("failed", error=f"{type(exc).__name__}: {exc}",
@@ -743,7 +754,10 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
     if title_gate_client and kind != "news":
         raise ValueError("title-gate body fetching is only valid for news")
     sources.clear_cache()
-    entries = pause_for_pass(crawled_entries(sources.load_sources(str(sources_path))), exclude)
+    entries = crawled_entries(sources.load_sources(str(sources_path)))
+    cooldown_file = publisher_cooldown.path_for(db_path)
+    cooled = publisher_cooldown.active(cooldown_file, {slug_for(e) for e in entries})
+    entries = pause_for_pass(entries, [*(exclude or []), *cooled])
     if not entries:
         raise ValueError(f"no sources in {sources_path}")
     wanted_mode = "title_only" if title_gate_client else "full_text"
@@ -863,7 +877,11 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
     # they cost no attempt, and enough of them in a row end the pass.
     transport_streak = 0
     transport_hosts: set[str] = set()
+    stopped_sources: set[str] = set()
     for task in tasks:
+        if task["source_slug"] in stopped_sources:
+            summary["deferred"] += 1
+            continue
         logger.info("[bodies] %d/%d %s", summary["attempted"] + 1, len(tasks), task["external_id"])
         pace_host(task["external_id"], host_seen)
         attempt_at, attempt_t0 = utcnow(), time.monotonic()
@@ -872,6 +890,13 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
         except Exception as exc:
             result = BodyResult("failed", error=f"{type(exc).__name__}: {exc}")
         attempt_ms = int((time.monotonic() - attempt_t0) * 1000)
+        rejected = result.http_status in REJECTION_STATUSES
+        if rejected:
+            stopped_sources.add(task["source_slug"])
+            publisher_cooldown.record(
+                cooldown_file, task["source_slug"], stage="bodies",
+                status=result.http_status, reason=result.error,
+                retry_after=result.retry_after)
         # ``attempts`` counts consecutive unsuccessful tries; a success resets it
         # and so does a changed hint. Past the cap a failure is retired rather
         # than retried on every run forever. The diagnosis is kept in the error
@@ -894,7 +919,10 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
         else:
             transport_streak = 0
             transport_hosts.clear()
-        if result.status == "failed" and not untried and attempts >= BODY_FETCH_MAX_ATTEMPTS:
+        if rejected:
+            attempts = task["attempts"]
+        if (result.status == "failed" and not untried and not rejected
+                and attempts >= BODY_FETCH_MAX_ATTEMPTS):
             result = BodyResult("unavailable", url=result.url,
                                 error=f"gave up after {attempts} attempts: {result.error}")
         # Commit each outcome before fetching another URL. A stopped run keeps
@@ -911,7 +939,7 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
             )
         # After the commit, in its own transaction; see src/monitoring.py.
         record_body_attempt(db_path, run_id, task, result, at=attempt_at,
-                            elapsed_ms=attempt_ms, counted=not untried,
+                            elapsed_ms=attempt_ms, counted=not (untried or rejected),
                             attempts=0 if result.status == "ok" else attempts,
                             stored=stored)
         source = counts[task["source_slug"]]
@@ -932,6 +960,8 @@ def run_body_fetch(sources_path: Path, *, kind: str = "news", limit: int = BODY_
             break
 
     with session(db_path) as conn:
+        for slug in by_slug.keys() - enabled.keys():
+            record_source_result(conn, run_id, slug, "paused")
         for slug, counts_for_source in counts.items():
             errors = counts_for_source.pop("errors")
             # ``unavailable`` is a valid terminal item outcome (404, declared

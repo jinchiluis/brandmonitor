@@ -214,6 +214,23 @@ class TestThrottle:
         adapter = PoliteAdapter(sleep=waits.append)
         self._session(adapter).get("https://x.de/a")
         assert adapter.tripped and waits == [] and len(sent) == 1
+        assert adapter.rejection["status"] == 429
+        assert adapter.rejection["retry_after"] == 3600
+
+    def test_403_stops_immediately_without_browser_fallback(self, monkeypatch):
+        from vendor.newscrawler import crawler_html_utils
+
+        sent = self._adapter_server(monkeypatch, [403, 200])
+        waits = []
+        adapter = PoliteAdapter(sleep=waits.append)
+        session = self._session(adapter)
+        monkeypatch.setattr(crawler_html_utils, "fetch_html_with_playwright",
+                            lambda *args, **kwargs: pytest.fail("browser after 403"))
+        crawler_html_utils.fetch_html(session, "https://x.de/a")
+        assert len(sent) == 1 and waits == []
+        assert adapter.rejection["status"] == 403
+        with pytest.raises(HostThrottled):
+            session.get("https://x.de/b")
 
     def test_retry_after_accepts_seconds_and_http_dates(self):
         assert retry_after_seconds("120") == 120.0

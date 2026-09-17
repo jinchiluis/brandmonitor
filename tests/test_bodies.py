@@ -345,6 +345,88 @@ def test_body_tracks_are_separate(project, monkeypatch):
     assert {r["source_kind"] for r in rows(project)} == {"regulatory"}
 
 
+@pytest.mark.parametrize("status", [403, 429, 503])
+def test_rejection_stops_only_its_source_and_never_retires_queue(project, monkeypatch, status):
+    from datetime import timedelta, timezone
+    from src import publisher_cooldown as cooldown
+
+    monkeypatch.setattr("src.bodies.pace_host", lambda *args: None)
+    configs = json.loads(project[1].read_text(encoding="utf-8"))
+    configs[1]["content_mode"] = "full_text"
+    project[1].write_text(json.dumps(configs), encoding="utf-8")
+    discover(project, "https://major.test/article")
+    discover(project, "https://trade.test/article-a")
+    discover(project, "https://trade.test/article-b")
+    with session(project[0]) as conn:
+        conn.execute("UPDATE body_fetch SET attempts=4 WHERE source_slug='trade.test'")
+    seen = []
+
+    def fetch(url):
+        seen.append(url)
+        return (success() if "major.test" in url else
+                BodyResult("failed", url=url, error=f"HTTP {status}", http_status=status))
+
+    monkeypatch.setattr("src.bodies.fetch_body", fetch)
+    at = datetime(2026, 9, 17, 8, tzinfo=timezone.utc)
+    for day in range(6):
+        monkeypatch.setattr(cooldown, "now_utc", lambda: at + timedelta(days=day))
+        seen.clear()
+        summary = run(project, refresh=True)
+        assert summary["ok"] == summary["failed"] == 1
+        assert summary["deferred"] == 1
+        if day == 0:
+            assert seen[0] == "https://major.test/article", "rejection protection applies after success too"
+        assert "https://major.test/article" in seen
+        assert len(seen) == 2
+        with session(project[0]) as conn:
+            tasks = conn.execute("SELECT status, attempts FROM body_fetch WHERE source_slug='trade.test'").fetchall()
+            assert all(t["status"] != "unavailable" and t["attempts"] == 4 for t in tasks)
+            assert conn.execute("SELECT counted FROM body_attempt WHERE run_id=? AND source_slug='trade.test'",
+                                (summary["run_id"],)).fetchone()[0] == 0
+        # A second pass during cooldown cannot touch either task.
+        seen.clear()
+        paused = run(project)
+        assert paused["attempted"] == 0 and seen == []
+        with session(project[0]) as conn:
+            assert conn.execute("SELECT status FROM run_source WHERE run_id=? AND source_slug='trade.test'",
+                                (paused["run_id"],)).fetchone()[0] == "paused"
+    monkeypatch.setattr(cooldown, "now_utc", lambda: at + timedelta(days=7))
+    monkeypatch.setattr("src.bodies.fetch_body", lambda url: success())
+    assert run(project)["ok"] == 2
+
+
+def test_discovery_rejection_pauses_internal_bodies_and_next_collection(project, monkeypatch):
+    from src import publisher_cooldown as cooldown
+
+    discover(project)
+    seen = []
+
+    def collect(entry, *args, http, **kwargs):
+        seen.append(entry["url"])
+        if "trade.test" in entry["url"]:
+            http.update(requests=1, not_modified=0, replayed=0, bytes=0,
+                        rejection={"status": 429, "retry_after": 172800,
+                                   "reason": "HTTP 429 from www.trade.test"})
+            return [], "rejected"
+        return [], None
+
+    monkeypatch.setattr("src.collect.collect_source", collect)
+    monkeypatch.setattr("src.bodies.fetch_body", lambda url: pytest.fail("cooled body requested"))
+    first = run_collection(project[1], db_path=project[0], workers=1)
+    assert first["bodies"]["attempted"] == 0
+    assert set(cooldown.read(cooldown.path_for(project[0]))) == {"trade.test"}
+    with session(project[0]) as conn:
+        mark = get_watermark(conn, "collection:news:trade.test")
+    seen.clear()
+    second = run_collection(project[1], db_path=project[0], workers=1)
+    assert seen == ["https://major.test/"] and second["paused"] == 1
+    with session(project[0]) as conn:
+        assert get_watermark(conn, "collection:news:trade.test") == mark
+        assert tuple(conn.execute("SELECT status, attempts FROM body_fetch").fetchone()) == ("pending", 0)
+    with pytest.raises(ValueError, match="--exclude"):
+        run_collection(project[1], db_path=project[0], exclude=["typo.test"])
+
+
 PARAGRAPHS = [
     "Die neue Verordnung betrifft den Versand von Paketen nach Deutschland. "
     "Die zuständige Behörde hat dazu eine ausführliche Mitteilung veröffentlicht.",
@@ -449,6 +531,18 @@ def test_timeout_is_retryable(monkeypatch):
     monkeypatch.setattr("src.bodies.requests.get", timeout)
     result = fetch_body("https://trade.test/article")
     assert result.status == "failed" and "Timeout" in result.error
+
+
+@pytest.mark.parametrize("status", [403, 429, 503])
+@pytest.mark.parametrize("retry_after", ["172800", "Wed, 01 Jan 2031 00:00:00 GMT"])
+def test_body_rejection_preserves_status_and_retry_after(monkeypatch, status, retry_after):
+    respond(monkeypatch, status=status)
+    response = requests.get("https://trade.test/article")
+    response.headers["Retry-After"] = retry_after
+    monkeypatch.setattr("src.bodies._fetch_rendered", lambda *args: pytest.fail("browser after rejection"))
+    result = fetch_body(response.url)
+    assert result.http_status == status and result.status == "failed"
+    assert result.retry_after >= 172800
 
 
 @pytest.mark.parametrize("exc,transport", [

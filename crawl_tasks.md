@@ -85,14 +85,17 @@ sibling results remain available, with the incomplete interval retried.
 
 ### C3. Make body fetching respect publisher throttling (W20)
 
+**Implemented 2026-09-17; rollout pending.** `rejection_plan.md` records the agreed
+23-hour cooldown, 403/429/503 attempt protection, seven-day history and intraday
+health alarm. Deploy the matching VPS checker and verify the alarm before
+re-enabling intraday. The schedule has not been changed by this implementation.
+
 **Priority: before resuming intraday / contacting ZEIT again.** Files:
 `src/bodies.py`, `src/polite_http.py`, health source accounting.
 
-Extend the publisher cooldown rule to body requests and future passes. Discovery's
-adapter currently stops only its own pass; body fetching neither shares that
-state nor honours `Retry-After`. A long server-requested delay must survive the
-next scheduled run. A temporary host block must not retire all its articles as
-permanently unavailable after five attempts.
+Collection and body fetching now share a persistent source cooldown and honour
+longer `Retry-After` delays across stages and passes. A temporary 403/429/503 block
+does not spend body attempts or retire the queue; unrelated sources continue.
 
 **Done when:** a throttled publisher remains deferred until its retry time across
 stages and passes; unrelated sources continue; a temporary host block does not
@@ -178,8 +181,8 @@ including a weekend. A material change restarts validation of its affected path.
 
 These are proposed launch-period triggers, not already-implemented alarms.
 Check after the daily run; when intraday resumes, inspect its source outcomes too.
-The coverage observer runs only daily, so a partial intraday source failure can
-remain absent from VPS alerts until the next morning even while the timer polls.
+The coverage observer now runs after intraday too. Partial source failures may
+still exit zero, so inspect the source findings rather than only the stage code.
 
 | Signal | Where / comparison | Action threshold during validation |
 |---|---|---|

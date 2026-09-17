@@ -472,3 +472,58 @@ def test_disabled_canary_is_not_a_missing_snapshot(tmp_path):
 
     assert result["canaries"] is None
     assert not [item for item in result["incidents"] if "canary" in item["check"]]
+
+
+def test_rejection_alert_survives_pauses_escalates_once_and_resolves(tmp_path):
+    from health import check
+    from src import publisher_cooldown as cooldown
+
+    db = tmp_path / "db.sqlite3"
+    migrate(db)
+    news, regulatory, canary_config = _inputs(tmp_path)
+    _json(canary_config, {"enabled": False, "checks": []})
+    path = cooldown.path_for(db)
+    state = {}
+
+    def observe(at, *, failed=False):
+        result = analyze(
+            db_path=db, news_sources=news, regulatory_sources=regulatory,
+            canary_config=canary_config, canary_file=tmp_path / "absent-canary.json",
+            output_dir=tmp_path / "health", cycle_date=at.date().isoformat(),
+            generated_at=at)
+        marker = check.Marker(at, int(failed), {"news": int(failed)}, "log",
+                              at.date().isoformat())
+        status = check.evaluate(
+            check.Probe(marker), checked_at=at, stale_after=timedelta(hours=26),
+            quality_probe=check.QualityProbe(check.parse_quality_snapshot(json.dumps(result))))
+        return result, status
+
+    first = datetime(2026, 9, 17, 8, tzinfo=UTC)
+    _add_window_run(db, first - timedelta(days=1), first, 0, status="paused")
+    ordinary_pause, status = observe(first)
+    assert ordinary_pause["incidents"] == []
+    assert check.notification_action(status, state) is None
+
+    for day in range(4):
+        at = first + timedelta(days=day)
+        cooldown.record(path, "news.test", stage="collect", status=403,
+                        reason="HTTP 403 from www.news.test, stopped this pass", now=at)
+        _add_window_run(db, at - timedelta(days=1), at, 0, status="failed")
+        result, status = observe(at, failed=True)
+        assert len(result["incidents"]) == 1, "no duplicate source_failed alarm"
+        incident = result["incidents"][0]
+        assert incident["check"] == "publisher_rejection"
+        assert incident["severity"] == ("critical" if day >= 2 else "warning")
+        assert any("collect: HTTP 403 from www.news.test" in detail for detail in status.details)
+        assert check.notification_action(status, state) == ("alert" if day in (0, 2) else None)
+        state = {"notified_kind": status.kind, "notified_key": status.incident_key}
+
+        _add_window_run(db, at, at + timedelta(hours=2), 0, status="paused")
+        paused, status = observe(at + timedelta(hours=2))
+        assert paused["incident_key"] == result["incident_key"]
+        assert check.notification_action(status, state) is None
+
+    _json(path, {})  # The operator clears the cooldown; ordinary pauses stay quiet.
+    cleared, status = observe(at + timedelta(hours=3))
+    assert cleared["incidents"] == []
+    assert check.notification_action(status, state) == "recovery"

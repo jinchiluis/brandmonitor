@@ -477,7 +477,7 @@ def evaluate(
         failed = ", ".join(
             f"{name}={code}" for name, code in marker.stages.items() if code
         )
-        return HealthStatus(
+        failure = HealthStatus(
             "run_failed",
             f"Daily run completed with exit {marker.worst_exit}",
             (
@@ -487,9 +487,10 @@ def evaluate(
             ),
             True,
         )
+        return include_rejections(failure, quality_probe, marker, checked_at, stale_after)
     intraday = evaluate_intraday(intraday_probe, daily=marker)
     if intraday is not None:
-        return intraday
+        return include_rejections(intraday, quality_probe, marker, checked_at, stale_after)
     if quality_probe is not None:
         return evaluate_quality(
             quality_probe,
@@ -507,6 +508,25 @@ def evaluate(
         ),
         False,
     )
+
+
+def include_rejections(status: HealthStatus, probe: QualityProbe | None,
+                       marker: Marker, checked_at: datetime,
+                       stale_after: timedelta) -> HealthStatus:
+    """Keep publisher details and escalation visible even when a stage failed.
+
+    Use the coverage incident key so a rejected pass followed by a paused pass
+    stays one incident. A severity change or another source still notifies.
+    """
+    if probe is None or probe.snapshot is None or not any(
+            item["check"] == "publisher_rejection" for item in probe.snapshot.incidents):
+        return status
+    quality = evaluate_quality(probe, marker=marker, checked_at=checked_at,
+                               stale_after=stale_after)
+    if quality.kind not in {"quality_warning", "quality_critical"}:
+        return status
+    return HealthStatus(status.kind, status.title, status.details + quality.details,
+                        True, quality.incident_key)
 
 
 def evaluate_intraday(probe: Probe | None, *, daily: Marker) -> HealthStatus | None:

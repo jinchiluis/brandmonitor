@@ -202,7 +202,8 @@ collection, title gate, body fetch, news body gate, alert gate — every two hou
 from 08:00 to 22:00, so a potential alert reaches the reviewer the same day rather
 than after the next 06:00 run. 23:00–05:00 stays free for Windows updates and
 restarts. The 06:00 daily run remains the complete record and the only one that
-collects regulatory sources, backs up and runs the health observers; collection
+collects regulatory sources, backs up and runs the canary. Coverage analysis runs
+after daily and intraday passes; collection
 windows chain from each source's watermark, so it simply continues where the last
 intraday pass stopped. The two share `data/run.lock`: a slot that finds the lock
 held exits 3 and writes no marker. Its own marker is `data/last_intraday_run.json`,
@@ -520,6 +521,18 @@ them again on every pass. Discovery is polite by construction (`src/polite_http.
 sitemap and feed requests are conditional and a 304 replays the stored entries, and
 a host answering 429/503 twice stops that source for the pass, which reports it
 failed so its window is re-covered.
+
+Publisher rejections persist in `data/publisher_cooldown.json`: 403 stops discovery
+immediately, and a discovery throttle stop or any body 403/429/503 pauses the source
+for 23 hours (longer `Retry-After` wins). Collection and body fetching both read it
+on entry, including collection's internal body pass. Bodies skip the rest of a
+rejected source's queue without spending attempts. Other sources continue.
+Expired entries no longer pause traffic but retain seven days of rejection
+history; rejection on three consecutive UTC days escalates the health incident.
+`health/analyze.py` runs after both passes and publishes the alarm through the
+existing VPS checker. Remove a source's JSON entry to clear its cooldown and
+history; the next analyzer run reflects the change. `--exclude` remains a manual
+pause and creates no rejection incident. See `rejection_plan.md`.
 
 `allowed_dirs` means something different to each method, which is the sharpest edge
 in this config format:

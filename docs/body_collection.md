@@ -5,6 +5,15 @@ article bodies. This needs no client profile or assessment prompt.
 
 ## Source policy
 
+Discovery and body fetching share `data/publisher_cooldown.json`. A body HTTP
+403/429/503 pauses that source for 23 hours, or longer when `Retry-After` says so,
+without consuming a URL attempt. Remaining tasks for that source are skipped in
+the current pass; other sources continue. The next pass checks cooldowns before
+queuing or fetching. HTTP 404/410 still retire immediately and ordinary retryable
+failures still count toward the attempt limit. The daily and intraday coverage
+analyzer reports rejections through the existing VPS health notifications.
+See [rejection_plan.md](../rejection_plan.md) for expiry, escalation and manual clearing.
+
 Each source has `content_mode` in its JSON entry. `full_text` is configured for 15
 trade/association sources and all 8 regulatory sources; 9 news sources use
 `title_only`. Missing settings default to `title_only`; invalid values

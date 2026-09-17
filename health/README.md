@@ -14,7 +14,8 @@ There are two deliberately separate halves:
 run lock still holds. They therefore see the completed daily database, cannot
 delay its backup, and cannot race a manual collection. A publisher finding is
 written into JSON and exits zero; a nonzero observer stage means the observer
-itself failed.
+itself failed. `run_intraday.bat` also runs `analyze.py` after its news stages,
+under the same run lock, so publisher rejection findings reach the VPS that day.
 
 ## Laptop observations
 
@@ -67,8 +68,18 @@ quiet week is not an absence. Yield warnings also require
 a learned median of at least two; a broken source can learn a low baseline.
 Body warnings cover repeated retryable failures, not queue age or technical errors
 retired as unavailable. These remaining gaps are recorded in `weaknesses.md`.
-Observers run only after the daily pass: the VPS's 15-minute polling does not
-refresh per-source coverage during intraday collection.
+The coverage analyzer runs after both daily and intraday passes; the canary runs
+only daily. The VPS polls the latest published snapshot every fifteen minutes.
+
+The analyzer also reads `data/publisher_cooldown.json`. Active publisher rejections
+are warnings, escalating to critical on three consecutive rejection days. The
+incident key ignores changing timestamps and day counts, so a continued pause
+stays latched; escalation changes its severity and sends one updated alert.
+Generic source-failure findings for a cooled source are replaced by its more
+specific rejection finding. Run-failure alerts include these findings and use
+the same coverage key, so the subsequent paused pass does not notify again.
+Clearing or expiring a cooldown resolves its finding at the next analyzer run;
+ordinary `--exclude` pauses do not create one.
 
 Both observers retain the first immutable observation for each news run and
 atomically replace a latest pointer:

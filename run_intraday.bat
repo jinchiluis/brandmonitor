@@ -10,7 +10,7 @@ rem
 rem It is optional. Collection windows chain from each source's watermark, so the
 rem 06:00 daily run simply picks up where the last intraday run stopped, and it
 rem remains the complete record: regulatory sources, parliamentary procedures,
-rem backup and the health observers run only there.
+rem backup and the canary run only there. Coverage health runs after both passes.
 rem
 rem   0  every stage completed
 rem   1  a stage produced nothing usable
@@ -94,6 +94,7 @@ set "CODE_title_gate=2"
 set "CODE_title_bodies=2"
 set "CODE_body_gate=2"
 set "CODE_alert_gate=2"
+set "CODE_quality_health=2"
 
 rem The same lock as run_daily.bat. A 06:00 run still going at 08:00 wins; this
 rem slot is skipped without a marker, so the VPS keeps judging the last real run.
@@ -131,7 +132,7 @@ set "MARKER=%~dp0data\last_intraday_run.json"
     echo   "finished_utc": "!FINISHED!Z",
     echo   "worst_exit": !WORST!,
     echo   "cycle_date": "%DAY%",
-    echo   "stages": { "netcheck": !CODE_netcheck!, "news": !CODE_news!, "title_gate": !CODE_title_gate!, "title_bodies": !CODE_title_bodies!, "body_gate": !CODE_body_gate!, "alert_gate": !CODE_alert_gate! },
+    echo   "stages": { "netcheck": !CODE_netcheck!, "news": !CODE_news!, "title_gate": !CODE_title_gate!, "title_bodies": !CODE_title_bodies!, "body_gate": !CODE_body_gate!, "alert_gate": !CODE_alert_gate!, "quality_health": !CODE_quality_health! },
     echo   "log": "data/log/%DAY%/run_intraday.txt"
     echo }
 )
@@ -149,6 +150,7 @@ call :stage title_bodies fetch-bodies --kind news --title-gate-client jt-express
 rem News only: regulatory bodies wait for the 06:00 run.
 call :stage body_gate body-gate --kind news
 call :stage alert_gate alert-gate
+call :observer quality_health health\analyze.py --cycle-date "%DAY%"
 exit /b 0
 
 
@@ -157,6 +159,19 @@ rem %1 stage name, %2.. arguments for run.py
 echo.>> "%OUT%"
 echo -------- %1 -------->> "%OUT%"
 "%PY%" run.py %2 %3 %4 %5 %6 %7 %8 %9 >> "%OUT%" 2>&1
+set "CODE=!ERRORLEVEL!"
+set "CODE_%1=!CODE!"
+echo [%1] exit=!CODE!>> "%OUT%"
+echo [brandmonitor] %1 exit=!CODE!
+if !CODE! GTR !WORST! set "WORST=!CODE!"
+exit /b 0
+
+
+:observer
+rem Findings exit zero; nonzero means the observer itself failed.
+echo.>> "%OUT%"
+echo -------- %1 -------->> "%OUT%"
+"%PY%" "%~2" %3 %4 %5 %6 %7 %8 %9 >> "%OUT%" 2>&1
 set "CODE=!ERRORLEVEL!"
 set "CODE_%1=!CODE!"
 echo [%1] exit=!CODE!>> "%OUT%"

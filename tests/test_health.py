@@ -356,6 +356,31 @@ def test_warning_quality_requires_an_incident():
         parse_quality_snapshot(quality_payload(generated=NOW, status="warning"))
 
 
+def test_intraday_failure_includes_rejection_and_uses_its_stable_latch():
+    daily, intraday = _daily_and_intraday(intraday_finished=NOW, intraday_worst=1)
+    quality = QualityProbe(parse_quality_snapshot(quality_payload(
+        generated=NOW, status="warning", incident_key="publisher-a-warning",
+        incidents=[{"source": "a.de", "check": "publisher_rejection",
+                    "severity": "warning", "message": "bodies: HTTP 429; paused for 23h"}])))
+    status = evaluate(daily, intraday_probe=intraday, quality_probe=quality,
+                      checked_at=NOW, stale_after=timedelta(hours=26))
+    assert status.kind == "intraday_failed"
+    assert any("a.de" in detail and "HTTP 429" in detail for detail in status.details)
+    assert notification_action(status, {"notified_kind": "intraday_failed"}) == "alert"
+    assert notification_action(status, {"notified_key": "publisher-a-warning"}) is None
+
+
+def test_stale_rejection_snapshot_is_not_attached_to_a_new_failure():
+    daily, intraday = _daily_and_intraday(intraday_finished=NOW, intraday_worst=2)
+    quality = QualityProbe(parse_quality_snapshot(quality_payload(
+        generated=NOW - timedelta(days=2), status="warning", incident_key="old-rejection",
+        incidents=[{"source": "a.de", "check": "publisher_rejection",
+                    "severity": "warning", "message": "old rejection"}])))
+    status = evaluate(daily, intraday_probe=intraday, quality_probe=quality,
+                      checked_at=NOW, stale_after=timedelta(hours=26))
+    assert status.kind == "intraday_failed" and status.incident_key is None
+
+
 def push_args(tmp_path, *, topic: str | None = "bm-test-topic"):
     push_env = tmp_path / "push.env"
     if topic:

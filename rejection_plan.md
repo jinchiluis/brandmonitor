@@ -4,6 +4,12 @@ Written **2026-09-17**. This is the implementation brief for [crawl_tasks.md](cr
 C3 / [weaknesses.md](weaknesses.md) W20, narrowed to one mechanism: when a publisher
 rejects us, stop asking for a while, and make sure a person finds out.
 
+**Updated after review; implemented 2026-09-17.** The agreed version uses 23-hour
+cooldowns, includes 403, retains seven days of expired history, serializes file
+updates with an OS lock, and runs coverage analysis after intraday too. No database
+migration or new dependency. VPS checker rollout and live alarm verification remain
+before re-enabling the intraday task.
+
 Scope note: the spoofed browser User-Agent and the absent `robots.txt` handling are
 **out of scope here** and are being done in a separate session. Those are about why a
 publisher decides to reject us; this file is about what happens afterwards.
@@ -66,11 +72,12 @@ a throttle rather than flattening it into an `HTTPError` string. Do not recover 
 parsing `BodyResult.error`: that field is the human-readable diagnosis and is displayed in
 the admin UI, so a regex over it would couple the retry logic to the wording.
 
-Reuse `THROTTLE_STATUSES` from `vendor/newscrawler/crawler_html_utils` rather than a second
-list of codes, and reuse `retry_after_seconds` from `src/polite_http.py` rather than a
+Reuse `REJECTION_STATUSES` from `vendor/newscrawler/crawler_html_utils` (403 plus
+the existing `THROTTLE_STATUSES` 429/503), and reuse `retry_after_seconds` from
+`src/polite_http.py` rather than a
 second `Retry-After` parser — it already handles both the delta and the HTTP-date form.
 
-**Done when:** a 429 or 503 on a body fetch is distinguishable from an ordinary failure at
+**Done when:** a 403, 429 or 503 on a body fetch is distinguishable from an ordinary failure at
 the call site, carrying its `Retry-After` when the publisher sent one.
 
 ### R2. A throttle must not spend the URL's attempt budget
@@ -84,7 +91,8 @@ is throttled again, and after five such cycles the queue retires anyway.
 A throttle says nothing about whether the URL is fetchable, so it belongs with the `untried`
 case, not with an ordinary failure — but unlike a transport error it is trustworthy evidence
 even after the pass has succeeded elsewhere, because the host answered. Follow the existing
-`untried` branch for how an attempt is withheld and how the pass is ended; do not rewrite
+`untried` branch for how an attempt is withheld. Skip the rejected source's remaining
+tasks using a small in-memory set; other sources continue. Do not rewrite
 the transport breaker, which is solving a different problem (our network versus a dead host).
 
 **Done when:** repeated 429s never move a `body_fetch` row to `unavailable`; a genuine
@@ -104,28 +112,33 @@ that survives a database restore and that a person can clear at 23:00 without a 
 client. It must be **written beside the target and moved over it**, exactly as the batch
 files do for `last_intraday_run.json`; slots are two hours apart, but a manual backfill can
 overlap one and a half-read cooldown file is a bad failure.
+Hold a separate OS file lock over the complete read–modify–replace operation, so
+overlapping writers cannot overwrite each other's source entries. The shared atomic
+writer in `health/common.py` supplies the temporary file and replacement.
 
 Shape — an expiry per source, not a bare flag:
 
 ```json
 {
   "dvz.de": {
-    "until": "2026-09-17T22:00:00Z",
+    "until": "2026-09-18T09:04:11Z",
     "since": "2026-09-17T10:04:11Z",
+    "last_rejected_at": "2026-09-17T10:04:11Z",
     "reason": "HTTP 429 from www.dvz.de (2 throttle response(s)), stopped this pass",
     "stage": "collect",
+    "status": 429,
     "consecutive_days": 1
   }
 }
 ```
 
-An expiry rather than "clear it at midnight" because nothing runs between 23:00 and 05:00,
-so there is no process to do the clearing. Default cooldown is the rest of the day: the last
-intraday slot is 22:00, so expiring then leaves the 06:00 daily run free to retry once
-overnight, which is the gentlest possible probe of whether the block has lifted. Honour a
-longer `Retry-After` when the publisher sent one — that is the publisher naming its own
-number and it outranks our default. Record the timestamps in UTC, as the markers do;
-collection's Berlin dates are a date-filtering concern and do not belong here.
+Default cooldown is 23 hours from rejection. The first scheduled pass after expiry
+may retry; that is not necessarily the next 06:00 run. Honour a longer `Retry-After`
+when the publisher sent one, and never shorten an existing longer expiry. All
+timestamps and consecutive rejection days use UTC. Multiple rejections on the same
+day count once; rejection again the next day increments the streak, and a missed
+rejection day resets it. Expired entries retain seven days of history, so writing
+another source's cooldown cannot erase yesterday's streak.
 
 `consecutive_days` is not decoration; R5 reads it.
 
@@ -133,18 +146,19 @@ collection's Berlin dates are a date-filtering concern and do not belong here.
 `Retry-After` preferred over the default expiry, and the file is valid JSON after a pass
 that was killed mid-write.
 
-### R4. Consume it in `run.py`, not in the batch file
+### R4. Consume it at collection and body-fetch entry points
 
-Files: `run.py`, `run_intraday.bat` and `run_daily.bat` (unchanged, deliberately).
+Files: `src/collect.py`, `src/bodies.py`. The CLI remains unchanged.
 
-`run.py` reads the cooldown file itself and folds the unexpired slugs into the `exclude`
-list it already passes to `run_collection` and `run_body_fetch`. The `--exclude` flag stays
+`run_collection` and `run_body_fetch` read the cooldown file themselves and fold the
+unexpired slugs into their existing exclusion path. This also protects the body pass
+invoked internally by collection, after a rejection in that same collection. The `--exclude` flag stays
 for manual use and for the ZEIT-style long pause.
 
 Do **not** plumb this through the batch files. The `:stage` helper forwards `%2` through
 `%9` — eight arguments — which is why `pause_for_pass` accepts a comma-separated form at
 all, and rendering JSON into a command-line flag from `cmd.exe` is worse than reading the
-file in Python. Neither `.bat` should change for this feature.
+file in Python. `run_daily.bat` stays unchanged; intraday adds only the R5 observer.
 
 One sharp edge: `pause_for_pass` raises `ValueError` on a name matching no configured source
 (`src/collect.py:234`). That is right for a hand-typed `--exclude`, where a typo would
@@ -153,11 +167,12 @@ aborts the entire collect stage because of one stale entry — a source renamed 
 from `germany_medias.json` leaves exactly such an entry behind. The file reader must drop
 unknown slugs with a WARNING and pass on the rest; keep `ValueError` for the flag.
 
-Expired entries are skipped on read and pruned on write, so the file does not grow forever.
+Expired entries stop excluding immediately. Prune them on writes only after their
+last rejection is more than seven days old; active longer expiries are retained.
 
 **Done when:** a slot with a live cooldown entry sends that publisher no request from either
 stage and reports it `paused`; an entry naming a removed source logs a warning and costs
-nothing; an expired entry is ignored and disappears.
+nothing; an expired entry stops excluding and is eventually pruned.
 
 ### R5. The alarm — the point of the whole thing
 
@@ -180,11 +195,20 @@ what buys the time to answer it. Two distinct signals, because they mean differe
   and no amount of waiting will fix it. This must escalate rather than repeat, because a
   daily line saying the same thing is the failure mode that stops being read.
 
+The threshold is three consecutive rejection days. A continued warning or critical
+incident keeps its key; timestamps and changing day counts do not retrigger it.
+
 Both belong with the existing source accounting so they travel the path that already works:
 `health/analyze.py` writes its own atomic JSON, and the VPS's `brandmonitor-health.timer`
 reads the markers over SSH every fifteen minutes. Reuse the existing latch — the
 `run_failed` notification already delivers by email *or* push, and a second notification
 channel is not wanted.
+
+`run_intraday.bat` runs `health/analyze.py` after its news stages under the run lock
+and includes the observer's exit code in its marker. Rejection findings replace
+generic `source_failed` findings for cooled sources. The VPS checker includes their
+details even in a run-failure alert, retaining the coverage key across failed and
+paused passes so the pause itself does not send another alert.
 
 Data loss from a long cooldown is accepted and is explicitly **not** handled here. Some
 sources are pinned to news-only sitemap files with a short listing window and will lose
@@ -195,6 +219,11 @@ once the publisher relationship is sorted out. Do not build automatic backfill f
 **Done when:** a first rejection reaches a person the same day; a source cooled for several
 consecutive days escalates once rather than repeating; a cleared cooldown is visible as
 resolved; and neither alarm fires for an ordinary `--exclude` pause.
+
+To clear a cooldown manually, remove its entry from `data/publisher_cooldown.json`
+while no collection/body stage is writing it (or replace the object with `{}` to
+clear all). Removing an entry also resets its streak. The next analyzer run reflects
+resolution; run `health/analyze.py` manually if the operator needs that immediately.
 
 ## Order and dependencies
 

@@ -11,11 +11,13 @@ are identical to a full download. Skipping would change them - an article found 
 a titled feed and an untitled sitemap would arrive untitled whenever only the feed
 went quiet, and ``src.bodies.queue_body`` requeues a body fetch on any changed hint.
 
-``PoliteAdapter`` counts what a source sends and listens for 429/503. The first
+``PoliteAdapter`` counts what a source sends and listens for 403/429/503. A 403
+stops immediately. For 429/503, the first
 throttle response is waited out (``Retry-After``, else 10 s) and retried; a second
 one, or a wait longer than 60 s, ends that source's pass without another request,
 and collection reports the source failed so its watermark holds and the next pass
 re-covers the window.
+The caller persists a stopped source's rejection for later stages and passes.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ from urllib.parse import urlsplit
 from requests.adapters import HTTPAdapter
 
 from src.db import utcnow
-from vendor.newscrawler.crawler_html_utils import THROTTLE_STATUSES, HostThrottled
+from vendor.newscrawler.crawler_html_utils import REJECTION_STATUSES, HostThrottled
 
 Entry = Tuple[str, Optional[datetime], Optional[str], Optional[str]]
 Child = Tuple[str, Optional[datetime]]
@@ -160,6 +162,7 @@ class PoliteAdapter(HTTPAdapter):
         self.bytes = 0
         self.throttles = 0
         self.tripped: Optional[str] = None
+        self.rejection: Optional[dict] = None
         # src.monitoring.FetchRecorder. ``requests`` counts responses only, so a
         # request that never got one (DNS, refused, timeout) is visible only there.
         self.recorder = recorder
@@ -182,16 +185,19 @@ class PoliteAdapter(HTTPAdapter):
                 self.recorder.finish(event, response=response)
             if response.status_code == 304:
                 self.not_modified += 1
-            if response.status_code not in THROTTLE_STATUSES:
+            if response.status_code not in REJECTION_STATUSES:
                 return response
             self.throttles += 1
             wait = retry_after_seconds(response.headers.get("Retry-After"))
-            if self.throttles >= self.max_throttles or (wait or 0) > self.max_wait:
+            if (response.status_code == 403 or self.throttles >= self.max_throttles
+                    or (wait or 0) > self.max_wait):
                 # Returned as-is, but the source is now an error: whatever this
                 # response cost the caller is re-covered by the next pass.
                 self.tripped = (f"HTTP {response.status_code} from "
                                 f"{urlsplit(request.url).netloc} ({self.throttles} "
                                 f"throttle response(s)), stopped this pass")
+                self.rejection = {"status": response.status_code,
+                                  "retry_after": wait, "reason": self.tripped}
                 return response
             # Waited out and retried once, so a lone 429 does not silently cost
             # the file it answered while the source still reports ok.

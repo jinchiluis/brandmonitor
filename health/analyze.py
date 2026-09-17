@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Build a read-only daily coverage-health verdict from the production database.
+"""Build a read-only coverage-health verdict after daily and intraday passes.
 
 The collector remains the authority for storing source material. This observer
-only reads its durable run accounting and the current canary snapshot, then writes
-small immutable health snapshots outside SQLite. A warning/critical finding is a
+only reads its durable run accounting, publisher cooldowns and the current canary
+snapshot, then writes small immutable health snapshots outside SQLite. A warning/critical finding is a
 successful analysis and therefore exits zero; exit 2 means the observer broke.
 """
 
@@ -26,6 +26,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from health.common import ROOT, format_utc, now_utc, publish_snapshot  # noqa: E402
+from src import publisher_cooldown  # noqa: E402
 
 
 DEFAULT_DB = ROOT / "data" / "brandmonitor.sqlite3"
@@ -36,7 +37,7 @@ DEFAULT_CANARY = ROOT / "data" / "health" / "canaries" / "latest.json"
 DEFAULT_OUTPUT = ROOT / "data" / "health"
 UTC = timezone.utc
 BERLIN = ZoneInfo("Europe/Berlin")
-RULES_VERSION = "coverage-health-v4"
+RULES_VERSION = "coverage-health-v5"
 SEVERITY_RANK = {"healthy": 0, "learning": 0, "warning": 1, "critical": 2}
 BASELINE_DAYS = 7
 BASELINE_MAX_DAYS = 28
@@ -544,6 +545,23 @@ def analyze(
         # expected state rather than a critical finding, and the snapshot left over
         # from its last run would mismatch this cycle every day from now on.
         canary = None
+
+    cooled = publisher_cooldown.active(
+        publisher_cooldown.path_for(db_path),
+        {_slug(entry["url"]) for entries in expected.values() for entry in entries},
+        now=generated)
+    # The cooldown explains this failure and remains visible on later paused
+    # passes. Avoid toggling an extra source_failed incident on every daily retry.
+    incidents = [item for item in incidents
+                 if not (item["source"] in cooled and item["check"] == "source_failed")]
+    for slug, entry in cooled.items():
+        days = entry["consecutive_days"]
+        stale = days >= publisher_cooldown.ESCALATE_DAYS
+        incidents.append(_incident(
+            slug, "publisher_rejection", "critical" if stale else "warning",
+            f"{entry['stage']}: {entry['reason']}; paused until {entry['until']}; "
+            f"rejected on {days} consecutive day(s)"
+            + (" - persistent block, manual review needed" if stale else "")))
 
     incidents.sort(key=lambda item: (-SEVERITY_RANK[item["severity"]], item["source"], item["check"]))
     if any(item["severity"] == "critical" for item in incidents):

@@ -25,6 +25,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import requests
 
+from src import publisher_cooldown
 from src.config import (COLLECTION_OVERLAP_HOURS, CRAWLER_WORKERS, INPUT_DIR,
                         NEWS_LOOKBACK_DAYS)
 from src.db import (
@@ -382,6 +383,7 @@ def collect_source(entry: Dict[str, Any], start: datetime,
             http.update(requests=adapter.requests, not_modified=adapter.not_modified,
                         replayed=cache.replayed, bytes=adapter.bytes,
                         cache_updates=cache.updates, throttles=adapter.throttles,
+                        rejection=adapter.rejection,
                         recorder=recorder)
 
     # The probe GETs the configured host and its www twin and keeps the first that
@@ -547,7 +549,10 @@ def run_collection(sources_path: Optional[Path] = None, *, days: Optional[float]
     path = Path(sources_path) if sources_path else (
         DEFAULT_REGULATORY_SOURCES if kind == "regulatory" else DEFAULT_NEWS_SOURCES)
     sources.clear_cache()
-    entries = pause_for_pass(crawled_entries(sources.load_sources(str(path))), exclude)
+    entries = crawled_entries(sources.load_sources(str(path)))
+    cooldown_file = publisher_cooldown.path_for(db_path)
+    cooled = publisher_cooldown.active(cooldown_file, {slug_for(e) for e in entries})
+    entries = pause_for_pass(entries, [*(exclude or []), *cooled])
     if not entries:
         raise ValueError(f"no sources in {path}")
     modes = {slug_for(entry): content_mode(entry) for entry in entries}
@@ -638,6 +643,9 @@ def run_collection(sources_path: Optional[Path] = None, *, days: Optional[float]
         for future in as_completed(futures):
             plan, hints, error, truncation, http = future.result()
             entry, slug = plan["entry"], plan["slug"]
+            if http.get("rejection"):
+                publisher_cooldown.record(cooldown_file, slug, stage="collect",
+                                          **http["rejection"])
             if http:
                 logger.info("[collect] %s: %d request(s), %d not modified, %d file(s) "
                             "replayed, %.2f MB", slug, http["requests"],

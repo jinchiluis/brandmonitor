@@ -13,6 +13,7 @@ from src.config import CRAWLER_VERBOSE as _VERBOSE
 # A publisher answering 429 or 503 is asking us to stop. Neither a browser nor the
 # next guessed URL is an acceptable answer to that.
 THROTTLE_STATUSES = (429, 503)
+REJECTION_STATUSES = (403, *THROTTLE_STATUSES)
 
 
 class HostThrottled(requests.exceptions.RequestException):
@@ -252,9 +253,9 @@ def fetch_html(session, url, timeout=(3,5), use_playwright_fallback=True, use_br
 
         if _VERBOSE: logger.info(f"[fetch_html] requests status={r.status_code} for {url}")
 
-        # If 403 or other error, try Playwright fallback (unless disabled)
+        # A publisher rejection must never trigger a browser fallback.
         if r.status_code >= 400:
-            if use_playwright_fallback and r.status_code not in THROTTLE_STATUSES:
+            if use_playwright_fallback and r.status_code not in REJECTION_STATUSES:
                 if _VERBOSE: logger.info(f"[fetch_html] trying Playwright fallback for {url}")
                 try:
                     return fetch_html_with_playwright(url, timeout_ms=40000)

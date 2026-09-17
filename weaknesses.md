@@ -116,6 +116,12 @@ month boundary. Do not silently restore unrestricted recursive discovery.
 
 ## W20. Body requests ignore publisher throttling
 
+**Implementation update, 2026-09-17:** the agreed fix is in `rejection_plan.md`:
+23-hour source cooldowns (longer `Retry-After` wins), no spent attempts for body
+403/429/503, and coverage analysis after daily and intraday passes. Matching VPS
+checker deployment and alarm verification remain before enabling intraday.
+The evidence below describes the behavior before this fix.
+
 **Priority:** before resuming intraday or contacting ZEIT again.
 **Evidence:** code review and production. Files: `src/bodies.py`,
 `src/polite_http.py`.
@@ -201,9 +207,10 @@ retitles/enrichment can also make a source look busy.
   failures can similarly reduce its reference set.
 - Monthly checks can detect drift after short-lived missed listings are gone.
 
-Current health also has operational blind spots: observers run only after the
-daily pass, partial intraday source failure may still exit 0, and the optional
-intraday marker has no freshness alarm. `_body_metrics` warns on retryable rows
+Current health also has operational blind spots: partial intraday source failure
+may still exit 0, and the optional intraday marker has no freshness alarm. The
+coverage analyzer now runs after both daily and intraday passes (C3).
+`_body_metrics` warns on retryable rows
 with at least three attempts, but that warning disappears when they retire to
 `unavailable`; there is no queue-age/retirement incident.
 
