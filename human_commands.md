@@ -16,4 +16,4 @@ Get-Content C:\apps\brandmonitor\data\log\2026-09-12\run_daily.txt -Wait -Tail 2
 
 # Human todos:
 - paywall?
-- zeit can be retried (block gone, --exclude param there)
+- do i need feed, when i have sitemap? what would be lost?

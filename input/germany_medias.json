@@ -8,7 +8,7 @@
     "sitemap": true,
     "sitemap_urls": [
       "https://www.spiegel.de/sitemaps/news-de.xml",
-      {"url": "https://www.spiegel.de/sitemaps/article/sitemap-{YYYY}-{MM}_{PAGE}.xml", "pages": [1, 9]}
+      {"url": "https://www.spiegel.de/sitemaps/article/sitemap-{YYYY}-{MM}_{PAGE}.xml", "pages": [1, 9], "optional_current_404": true}
     ],
     "feeds": true,
     "feed_urls": ["https://www.spiegel.de/schlagzeilen/index.rss", "https://www.spiegel.de/index.rss"],
@@ -215,7 +215,7 @@
     "sitemap": true,
     "sitemap_urls": [
       "https://www.welt.de/sitemaps/newssitemap/newssitemap.xml",
-      "https://www.welt.de/sitemaps/sitemap/{YYYY}/{MM}/sitemap.xml.gz"
+      {"url": "https://www.welt.de/sitemaps/sitemap/{YYYY}/{MM}/sitemap.xml.gz", "optional_current_404": true}
     ],
     "feeds": false,
     "frontpage": false,
@@ -449,8 +449,7 @@
     "allowed_dirs": [
       "presse",
       "aktuelles",
-      "themen-und-positionen",
-      "kep-branche"
+      "themen-und-positionen"
     ],
     "excluded_dirs": [
       "ueber-uns",

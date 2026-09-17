@@ -71,7 +71,13 @@ def _specs(entry: Dict[str, Any]) -> List[Dict[str, Any]]:
 
         {"url": ".../sitemap.xml?page={LATEST}", "index": ".../sitemap.xml"}
         {"url": ".../sitemap-{YYYY}-{MM}_{LATEST}.xml", "index": "...", "latest_count": 3}
-        {"url": ".../sitemap-{YYYY}-{MM}_{PAGE}.xml", "pages": [1, 6]}
+        {"url": ".../sitemap-{YYYY}-{MM}_{PAGE}.xml", "pages": [1, 6],
+         "optional_current_404": true}
+
+    A grouped 404 is required by default. ``optional_current_404`` is the explicit
+    exception for a current month whose file or trailing pages may not exist yet;
+    older periods in the same recovery window remain required. ``optional_404``
+    exists for a verified non-dated page range with the same publisher contract.
     """
     specs: List[Dict[str, Any]] = []
     for raw in entry.get("sitemap_urls") or []:
@@ -176,7 +182,8 @@ def resolve_latest(session: requests.Session, url: str, spec: Dict[str, Any],
     nothing.
     """
     index_url = spec["index"]
-    _entries, children = fetch_sitemap_urls(session, index_url, cache, strict=True)
+    _entries, children = fetch_sitemap_urls(
+        session, index_url, cache, strict=True, expected_root="sitemapindex")
     # The token marks where the number is, and matching stops there: ohn.haendlerbund
     # and bevh serve TYPO3 paged sitemaps whose every page carries its own cHash
     # (?page=34&cHash=7ea2f388...), which no template can predict. What follows the
@@ -220,19 +227,30 @@ def collect_from_pinned(entry: Dict[str, Any], since: datetime, end: datetime, *
     undated = 0
 
     for spec in _specs(entry):
-        urls = expand_dates(spec["url"], since, end)
+        period_urls = expand_dates(spec["url"], since, end)
+        current_urls = set(expand_dates(spec["url"], end, end))
+        targets: List[tuple[str, bool]] = []
         if LATEST_TOKEN in spec["url"]:
             resolved: List[str] = []
-            for url in urls:
+            for url in period_urls:
                 resolved += resolve_latest(session, url, spec, cache)
-            urls = list(dict.fromkeys(resolved))
+            targets = [(url, bool(spec.get("optional_404")))
+                       for url in dict.fromkeys(resolved)]
         elif PAGE_TOKEN in spec["url"]:
-            urls = [page for url in urls for page in expand_pages(url, spec)]
+            for period_url in period_urls:
+                optional = bool(spec.get("optional_404") or (
+                    spec.get("optional_current_404") and period_url in current_urls))
+                targets.extend((page, optional) for page in expand_pages(period_url, spec))
+        else:
+            targets = [(url, bool(spec.get("optional_404") or (
+                spec.get("optional_current_404") and url in current_urls)))
+                       for url in period_urls]
 
-        read, failures, unreadable = 0, [], []
-        for url in urls:
+        read, failures, required_failures, unreadable = 0, [], [], []
+        for url, optional_404 in targets:
             try:
-                url_entries, _children = fetch_sitemap_urls(session, url, cache, strict=True)
+                url_entries, _children = fetch_sitemap_urls(
+                    session, url, cache, strict=True, expected_root="urlset")
             except (PinnedSitemapError, HostThrottled):
                 # A throttled host must stop the source's pass, not be retried
                 # against the next page of the same range.
@@ -241,6 +259,8 @@ def collect_from_pinned(entry: Dict[str, Any], since: datetime, end: datetime, *
                 failures.append(f"{url}: {type(exc).__name__}: {exc}")
                 if not _is_absent(exc):
                     unreadable.append(f"{url}: {type(exc).__name__}: {exc}")
+                elif not optional_404:
+                    required_failures.append(f"{url}: {type(exc).__name__}: {exc}")
                 continue
             read += 1
 
@@ -262,14 +282,15 @@ def collect_from_pinned(entry: Dict[str, Any], since: datetime, end: datetime, *
             if cache is not None:
                 cache.remember(url, kept, [])
 
-        if not read or unreadable:
+        if not read or unreadable or required_failures:
             raise PinnedSitemapError(
-                "pinned sitemap unavailable: " + "; ".join(unreadable or failures))
+                "pinned sitemap unavailable: "
+                + "; ".join(unreadable or required_failures or failures))
         if failures:
             # Every failure here answered 404, and a sibling read: a page or month
             # that has not started yet, which is not this source being down.
             logger.info("[pinned] %s: %d of %d file(s) absent: %s",
-                        entry.get("url"), len(failures), len(urls), "; ".join(failures))
+                        entry.get("url"), len(failures), len(targets), "; ".join(failures))
 
     if undated:
         logger.info("[pinned] %s: %d entry/entries carried no date and were skipped",

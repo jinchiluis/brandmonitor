@@ -21,7 +21,7 @@ import time, random
 from datetime import datetime, timedelta, timezone
 
 from src.config import CRAWLER_VERBOSE as _VERBOSE
-from typing import Any, List, Optional, Tuple, Dict, Set
+from typing import Any, Callable, List, Optional, Tuple, Dict, Set
 from urllib.parse import urljoin, urlparse, urlsplit, urlunsplit, parse_qsl, urlencode
 import tldextract
 import requests
@@ -361,7 +361,8 @@ def _is_news_sitemap(sitemap_url: str) -> bool:
 
 
 def fetch_sitemap_urls(session: requests.Session, sitemap_url: str, cache=None, *,
-                       strict: bool = False) -> Tuple[
+                       strict: bool = False,
+                       expected_root: Optional[str] = None) -> Tuple[
     List[Tuple[str, Optional[datetime], Optional[str], Optional[str]]],
     List[Tuple[str, Optional[datetime]]]
 ]:
@@ -377,7 +378,8 @@ def fetch_sitemap_urls(session: requests.Session, sitemap_url: str, cache=None, 
 
     ``strict`` raises instead of returning an empty result when the file cannot be
     read: a bad status, a redirect to another host, markup where XML was promised,
-    or XML that will not parse even with the recover parser. A traversal wants the
+    or incomplete XML. ``expected_root`` additionally requires ``urlset`` or
+    ``sitemapindex`` when a pinned file has a configured role. A traversal wants the
     quiet default - one unreadable file among a hundred guesses is normal and the
     walk continues. A *pinned* file is the opposite case: it is the only place that
     source's articles come from, so an unreadable one has to stop the source
@@ -437,7 +439,13 @@ def fetch_sitemap_urls(session: requests.Session, sitemap_url: str, cache=None, 
     content = raw
     try:
         root = etree.fromstring(content)
-    except Exception:
+    except Exception as parse_error:
+        # A pinned file is a checkpoint boundary. Recovering the prefix of a
+        # truncated response and calling it complete can move the watermark over
+        # entries that were cut off, so strict reads must require the closing XML.
+        if strict:
+            raise SitemapUnreadable(
+                f"{sitemap_url}: XML is incomplete or invalid: {parse_error}") from parse_error
         parser = etree.XMLParser(recover=True, huge_tree=True)
         try:
             root = etree.fromstring(content, parser=parser)
@@ -461,6 +469,9 @@ def fetch_sitemap_urls(session: requests.Session, sitemap_url: str, cache=None, 
         if localname not in ("urlset", "sitemapindex"):
             raise SitemapUnreadable(
                 f"{sitemap_url}: root element is <{localname or '?'}>, not a sitemap")
+        if expected_root and localname != expected_root:
+            raise SitemapUnreadable(
+                f"{sitemap_url}: root element is <{localname}>, expected <{expected_root}>")
 
     # Detect actual namespace from root (some sites use https:// instead of http://)
     root_ns = root.nsmap.get(None, "http://www.sitemaps.org/schemas/sitemap/0.9")
@@ -731,12 +742,21 @@ def discover_declared_feeds(session, base: str) -> List[str]:
     return found
 
 
-def collect_from_feeds(session, site_url, cache=None):
+def _feed_document_kind(raw: bytes) -> str:
+    """Return the feed root kind, requiring one complete XML document."""
+    root = etree.fromstring(raw)
+    return etree.QName(root).localname.lower() if isinstance(root.tag, str) else ""
+
+
+def collect_from_feeds(session, site_url, cache=None,
+                       report: Optional[Dict[str, Any]] = None):
     """
     Discover article URLs via RSS/Atom.
       - Reads the feeds the homepage advertises via <link rel="alternate">
       - Then tries common on-site feed paths (COMMON_FEED_PATHS)
-    Returns: List[ArticleHint]
+    Returns: List[ArticleHint]. When ``report`` is supplied, a configured feed that
+    cannot be read is appended to ``report["errors"]`` while usable sibling feeds
+    are still returned. Autodiscovered/common-path guesses remain optional.
     """
     from urllib.parse import urljoin, urlsplit
     import feedparser
@@ -752,6 +772,14 @@ def collect_from_feeds(session, site_url, cache=None):
     rules = sources.get_site_rules(site_url) or {}
     feed_urls: List[str] = [u for u in (rules.get("feed_urls") or []) if u]
     explicit = set(feed_urls)
+
+    def failed(url: str, detail: str) -> None:
+        if url not in explicit:
+            return
+        if report is not None:
+            report.setdefault("errors", []).append(f"{url}: {detail}")
+        if _VERBOSE:
+            logger.info(f"[rss] required feed failed {url}: {detail}")
 
     # Advertised feeds next: a fixed path list misses any publisher who puts its
     # feed somewhere unusual, and that reads as "this site has no feeds" rather
@@ -786,9 +814,22 @@ def collect_from_feeds(session, site_url, cache=None):
                                       source="rss", date_source=label)
                           for url, published, title, label in cache.replay(fu)[0]]
                 continue
-            raw = r.content if r.status_code < 400 else b""
+            if r.status_code >= 400:
+                failed(fu, f"HTTP {r.status_code}")
+                if _VERBOSE: logger.info(f"[rss] miss {fu}: status={r.status_code}")
+                continue
+            raw = r.content
             if not raw:
+                failed(fu, "empty response")
                 if _VERBOSE: logger.info(f"[rss] miss {fu}: status={r.status_code} empty")
+                continue
+            try:
+                root_kind = _feed_document_kind(raw)
+            except Exception as exc:
+                failed(fu, f"incomplete or invalid XML: {type(exc).__name__}: {exc}")
+                continue
+            if root_kind not in ("rss", "feed", "rdf"):
+                failed(fu, f"unexpected <{root_kind or '?'}> document")
                 continue
             if cache is not None:
                 cache.seen(fu, r)
@@ -850,7 +891,10 @@ def collect_from_feeds(session, site_url, cache=None):
                 cache.remember(fu, [(h.url, h.published_at, h.title, h.date_source)
                                     for h in feed_hints], [])
 
+        except HostThrottled:
+            raise
         except Exception as ex:
+            failed(fu, f"{type(ex).__name__}: {ex}")
             if _VERBOSE: logger.info(f"[rss] error {fu}: {ex}")
 
     return hints
@@ -968,7 +1012,9 @@ def _extract_date_near_link(link_elem):
 
     return None
 
-def collect_from_frontpage(session, site_url, start_date=None, cap=80):
+def collect_from_frontpage(session, site_url, start_date=None, cap=80, *,
+                           report: Optional[Dict[str, Any]] = None,
+                           include_url: Optional[Callable[[str, Optional[str]], bool]] = None):
     """
     Scrape homepage + common sections for article anchors.
     All fetches go through crawler_html_utils.fetch_html() so Playwright/reader-proxy fallbacks can apply.
@@ -976,6 +1022,9 @@ def collect_from_frontpage(session, site_url, start_date=None, cap=80):
 
     start_date: If provided, dates found < start_date are kept (to filter out later),
                 dates >= start_date are discarded (to force fetch for exact datetime).
+
+    ``report`` receives fetch/challenge errors and a truncation note. ``include_url``
+    is applied before the cap so configured exclusions cannot consume the budget.
 
     Returns: List[ArticleHint]
     """
@@ -1028,6 +1077,8 @@ def collect_from_frontpage(session, site_url, start_date=None, cap=80):
         try:
             data = fetch_html(session, b, timeout=(5, 8), use_brightdata=use_brightdata)
             if not data:
+                if report is not None:
+                    report.setdefault("errors", []).append(f"{b}: no document returned")
                 continue
 
             # Try HTML parsing first
@@ -1036,6 +1087,13 @@ def collect_from_frontpage(session, site_url, start_date=None, cap=80):
                 # Decode bytes first - lxml.html.fromstring(bytes) ignores meta charset
                 html_str = data.decode('utf-8', 'ignore') if isinstance(data, bytes) else data
                 doc = _lxml_html.fromstring(html_str)
+                page_title = " ".join(doc.xpath("//title//text()")).strip().lower()
+                if any(marker in page_title for marker in
+                       ("just a moment", "access denied", "verify you are human", "captcha")):
+                    if report is not None:
+                        report.setdefault("errors", []).append(
+                            f"{b}: access challenge page ({page_title[:80]})")
+                    continue
                 # Get link elements (not just hrefs) so we can extract dates
                 link_elements = doc.xpath('//a[@href]')
             except Exception:
@@ -1140,10 +1198,21 @@ def collect_from_frontpage(session, site_url, start_date=None, cap=80):
             # The cap will be applied when converting to ArticleHints (line 970)
 
         except Exception as e:
+            if report is not None:
+                report.setdefault("errors", []).append(f"{b}: {type(e).__name__}: {e}")
             if _VERBOSE: logger.info(f"[front] failed {b}: {e}")
 
-    # Convert url_dates dict to list of ArticleHints
-    selected_items = list(url_dates.items())[:cap]
+    # Apply the source's article eligibility policy before the budget. Previously
+    # 300 excluded/furniture links could crowd out the first useful article.
+    eligible_items = []
+    for url, published in url_dates.items():
+        title = url_titles[url][2] if url in url_titles else None
+        if include_url is None or include_url(url, title):
+            eligible_items.append((url, published))
+    if len(eligible_items) > cap and report is not None:
+        report["truncated"] = (
+            f"eligible article cap {cap} reached, {len(eligible_items) - cap} URL(s) unread")
+    selected_items = eligible_items[:cap]
     dates_found = sum(1 for url, dt in selected_items if dt is not None)
 
     if _VERBOSE: logger.info(f"[front] collected ~{len(selected_items)} candidate links, {dates_found} with dates extracted")

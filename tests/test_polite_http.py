@@ -45,6 +45,8 @@ FEED = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>X</title>
     <pubDate>Tue, 15 Sep 2026 06:00:00 GMT</pubDate></item>
   <item><title>No Date</title><link>https://x.de/nodate</link></item>
 </channel></rss>"""
+EMPTY_FEED = (
+    b'<?xml version="1.0"?><rss version="2.0"><channel><title>X</title></channel></rss>')
 
 
 class Server:
@@ -168,6 +170,34 @@ class TestFeedReplay:
         assert again == full
         assert {(h.url, h.title) for h in again} == {
             ("https://x.de/titled", "Feed Title"), ("https://x.de/nodate", "No Date")}
+
+    def test_a_failed_configured_feed_is_reported_while_its_sibling_survives(
+            self, server, monkeypatch):
+        rules(monkeypatch, feed_urls=["https://x.de/rss", "https://x.de/missing"])
+        server({"https://x.de/rss": FEED})
+        report = {}
+        hints = crawler.collect_from_feeds(requests.Session(), "https://x.de",
+                                           report=report)
+        assert {h.url for h in hints} == {"https://x.de/titled", "https://x.de/nodate"}
+        assert len(report["errors"]) == 1
+        assert "https://x.de/missing" in report["errors"][0]
+        assert "HTTP 404" in report["errors"][0]
+
+    def test_a_valid_empty_configured_feed_is_quiet(self, server, monkeypatch):
+        rules(monkeypatch, feed_urls=["https://x.de/rss"])
+        server({"https://x.de/rss": EMPTY_FEED})
+        report = {}
+        assert crawler.collect_from_feeds(
+            requests.Session(), "https://x.de", report=report) == []
+        assert report == {}
+
+    def test_html_from_a_configured_feed_is_reported(self, server, monkeypatch):
+        rules(monkeypatch, feed_urls=["https://x.de/rss"])
+        server({"https://x.de/rss": b"<html><title>Access denied</title></html>"})
+        report = {}
+        assert crawler.collect_from_feeds(
+            requests.Session(), "https://x.de", report=report) == []
+        assert "unexpected <html>" in report["errors"][0]
 
 
 class TestThrottle:

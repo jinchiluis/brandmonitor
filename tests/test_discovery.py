@@ -207,6 +207,17 @@ class TestPinnedFetch:
         server({"https://x.de/news.xml": EMPTY})
         assert collect(entry(sitemap_urls=["https://x.de/news.xml"])) == []
 
+    def test_a_truncated_urlset_is_not_recovered_under_strict_pinning(self, server):
+        truncated = urlset("https://x.de/a")[:-9]
+        server({"https://x.de/news.xml": truncated})
+        with pytest.raises(PinnedSitemapError, match="incomplete or invalid"):
+            collect(entry(sitemap_urls=["https://x.de/news.xml"]))
+
+    def test_a_leaf_that_becomes_an_index_is_not_silently_empty(self, server):
+        server({"https://x.de/news.xml": index("https://x.de/child.xml")})
+        with pytest.raises(PinnedSitemapError, match="expected <urlset>"):
+            collect(entry(sitemap_urls=["https://x.de/news.xml"]))
+
     def test_a_304_replays_the_stored_entries(self, server):
         srv = server({"https://x.de/news.xml": urlset("https://x.de/a")}, etag=True)
         src = entry(sitemap_urls=["https://x.de/news.xml"])
@@ -256,10 +267,23 @@ class TestAPinThatBreaks:
         end = datetime(2026, 10, 1, 6, 0, tzinfo=BERLIN_TZ)
         server({"https://x.de/2026/09/s.xml": urlset("https://x.de/september",
                                                      when="2026-09-30T08:00:00+02:00")})
-        hints = collect_from_pinned(entry(sitemap_urls=["https://x.de/{YYYY}/{MM}/s.xml"]),
+        pin = {"url": "https://x.de/{YYYY}/{MM}/s.xml",
+               "optional_current_404": True}
+        hints = collect_from_pinned(entry(sitemap_urls=[pin]),
                                     end - timedelta(hours=48), end,
                                     session=requests.Session())
         assert [h.url for h in hints] == ["https://x.de/september"]
+
+    def test_a_missing_required_prior_month_fails_beside_a_readable_current_month(
+            self, server):
+        end = datetime(2026, 10, 1, 6, 0, tzinfo=BERLIN_TZ)
+        server({"https://x.de/2026/10/s.xml": urlset(
+            "https://x.de/october", when="2026-10-01T05:00:00+02:00")})
+        pin = {"url": "https://x.de/{YYYY}/{MM}/s.xml",
+               "optional_current_404": True}
+        with pytest.raises(PinnedSitemapError, match="2026/09"):
+            collect_from_pinned(entry(sitemap_urls=[pin]), end - timedelta(hours=48), end,
+                                session=requests.Session())
 
     def test_a_group_with_nothing_readable_still_raises(self, server):
         end = datetime(2026, 10, 1, 6, 0, tzinfo=BERLIN_TZ)
@@ -517,7 +541,8 @@ class TestPageRange:
     def test_a_page_that_does_not_exist_yet_is_not_a_failure(self, server):
         """On the 1st of a month only page 1 exists; the range is one group."""
         server({"https://x.de/s-1.xml": urlset("https://x.de/one-real-article")})
-        pin = {"url": "https://x.de/s-{PAGE}.xml", "pages": [1, 4]}
+        pin = {"url": "https://x.de/s-{PAGE}.xml", "pages": [1, 4],
+               "optional_404": True}
         assert [h.url for h in collect(entry(sitemap_urls=[pin]))] == \
             ["https://x.de/one-real-article"]
 
@@ -548,9 +573,10 @@ class TestPageRange:
 
 
 class TestOnlyAbsenceIsForgiven:
-    """A group forgives a file that does not exist yet, never one that broke."""
+    """Only an explicitly optional group forgives absence, never breakage."""
 
-    PIN = {"url": "https://x.de/s-{PAGE}.xml", "pages": [1, 3]}
+    PIN = {"url": "https://x.de/s-{PAGE}.xml", "pages": [1, 3],
+           "optional_404": True}
 
     def test_a_404_beside_a_readable_page_is_forgiven(self, server):
         server({"https://x.de/s-1.xml": urlset("https://x.de/one-real-article")})
@@ -568,6 +594,12 @@ class TestOnlyAbsenceIsForgiven:
                 "https://x.de/s-2.xml": broken})
         with pytest.raises(PinnedSitemapError, match="pinned sitemap unavailable"):
             collect(entry(sitemap_urls=[self.PIN]))
+
+    def test_a_required_404_fails_even_when_a_sibling_reads(self, server):
+        server({"https://x.de/s-1.xml": urlset("https://x.de/one-real-article")})
+        required = {"url": "https://x.de/s-{PAGE}.xml", "pages": [1, 3]}
+        with pytest.raises(PinnedSitemapError, match="404"):
+            collect(entry(sitemap_urls=[required]))
 
     def test_a_throttled_host_stops_the_source_rather_than_trying_the_next_page(
             self, server, monkeypatch):

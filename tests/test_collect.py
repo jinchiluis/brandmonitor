@@ -203,6 +203,22 @@ class TestCollectSourceErrors:
         hints, error = collect_source(self._entry(), now - timedelta(days=30), now, 100)
         assert hints == [] and "origin probe failed" in error
 
+    def test_frontpage_report_keeps_results_but_marks_source_incomplete(self, monkeypatch):
+        entry = {"url": "https://x.de/", "sitemap": False, "feeds": False,
+                 "frontpage": True, "organization": "X"}
+        monkeypatch.setattr("src.collect.pick_accessible_origin",
+                            lambda s, u: "https://x.de")
+
+        def incomplete(_session, _origin, start_date, cap, *, report, include_url):
+            report.setdefault("errors", []).append("https://x.de/news: HTTP 500")
+            return [hint("https://x.de/a-one", source="frontpage")]
+
+        monkeypatch.setattr("src.collect.collect_from_frontpage", incomplete)
+        now = datetime.now(tz=BERLIN_TZ)
+        hints, error = collect_source(entry, now - timedelta(days=1), now, 100)
+        assert [h.url for h in hints] == ["https://x.de/a-one"]
+        assert "frontpage" in error and "HTTP 500" in error
+
 
 class TestWindowOverlap:
     """A discovery date can precede the moment an article becomes visible.
@@ -227,7 +243,7 @@ class TestWindowOverlap:
             seen["sitemap"] = start
             return []
 
-        def frontpage(_session, _origin, start_date, cap):
+        def frontpage(_session, _origin, start_date, cap, **_kwargs):
             seen["frontpage"] = start_date
             return []
 
@@ -621,6 +637,56 @@ class TestFrontpageTitles:
                 "SELECT title FROM raw_item ORDER BY version")]
         assert stored == [1, 1, 0]
         assert versions == [None, "Temu verliert den Preisvorteil"]
+
+    def test_excluded_links_do_not_consume_the_cap(self, monkeypatch):
+        from vendor.newscrawler import crawler
+
+        page = b"""<html><body>
+          <a href="/politik/excluded-one">Excluded one is long enough</a>
+          <a href="/politik/excluded-two">Excluded two is long enough</a>
+          <a href="/politik/keep-this-one">Keep this article headline</a>
+        </body></html>"""
+        monkeypatch.setattr(crawler.sources, "get_site_rules",
+                            lambda url: {"allowed_dirs": ["politik"]})
+        monkeypatch.setattr(crawler.sources, "is_brightdata_enabled", lambda url: False)
+        monkeypatch.setattr(crawler, "fetch_html", lambda *a, **k: page)
+        report = {}
+        hints = crawler.collect_from_frontpage(
+            None, "https://www.sz.test/", cap=1, report=report,
+            include_url=lambda url, title: "excluded" not in url)
+        assert [h.url for h in hints] == ["https://www.sz.test/politik/keep-this-one"]
+        assert report == {}
+
+    def test_eligible_cap_is_reported_as_incomplete(self, monkeypatch):
+        from vendor.newscrawler import crawler
+
+        page = b"""<html><body>
+          <a href="/politik/one-article">First article headline</a>
+          <a href="/politik/two-article">Second article headline</a>
+        </body></html>"""
+        monkeypatch.setattr(crawler.sources, "get_site_rules",
+                            lambda url: {"allowed_dirs": ["politik"]})
+        monkeypatch.setattr(crawler.sources, "is_brightdata_enabled", lambda url: False)
+        monkeypatch.setattr(crawler, "fetch_html", lambda *a, **k: page)
+        report = {}
+        hints = crawler.collect_from_frontpage(
+            None, "https://www.sz.test/", cap=1, report=report)
+        assert len(hints) == 1
+        assert "eligible article cap 1 reached" in report["truncated"]
+
+    def test_access_challenge_is_reported(self, monkeypatch):
+        from vendor.newscrawler import crawler
+
+        monkeypatch.setattr(crawler.sources, "get_site_rules",
+                            lambda url: {"allowed_dirs": ["politik"]})
+        monkeypatch.setattr(crawler.sources, "is_brightdata_enabled", lambda url: False)
+        monkeypatch.setattr(
+            crawler, "fetch_html",
+            lambda *a, **k: b"<html><head><title>Access denied</title></head></html>")
+        report = {}
+        assert crawler.collect_from_frontpage(
+            None, "https://www.sz.test/", report=report) == []
+        assert "access challenge" in report["errors"][0]
 
 
 class TestSitemapCaps:

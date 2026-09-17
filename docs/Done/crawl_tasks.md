@@ -1,9 +1,8 @@
 # Crawl stabilisation — remaining launch work
 
-Updated **2026-09-16**, for go-live in about two weeks. Findings and supporting
-evidence are in [weaknesses.md](weaknesses.md); this file is the execution order
-and the monitoring plan. Finished work is checked off under **Done** with one line
-each; its brief is removed.
+Updated **2026-09-17**. Findings and supporting evidence are in
+[weaknesses.md](weaknesses.md); this file now records the crawl-stabilisation
+decision and the monitoring plan. The crawler is no longer an active build stream.
 
 ## Current position
 
@@ -14,24 +13,26 @@ each; its brief is removed.
   pass (2026-09-16 afternoon) sent **65 discovery requests / 27.1 MB** across 22
   news sources, against 471 / 180 MB for the old warm traversal. One pass, not a
   sustained measurement.
-- The daily task is enabled. **Intraday is disabled**, verified from Task
-  Scheduler settings, even though `tools/laptop.py status` prints a next trigger.
-  Do not assume nine passes/day or two-hour recovery while it is paused, and
-  restart it deliberately after C2–C4; a code pull does not enable it.
+- The daily and intraday tasks are enabled. Intraday is the news-only path; the
+  daily pass remains the complete record.
 - Canaries are disabled. The coverage observer learns from stored yield;
   `rediscover` is a manual comparison using the production parser.
-- The 06:00 run on September 16 failed (`worst_exit=2`) in a DNS outage; the
-  afternoon re-run finished with every stage at 0. The VPS recorded a
-  `run_failed` notification; its latch means email **or** push delivered.
+- The September 17 06:00 pass detected the host outage before collection and the
+  09:37 re-run completed with every stage at 0. The VPS health timer is active.
 
 ## Done
 
-- [x] **C1 deployment** — pins, ZEIT pause, canary switch and outage handling are
-  live, with commit/config hash and per-source traffic recorded per pass. The
-  reconciliation half of C1 is still open below.
-- [x] **C3 pause** — a paused source sends no origin, discovery or body request,
-  keeps its queued bodies and holds its watermark (tested). Throttling is still
-  open below.
+- [x] **C1 deployment and reconciliation** — pins, source fixes, outage handling
+  and monitoring are live. The six DVZ/VerkehrsRundschau URLs from the old canary
+  are stored; BVDW's four alleged September misses are July 28–31 pages and were
+  outside the affected window.
+- [x] **C2 incomplete discovery** — configured feed/frontpage failures and
+  frontpage truncation fail only their source while preserving sibling hints;
+  strict pins reject partial XML and changed file roles; only explicitly optional
+  current-period 404s are tolerated. Valid empty feeds and 304 replay remain valid.
+- [x] **C3 publisher rejection handling** — collection and bodies share persistent
+  cooldowns, 403/429/503 do not retire body work, and the VPS analyzer reads the
+  cooldown state. Intraday and ZEIT are enabled under that protection.
 - [x] **C6 structured collectors (W24, W25)** — EP throttling records `failed` and
   holds the weekly sweep; Safety Gate rejects a document without the
   `Safety-Gate` root/`report_date` and writes a run on every check; the health
@@ -40,66 +41,7 @@ each; its brief is removed.
   kind='safety_gate' ORDER BY id DESC LIMIT 3"` shows a run from the latest daily
   pass, then remove W24/W25.
 
-## Before the final validation week
-
-### C1. Reconcile the September 10–16 gap
-
-**Priority: first operational step.** The source fixes have already restored
-new September 15 arrivals from DVZ, VerkehrsRundschau, Händlerbund and etailment.
-That does not establish that the earlier gap was recovered completely. BVDW's
-latest first-version row is still September 10; its old canary lists four missing
-URLs, which need checking against current exclusions before calling them losses.
-
-Reconcile the September 10–16 affected window source by source. Separate missing
-articles, renamed URLs, deliberate exclusions, and entries no longer recoverable
-from a publisher's current feed/news sitemap. Recover only with an actual held
-run lock; checking that the lock was free earlier does not acquire it. The old
-blanket `collect --days 7` recipe is withdrawn: C4 explains why it cannot prove
-recovery. Replay affected title-gate run ids through the existing repair workflow.
-
-**Done when:** every sampled gap has a recorded explanation or recovered identity.
-No unresolved loss is marked fixed because the daily task returned zero.
-
-### C2. Propagate failed and incomplete discovery (W18, W19)
-
-**Priority: before launch.** Files: `vendor/newscrawler/crawler.py`,
-`src/discovery.py`, `src/collect.py`, discovery/watermark tests.
-
-- A configured feed or frontpage section that times out, returns an error or serves
-  a challenge page must produce an incomplete/failed source outcome. Preserve
-  successfully collected hints, but do not advance over unread required work.
-  A readable empty feed remains a valid quiet result. Guessed optional paths are
-  different from explicitly configured endpoints.
-- Strict pinned reads must distinguish complete XML from a recovered fragment,
-  and an expected article file from a newly returned sitemap index. Reject or
-  explicitly handle the latter; silently ignoring its children is not success.
-- Restrict grouped 404/410 tolerance to verified optional pages/files. Reading
-  September must not excuse a missing required August file in a recovery window.
-- Surface frontpage truncation and apply the budget to eligible article URLs;
-  300 excluded links currently crowd out the 301st real article without a warning.
-
-**Done when:** offline timeout, 403/500, HTML, partial XML, leaf-to-index,
-required-file-404 and frontpage-cap cases cannot report a complete source or
-advance its watermark. Valid empty and 304 replay cases still pass. Successful
-sibling results remain available, with the incomplete interval retried.
-
-### C3. Make body fetching respect publisher throttling (W20)
-
-**Implemented 2026-09-17; rollout pending.** `rejection_plan.md` records the agreed
-23-hour cooldown, 403/429/503 attempt protection, seven-day history and intraday
-health alarm. Deploy the matching VPS checker and verify the alarm before
-re-enabling intraday. The schedule has not been changed by this implementation.
-
-**Priority: before resuming intraday / contacting ZEIT again.** Files:
-`src/bodies.py`, `src/polite_http.py`, health source accounting.
-
-Collection and body fetching now share a persistent source cooldown and honour
-longer `Retry-After` delays across stages and passes. A temporary 403/429/503 block
-does not spend body attempts or retire the queue; unrelated sources continue.
-
-**Done when:** a throttled publisher remains deferred until its retry time across
-stages and passes; unrelated sources continue; a temporary host block does not
-retire its queued articles as unavailable.
+## Accepted and deferred after stabilisation
 
 ### C4. Establish how far each source can recover (W21)
 

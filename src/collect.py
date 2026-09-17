@@ -428,17 +428,30 @@ def collect_source(entry: Dict[str, Any], start: datetime,
 
     if entry.get("feeds") and not adapter.tripped:
         try:
-            feed_hints = collect_from_feeds(session_html, origin, cache=cache)
+            feed_report: Dict[str, Any] = {}
+            feed_hints = collect_from_feeds(session_html, origin, cache=cache,
+                                            report=feed_report)
             # Feeds are not window-limited by the collector, so filter here.
             hints += [h for h in feed_hints
                       if h.published_at is None or in_range(h.published_at, since, end)]
+            errors.extend(f"feeds: {detail}" for detail in feed_report.get("errors", []))
         except Exception as exc:
             errors.append(f"feeds: {type(exc).__name__}: {exc}")
 
     if entry.get("frontpage") and not adapter.tripped:
         try:
+            frontpage_report: Dict[str, Any] = {}
             hints += collect_from_frontpage(session_html, origin,
-                                            start_date=start, cap=300)
+                                            start_date=start, cap=300,
+                                            report=frontpage_report,
+                                            include_url=lambda url, title: (
+                                                not url_is_excluded(url, entry, title)
+                                                and not is_furniture(url)
+                                                and not is_malformed(url)))
+            errors.extend(f"frontpage: {detail}"
+                          for detail in frontpage_report.get("errors", []))
+            if frontpage_report.get("truncated"):
+                errors.append(f"frontpage: {frontpage_report['truncated']}")
         except Exception as exc:
             errors.append(f"frontpage: {type(exc).__name__}: {exc}")
 
