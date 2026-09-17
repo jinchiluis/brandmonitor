@@ -10,12 +10,7 @@ from src.logger import get_logger
 logger = get_logger(__name__)
 
 from src.config import CRAWLER_VERBOSE as _VERBOSE
-
-UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
-)
+from .browser_identity import chromium_user_agent
 
 # Simple in-memory cache to avoid re-fetching same URLs within a run
 _HTML_CACHE: dict = {}
@@ -54,7 +49,7 @@ def fetch_html_with_playwright(url: str, timeout_ms: int = 40000, use_cache: boo
                 ],
             )
             ctx = browser.new_context(
-                user_agent=UA,
+                user_agent=chromium_user_agent(browser.version),
                 viewport={"width": 1366, "height": 850},
                 java_script_enabled=True,
                 locale="de-DE",

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import tldextract
 from src.logger import get_logger
+from ..browser_identity import chromium_user_agent
 
 logger = get_logger(__name__)
 from src.config import CRAWLER_VERBOSE as _VERBOSE
@@ -20,12 +21,6 @@ _PAYWALL_DIR = Path(__file__).parent
 _PAYWALLS_CACHE = None
 _REFRESHED_THIS_RUN = set()  # domains logged-in at least once this process run
 _DEAD_DOMAINS = set()        # domains where re-login failed (expired subscription etc.)
-
-UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-)
-
 
 def _load_paywalls():
     global _PAYWALLS_CACHE
@@ -55,7 +50,10 @@ def _playwright_fetch(url, state_path, consent_selectors=None):
             headless=True,
             args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
         )
-        ctx_kwargs = {"user_agent": UA, "viewport": {"width": 1366, "height": 850}}
+        ctx_kwargs = {
+            "user_agent": chromium_user_agent(browser.version),
+            "viewport": {"width": 1366, "height": 850},
+        }
         if state_path.exists():
             ctx_kwargs["storage_state"] = str(state_path)
 
@@ -107,7 +105,10 @@ def _relogin(cfg, state_path):
             headless=False,  # headful — Cloudflare Turnstile blocks headless login
             args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
         )
-        ctx = browser.new_context(user_agent=UA, viewport={"width": 1366, "height": 850})
+        ctx = browser.new_context(
+            user_agent=chromium_user_agent(browser.version),
+            viewport={"width": 1366, "height": 850},
+        )
         page = ctx.new_page()
         try:
             login_mod.login(page, email, password)

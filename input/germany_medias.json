@@ -42,7 +42,7 @@
     "type": "媒体",
     "language": "德语",
     "url": "https://www.zeit.de/",
-    "sitemap": false,
+    "sitemap": true,
     "sitemap_urls": [
       "https://www.zeit.de/gsitemaps/index.xml?date={YYYY}-{MM}-{DD}&unit=days&period=1"
     ],

@@ -30,6 +30,7 @@ import feedparser
 from dateutil import parser as dateparser
 from .crawler_html_utils import HostThrottled, fetch_html
 from .crawler_playwright import fetch_html_with_playwright
+from .browser_identity import BROWSER_USER_AGENT
 from .source_loader import sources
 from src.logger import get_logger
 logger = get_logger(__name__)
@@ -60,7 +61,6 @@ if BERLIN_TZ is None:
 if BERLIN_TZ is None:
     BERLIN_TZ = timezone.utc
 
-USER_AGENT = "NewsMVPBot/0.1 (+contact@example.com)"
 REQ_TIMEOUT = 20
 SLEEP_BASE_SEC = 0.25  # polite pause between requests
 
@@ -71,7 +71,7 @@ COMMON_FEED_PATHS = [
 
 
 HTML_HEADERS = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "User-Agent": BROWSER_USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
         "Accept-Encoding": "gzip, deflate",
@@ -280,7 +280,7 @@ def discover_sitemaps(session, site_url, extra_sitemap_urls=None):
         try:
             old_headers = session.headers.copy()
             session.headers.clear()
-            session.headers.update(HTML_HEADERS) # appear more human
+            session.headers.update(HTML_HEADERS)
             for b in bases:
                 for g in guesses:
                     #print(urljoin(b, g))    
