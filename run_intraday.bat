@@ -17,9 +17,14 @@ rem   1  a stage produced nothing usable
 rem   2  a stage aborted, or this script could not start one
 rem   3  another run holds the lock; nothing was attempted and no marker is written
 rem   4  this host has no internet; nothing was attempted
+rem
+rem Optional source arguments (for example, --exclude zeit.de) are forwarded to
+rem both news collection and the separate title-gated body fetch.
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
+
+set "SOURCE_ARGS=%*"
 
 set "PY=%~dp0.venv\Scripts\python.exe"
 if not exist "%PY%" (
@@ -144,9 +149,9 @@ exit /b %WORST%
 
 
 :stages
-call :stage news collect --kind news
+call :stage news collect --kind news %SOURCE_ARGS%
 call :stage title_gate gate
-call :stage title_bodies fetch-bodies --kind news --title-gate-client jt-express
+call :stage title_bodies fetch-bodies --kind news --title-gate-client jt-express %SOURCE_ARGS%
 rem News only: regulatory bodies wait for the 06:00 run.
 call :stage body_gate body-gate --kind news
 call :stage alert_gate alert-gate
