@@ -444,6 +444,7 @@
     "type": "行业协会",
     "language": "德语",
     "url": "https://bpex-ev.de/",
+    "origin": "https://bpex-ev.de",
     "sitemap": false,
     "feeds": false,
     "frontpage": true,
