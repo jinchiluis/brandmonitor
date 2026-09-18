@@ -145,18 +145,18 @@
     "language": "德语",
     "url": "https://www.sueddeutsche.de/",
     "sitemap": false,
-    "feeds": false,
+    "feeds": true,
+    "feed_urls": [
+      "https://rss.sueddeutsche.de/rss/Wirtschaft",
+      "https://rss.sueddeutsche.de/rss/Topthemen"
+    ],
     "frontpage": true,
     "allowed_dirs": [
+      "wirtschaft",
       "politik",
-      "projekte",
-      "meinung",
-      "muenchen",
-      "kultur",
-      "thema",
-      "magazin"
+      "meinung"
     ],
-    "notes": "frontpage-only fallback (80 links, undated); paywalled - needs subscription + login module for full text. frontpage source, so allowed_dirs seeds navigation but does NOT filter output - which is how /gutscheine and /consent got in. excluded_dirs added 2026-09-10 because it is a real output rule.",
+    "notes": "frontpage-only fallback (undated); paywalled - needs subscription + login module for full text. frontpage source, so allowed_dirs seeds navigation but does NOT filter output - which is how /gutscheine and /consent got in. excluded_dirs added 2026-09-10 because it is a real output rule. No public sitemap (robots.txt declares none, guessed paths 307 to home); RSS on rss.sueddeutsche.de holds 15 items per feed. 2026-09-18: sections reseeded to fit the 300 frontpage cap - the old seven (politik, projekte, meinung, muenchen, kultur, thema, magazin) gave 560 eligible links and truncated magazin/kultur/muenchen every pass, while wirtschaft was never scraped. Measured: +panorama 303, +panorama+muenchen 377; these three about 246. Feeds added the same day for publication dates, not coverage: all 15 Wirtschaft feed items were also on the section page, and a dated feed copy replaces the undated frontpage one (_dedupe_hints). Topthemen adds top stories from sections not scraped.",
     "content_mode": "title_only",
     "excluded_dirs": [
       "gutscheine",
@@ -176,7 +176,8 @@
       "leben",
       "reise",
       "auto",
-      "jetzt"
+      "jetzt",
+      "advertorial"
     ],
     "access": "mixed"
   },

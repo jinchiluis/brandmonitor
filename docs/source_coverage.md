@@ -51,8 +51,13 @@ feed, which is not window-limited.
 | WELT | 1500+ | — | sitemap (paywalled) |
 | Tagesschau/ARD | 0 | 143 | **feeds only** — free |
 
-Süddeutsche is the weak one: no sitemap, no feeds, frontpage only. Its frontpage
-does yield usable sections, so it is configured with an explicit navigation seed.
+Süddeutsche is the weak one: no public sitemap (robots.txt declares none; guessed
+paths redirect to the homepage), frontpage only. It does publish RSS, on a separate
+host that autodiscovery misses (`rss.sueddeutsche.de/rss/Wirtschaft`, `/alles`), but
+each feed holds only 15 items — about 10–20 hours. Its frontpage is configured with
+an explicit navigation seed, measured 2026-09-18 to fit the 300-link frontpage cap:
+`wirtschaft`, `politik`, `meinung` give ~230 eligible links, where the previous seven
+sections gave 560 and cut magazin, kultur and muenchen on every pass.
 Worth revisiting — a paid subscription may expose a content feed that anonymous
 access does not.
 
