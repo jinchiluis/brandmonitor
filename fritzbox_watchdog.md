@@ -470,6 +470,90 @@ Only after this works reliably should the automatic watchdog be enabled.
 
 ---
 
+## Implementation
+
+The watchdog is `tools/fritzbox_watchdog.py` (standard library only, tests in
+`tests/test_fritzbox_watchdog.py`). It runs on the production laptop, never the VPS.
+
+```text
+python tools/fritzbox_watchdog.py --check      # probe everything once; changes nothing
+python tools/fritzbox_watchdog.py --dry-run    # the real loop, but it only logs
+python tools/fritzbox_watchdog.py              # the real loop
+```
+
+Measured on 2026-09-19 with the FRITZ!Box on the plug (11–12 W): the box answered on the
+LAN after 1:30 and the internet was back after 2:30. The plug is `192.168.178.115`
+(Shelly Plug M Gen3, no auth, address reserved in the FRITZ!Box), `initial_state` is
+`on`, and `Switch.Set` with `toggle_after: 5` is exactly the command in this document.
+
+What it does, per 30-second check:
+
+- **Down** means every target failed: `1.1.1.1:443`, `8.8.8.8:443` and
+  `https://example.com`. One answering target is "up".
+- The outage must last 60 seconds, then the FRITZ!Box must answer on `192.168.178.1:80`.
+- **`run.lock`** is read the way the batch files hold it: as an open handle, not as
+  content. `data/run.lock` is a zero-byte file that `9>data\run.lock` keeps open for the
+  length of a run, so "explicitly false" is implemented as "the file can be opened with
+  sharing denied". Held, missing, unreadable — anything but free — means do nothing. It is
+  read before the plug status call and again immediately before `Switch.Set`.
+- Retries are 10 minutes after cycle 1, 15 after cycle 2, then every 30. The counter
+  resets only after 30 minutes of uninterrupted internet, so a relapse soon after a
+  cycle keeps the throttle. `cycles` and the time of the last cycle are the only
+  persisted state (`data/fritzbox_watchdog_state.json`), so a restart mid-outage
+  re-confirms for a minute but can never cycle the box early.
+- A plug that does not answer is not counted as a cycle and is retried after 5 minutes.
+- Events go to `data/log/fritzbox_watchdog.log` (rotating), one line per state change
+  plus an hourly "Watching" line, in the format of the Logging section above.
+
+Every outage, cycled or not, is appended as one row to `tools/data/fritzbox_outages.csv`
+when the internet returns (the directory is covered by the `data/` rule in `.gitignore`,
+so the history stays on the laptop). This is the record the Logging section asks for:
+
+```text
+start,end,duration_s,power_cycles,first_cycle_after_s,last_cycle_to_recovery_s,fritz_reachable,blocked
+2026-09-19 13:57:10+02:00,2026-09-19 14:01:40+02:00,270,1,60,210,yes,
+```
+
+`first_cycle_after_s` and `last_cycle_to_recovery_s` are blank when nothing was cycled;
+the second is how long recovery took after the last cycle. `fritz_reachable` is `yes`,
+`no`, `mixed` or `unchecked` (the outage ended inside the 60-second confirmation).
+`blocked` lists why a due cycle did not happen (`lock-held`, `lock-missing`,
+`lock-unreadable`, `shelly`, `shelly-off`). Times are local with their UTC offset, and
+have the 30-second resolution of the check. An outage the watchdog was restarted in
+starts at the first failure the new process saw. `--dry-run` writes no rows.
+
+A second real loop refuses to start (`data/fritzbox_watchdog.lock`), since two loops would
+each cycle the box. `--dry-run` and `--check` skip that guard.
+
+Known limits, all following from the rules above:
+
+- A run holding `run.lock` blocks recovery for as long as it holds it (up to the batch's
+  4-hour limit). A run that starts during an outage is skipped by `netcheck`, and one
+  already running fails its stages quickly and releases the lock, so this should be short.
+- A FRITZ!Box that hangs so hard it stops answering on the LAN is not cycled, because
+  that state cannot be told apart from this host losing its own network.
+
+Registering it on the laptop follows the `brandmonitor-admin` pattern: start at boot and
+retry every 10 minutes (`IgnoreNew`), as S4U so it needs no logged-on user.
+
+```powershell
+$root = 'C:\apps\brandmonitor'
+$a = New-ScheduledTaskAction -Execute "$root\.venv\Scripts\python.exe" -WorkingDirectory $root `
+       -Argument 'tools\fritzbox_watchdog.py'
+$s = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+       -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+$again = New-ScheduledTaskTrigger -Daily -At 12am
+$again.Repetition = (New-ScheduledTaskTrigger -Once -At 12am `
+       -RepetitionInterval (New-TimeSpan -Minutes 10) -RepetitionDuration (New-TimeSpan -Days 1)).Repetition
+$p = New-ScheduledTaskPrincipal -UserId 'DELL Laptop' -LogonType S4U
+Register-ScheduledTask -TaskName 'brandmonitor-fritzbox-watchdog' -Action $a -Settings $s -Principal $p `
+  -Trigger (New-ScheduledTaskTrigger -AtStartup), $again
+```
+
+Run `--check` and `--dry-run` on the laptop before registering it.
+
+---
+
 ## Final Intended Behavior
 
 ```text

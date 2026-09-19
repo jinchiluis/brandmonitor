@@ -15,3 +15,5 @@ vendor/newscrawler/paywall/states/
 
 # probe/crawl scratch output
 input/*.local.json
+
+tools/data/ip-history.csv

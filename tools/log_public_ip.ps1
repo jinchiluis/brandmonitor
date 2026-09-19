@@ -5,7 +5,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 if (-not $HistoryPath) {
-    $HistoryPath = Join-Path $PSScriptRoot 'ip-history.csv'
+    $HistoryPath = Join-Path $PSScriptRoot 'data\ip-history.csv'
+}
+$historyDirectory = Split-Path -Parent $HistoryPath
+if ($historyDirectory -and -not (Test-Path -LiteralPath $historyDirectory)) {
+    New-Item -ItemType Directory -Path $historyDirectory -Force | Out-Null
 }
 $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'
 $ipv4 = ''
